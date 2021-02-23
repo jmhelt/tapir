@@ -1,24 +1,25 @@
+.vscode/
 .obj/
 
-lockserver/client-main
-lockserver/server-main
-lockserver/lockserver-repl
-store/benchmark/benchClient
-store/benchmark/retwisClient
-store/benchmark/terminalClient
-store/strongstore/server
-store/tapirstore/server
-store/weakstore/server
-timeserver/timeserver
+src/lockserver/client-main
+src/lockserver/server-main
+src/lockserver/lockserver-repl
+src/store/benchmark/benchClient
+src/store/benchmark/retwisClient
+src/store/benchmark/terminalClient
+src/store/strongstore/server
+src/store/tapirstore/server
+src/store/weakstore/server
+src/timeserver/timeserver
 
-lib/tests/configuration-test
-lib/tests/simtransport-test
-lockserver/tests/lockserver-test
-replication/ir/tests/ir-test
-replication/vr/tests/vr-test
-store/common/backend/tests/kvstore-test
-store/common/backend/tests/lockserver-test
-store/common/backend/tests/versionstore-test
+src/lib/tests/configuration-test
+src/lib/tests/simtransport-test
+src/lockserver/tests/lockserver-test
+src/replication/ir/tests/ir-test
+src/replication/vr/tests/vr-test
+src/store/common/backend/tests/kvstore-test
+src/store/common/backend/tests/lockserver-test
+src/store/common/backend/tests/versionstore-test
 
 ################################################################################
 # vim
