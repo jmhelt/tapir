@@ -11,6 +11,5 @@ $(d)lockserver-test: $(o)lockserver-test.o \
 	$(LIB-configuration) \
 	$(LIB-repltransport) \
    	$(LIB-store-common) \
-	$(GTEST_MAIN)
 
 TEST_BINS += $(d)lockserver-test

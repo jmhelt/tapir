@@ -9,10 +9,10 @@ GTEST_SRCS += $(addprefix $(d), \
 
 PROTOS += $(d)simtransport-testmessage.proto
 
-$(d)configuration-test: $(o)configuration-test.o $(LIB-configuration) $(GTEST_MAIN)
+$(d)configuration-test: $(o)configuration-test.o $(LIB-configuration)
 
 TEST_BINS += $(d)configuration-test
 
-$(d)simtransport-test: $(o)simtransport-test.o $(LIB-simtransport) $(o)simtransport-testmessage.o $(GTEST_MAIN)
+$(d)simtransport-test: $(o)simtransport-test.o $(LIB-simtransport) $(o)simtransport-testmessage.o
 
 TEST_BINS += $(d)simtransport-test
