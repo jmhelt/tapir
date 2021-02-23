@@ -226,6 +226,7 @@ main(int argc, char **argv)
         ttype = rand() % 100;
 
         if (ttype < 5) {
+            Debug("Transaction: Add user");
             // 5% - Add user transaction. 1,3
             keyIdx.push_back(rand_key());
             keyIdx.push_back(rand_key());
@@ -242,6 +243,7 @@ main(int argc, char **argv)
             }
             ttype = 1;
         } else if (ttype < 20) {
+            Debug("Transaction: Follow");
             // 15% - Follow/Unfollow transaction. 2,2
             keyIdx.push_back(rand_key());
             keyIdx.push_back(rand_key());
@@ -256,6 +258,7 @@ main(int argc, char **argv)
             }
             ttype = 2;
         } else if (ttype < 50) {
+            Debug("Transaction: Post");
             // 30% - Post tweet transaction. 3,5
             keyIdx.push_back(rand_key());
             keyIdx.push_back(rand_key());
@@ -276,6 +279,7 @@ main(int argc, char **argv)
             }
             ttype = 3;
         } else {
+            Debug("Transaction: Get followers");
             // 50% - Get followers/timeline transaction. rand(1,10),0
             int nGets = 1 + rand() % 10;
             for (int i = 0; i < nGets; i++) {

@@ -28,7 +28,6 @@ $(d)lockserver-repl: $(o)lockserver-repl.o \
 	$(LIB-configuration) \
 	$(LIB-repltransport) \
    	$(LIB-store-common) \
-	$(GTEST_MAIN)
 
 BINS += $(d)server-main $(d)client-main $(d)lockserver-repl
 
