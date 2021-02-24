@@ -35,6 +35,7 @@
 #include "replication/ir/replica.h"
 #include "store/common/timestamp.h"
 #include "store/common/truetime.h"
+#include "store/server.h"
 #include "store/tapirstore/store.h"
 #include "store/tapirstore/tapir-proto.pb.h"
 
@@ -43,7 +44,7 @@ namespace tapirstore {
 using opid_t = replication::ir::opid_t;
 using RecordEntry = replication::ir::RecordEntry;
 
-class Server : public replication::ir::IRAppReplica
+class Server : public replication::ir::IRAppReplica, public ::Server
 {
 public:
     Server(bool linearizable);
@@ -67,7 +68,9 @@ public:
         const std::map<opid_t, std::vector<RecordEntry>> &u,
         const std::map<opid_t, std::string> &majority_results_in_d) override;
 
-    void Load(const string &key, const string &value, const Timestamp timestamp);
+    void Load(const string &key, const string &value, const Timestamp timestamp) override;
+
+    virtual inline Stats &GetStats() override { return store->GetStats(); }
 
 private:
     TxnStore *store;

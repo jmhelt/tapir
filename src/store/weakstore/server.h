@@ -35,12 +35,14 @@
 #include "lib/message.h"
 #include "lib/udptransport.h"
 #include "lib/configuration.h"
+#include "store/common/stats.h"
+#include "store/server.h"
 #include "store/weakstore/store.h"
 #include "store/weakstore/weak-proto.pb.h"
 
 namespace weakstore {
 
-class Server : TransportReceiver
+class Server : TransportReceiver, public ::Server
 {
 private:
     // Underlying single node transactional key-value store.
@@ -68,6 +70,14 @@ public:
                    const proto::PutMessage &msg);
 
     void Load(const std::string &key, const std::string &value);
+
+    void Load(const std::string &key, const std::string &value,
+        Timestamp timestamp) override;
+
+    inline Stats &GetStats() override { return stats; }
+
+ private:
+  Stats stats;
 
 };
 

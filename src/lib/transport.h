@@ -83,6 +83,8 @@ public:
     virtual int Timer(uint64_t ms, timer_callback_t cb) = 0;
     virtual bool CancelTimer(int id) = 0;
     virtual void CancelAllTimers() = 0;
+    virtual void Run() = 0;
+    virtual void Stop() = 0;
 };
 
 class Timeout

@@ -30,17 +30,9 @@ class ExperimentCodebase(abc.ABC):
     def setup_nodes(self, config):
         pass
 
-from lib.tupaq_codebase import *
-from lib.rdma_repl_codebase import *
-from lib.morty_codebase import *
-from lib.indicus_codebase import *
 from lib.rss_codebase import *
 
 __BUILDERS__ = {
-    "tupaq": TupaqCodebase(),
-    "rdma-repl": RdmaReplCodebase(),
-    "morty": MortyCodebase(),
-    "indicus": IndicusCodebase(),
     "rss": RssCodebase()
 }
 
