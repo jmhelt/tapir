@@ -7,7 +7,6 @@ class RssCodebase(ExperimentCodebase):
     def get_client_cmd(self, config, i, j, k, run, local_exp_directory,
             remote_exp_directory):
         name, _ = os.path.splitext(config['network_config_file_name'])
-        closest_replica = i // config['num_groups'] if config['server_emulate_wan'] else -1
         if 'run_locally' in config and config['run_locally']:
             path_to_client_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['client_bin_name'])
@@ -39,7 +38,6 @@ class RssCodebase(ExperimentCodebase):
             '--cooldown_secs', config['client_ramp_down'],
             '--config_path', config_path,
             '--num_shards', config['num_shards'],
-            '--num_groups', config['num_groups'],
             '--protocol_mode', config['client_protocol_mode'],
             '--stats_file', stats_file,
             '--num_clients', client_threads]])
@@ -237,12 +235,7 @@ class RssCodebase(ExperimentCodebase):
                     config['out_directory_name'],
                     'server-%d-%d-stats-%d.json' % (i, k, run))
 
-        if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'hotstuff': 
-            n = 5 * config['fault_tolerance'] + 1
-        elif config['replication_protocol'] == 'pbft':
-            n = 3 * config['fault_tolerance'] + 1
-        else:
-            n = 2 * config['fault_tolerance'] + 1
+        n = 2 * config['fault_tolerance'] + 1
         xx = len(config['server_names']) // n
 
         replica_command = ' '.join([str(x) for x in [
@@ -251,7 +244,6 @@ class RssCodebase(ExperimentCodebase):
             '--replica_idx', i // xx,
             '--protocol', config['replication_protocol'],
             '--num_shards', config['num_shards'],
-            '--num_groups', config['num_groups'],
             '--stats_file', stats_file,
             '--group_idx', group]])
 
@@ -413,12 +405,7 @@ class RssCodebase(ExperimentCodebase):
         local_exp_directory = super().prepare_local_exp_directory(config, config_file)
         config_file = os.path.join(local_exp_directory, config['network_config_file_name'])
         with open(config_file, 'w') as f:
-            if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'hotstuff':
-                n = 5 * config['fault_tolerance'] + 1
-            elif config['replication_protocol'] == 'pbft':
-                n = 3 * config['fault_tolerance'] + 1
-            else:
-                n = 2 * config['fault_tolerance'] + 1
+            n = 2 * config['fault_tolerance'] + 1
             x = len(config['server_names']) // n
             for group in range(config['num_groups']):
                 process_idx = group // x

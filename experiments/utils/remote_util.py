@@ -18,6 +18,10 @@ def get_client_host(config, i, j):
 def get_ip_for_interface(interface, remote_user, remote_host):
     return run_remote_command_sync('ip address show %s | awk \'/inet / {print $2}\'' % interface, remote_user, remote_host).rstrip()
 
+def run_local_command_sync(command):
+    print(command)
+    subprocess.run(command, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
+
 def ssh_args(command, remote_user, remote_host):
     return ["ssh", '-o', 'StrictHostKeyChecking=no',
         '-o', 'ControlMaster=auto',
@@ -71,7 +75,9 @@ def set_file_descriptor_limit(limit, remote_user, remote_host):
     run_remote_command_sync(command, remote_user, remote_host)
 
 def kill_remote_process_by_name_cmd(remote_process_name, kill_args):
-    return 'ps aux | grep -i \'%s\' | awk \'{print $2}\' | xargs kill%s' % (remote_process_name, kill_args)
+    cmd = 'pkill%s %s' % (kill_args, remote_process_name)
+    print(cmd)
+    return cmd
 
 def kill_remote_process_by_name(remote_process_name, remote_user, remote_host, kill_args):
     run_remote_command_sync(kill_remote_process_by_name_cmd(remote_process_name,
@@ -85,8 +91,7 @@ def kill_remote_process_by_port(port, remote_user, remote_host, kill_args):
             remote_user, remote_host)
 
 def kill_process_by_name(process_name, kill_args):
-    subprocess.run('ps aux | grep -i \'%s\' | awk \'{print $2}\' | xargs kill%s' % (process_name, kill_args),
-        stdout=subprocess.PIPE, universal_newlines=True, shell=True)
+    run_local_command_sync('pkill%s %s' % (kill_args, process_name))
 
 def kill_process_by_port(port, kill_args):
     subprocess.run('lsof -ti:%d | xargs kill%s' % (port, kill_args),
