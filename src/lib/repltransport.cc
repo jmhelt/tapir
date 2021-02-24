@@ -245,6 +245,9 @@ void ReplTransport::Run() {
     }
 }
 
+void ReplTransport::Stop() {
+}
+
 bool ReplTransport::SendMessageInternal(TransportReceiver *src,
                                         const ReplTransportAddress &dst,
                                         const Message &m,

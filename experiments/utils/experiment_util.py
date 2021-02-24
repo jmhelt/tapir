@@ -29,34 +29,25 @@ def collect_exp_data(config, remote_exp_directory, local_directory_base, executo
 
 def kill_servers(config, executor, kill_args=' -9'):
     futures = []
-    if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'hotstuff':
-        n = 5 * config['fault_tolerance'] + 1
-    elif config['replication_protocol'] == 'pbft':
-        n = 3 * config['fault_tolerance'] + 1
-    else:
-        n = 2 * config['fault_tolerance'] + 1
-    x = len(config['server_names']) // n
+
+    servers = config['server_names']
+
     kill_commands = {}
-    for group in range(config['num_groups']):
-        process_idx = group // x
-        for i in range(n):
-            server_idx = (i * x + group) % len(config['server_names'])
-            if is_exp_remote(config):
-                if not server_idx in kill_commands:
-                    kill_commands[server_idx] = kill_remote_process_by_name_cmd(
-                        os.path.join(config['base_remote_bin_directory_nfs'],
-                            config['bin_directory_name'],
-                            config['server_bin_name']), kill_args)
-                kill_commands[server_idx] += '; %s' % kill_remote_process_by_port_cmd(
-                    config['server_port'] + process_idx, kill_args)
-            else:
-                if not server_idx in kill_commands:
-                    kill_commands[server_idx] = kill_remote_process_by_name_cmd(
-                        os.path.join(config['src_directory'],
-                            config['bin_directory_name'],
-                            config['server_bin_name']), kill_args)
-                kill_commands[server_idx] += '; %s' % kill_remote_process_by_port_cmd(
-                    config['server_port'] + process_idx, kill_args)
+    server_idx = 0
+    for server in servers:
+        if is_exp_remote(config):
+            kill_commands[server_idx] = kill_remote_process_by_name_cmd(
+                os.path.join(config['base_remote_bin_directory_nfs'],
+                    config['bin_directory_name'],
+                    config['server_bin_name']), kill_args)
+        else:
+            kill_commands[server_idx] = kill_remote_process_by_name_cmd(
+                os.path.join(config['src_directory'],
+                    config['bin_directory_name'],
+                    config['server_bin_name']), kill_args)
+
+        server_idx += 1
+
     for idx, cmd in kill_commands.items():
         if is_exp_remote(config):
             server_host = get_server_host(config, idx)

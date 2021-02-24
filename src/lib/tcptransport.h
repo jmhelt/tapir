@@ -72,12 +72,12 @@ public:
     virtual ~TCPTransport();
     void Register(TransportReceiver *receiver,
                   const transport::Configuration &config,
-                  int replicaIdx);
-    void Run();
-    void Stop();
-    int Timer(uint64_t ms, timer_callback_t cb);
-    bool CancelTimer(int id);
-    void CancelAllTimers();
+                  int replicaIdx) override;
+    void Run() override;
+    void Stop() override;
+    int Timer(uint64_t ms, timer_callback_t cb) override;
+    bool CancelTimer(int id) override;
+    void CancelAllTimers() override;
     
 private:
     std::mutex mtx;

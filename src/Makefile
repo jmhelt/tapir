@@ -30,6 +30,11 @@ LIBSSL_CFLAGS := $(shell pkg-config --cflags openssl)
 LIBSSL_LDFLAGS := $(shell pkg-config --libs openssl)
 CFLAGS += $(LIBSSL_CFLAGS)
 LDFLAGS += $(LIBSSL_LDFLAGS)
+# Debian package: gflags
+GFLAGS_CFLAGS := $(shell pkg-config --cflags gflags)
+GFLAGS_LDFLAGS := $(shell pkg-config --libs gflags)
+CFLAGS += $(GFLAGS_CFLAGS)
+LDFLAGS += $(GFLAGS_LDFLAGS)
 
 
 # Google test framework. This doesn't use pkgconfig
@@ -131,6 +136,7 @@ include store/tapirstore/Rules.mk
 include store/strongstore/Rules.mk
 include store/weakstore/Rules.mk
 include store/benchmark/Rules.mk
+include store/Rules.mk
 include lockserver/Rules.mk
 include timeserver/Rules.mk
 include libtapir/Rules.mk

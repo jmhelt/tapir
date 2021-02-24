@@ -220,7 +220,8 @@ public:
     void TriggerTimer(int timer_id);
 
     // Launch the REPL.
-    void Run();
+    void Run() override;
+    void Stop() override;
 
 protected:
     bool SendMessageInternal(TransportReceiver *src,

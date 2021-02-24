@@ -35,6 +35,7 @@
 #include "lib/udptransport.h"
 #include "replication/vr/replica.h"
 #include "store/common/truetime.h"
+#include "store/server.h"
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/lockstore.h"
 #include "store/strongstore/strong-proto.pb.h"
@@ -49,7 +50,7 @@ enum Mode {
     MODE_SPAN_LOCK
 };
 
-class Server : public replication::AppReplica
+class Server : public replication::AppReplica, public ::Server
 {
 public:
     Server(Mode mode, uint64_t skew, uint64_t error);
@@ -58,7 +59,8 @@ public:
     virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2);
     virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2);
     virtual void UnloggedUpcall(const string &str1, string &str2);
-    void Load(const string &key, const string &value, const Timestamp timestamp);
+    void Load(const string &key, const string &value, const Timestamp timestamp) override;
+    virtual inline Stats &GetStats() override { return store->GetStats(); }
 
 private:
     Mode mode;

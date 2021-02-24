@@ -48,7 +48,7 @@ public:
 };
 
 
-class IRReplica : TransportReceiver
+class IRReplica : public TransportReceiver
 {
 public:
     IRReplica(transport::Configuration config, int myIdx,
