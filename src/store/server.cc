@@ -335,9 +335,10 @@ int main(int argc, char **argv) {
     if (FLAGS_num_keys > 0) {
       if (FLAGS_preload_keys) {
         for (size_t i = 0; i < FLAGS_num_keys; ++i) {
-          server->Load(std::string(reinterpret_cast<const char *>(&i), sizeof(uint64_t)), "", Timestamp(0, 0));
+          server->Load(std::to_string(i), "", Timestamp(0, 0));
           if (i % 10000 == 0) {
             Debug("Loaded key %lu", i);
+            Debug("Loaded key %s", std::to_string(i).c_str());
           }
         }
       }
