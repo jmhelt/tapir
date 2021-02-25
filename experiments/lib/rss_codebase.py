@@ -1,6 +1,8 @@
+import collections
 import ipaddress
 
 from lib.experiment_codebase import *
+from utils.experiment_util import *
 
 class RssCodebase(ExperimentCodebase):
 
@@ -213,39 +215,37 @@ class RssCodebase(ExperimentCodebase):
         client_command = '(cd %s; %s) & ' % (exp_directory, client_command)
         return client_command
 
-    def get_replica_cmd(self, config, i, k, group, run, local_exp_directory,
+    def get_replica_cmd(self, config, shard_idx, replica_idx, run, local_exp_directory,
             remote_exp_directory):
         name, ext = os.path.splitext(config['network_config_file_name'])
-        if  'run_locally' in config and config['run_locally']:
+        if 'run_locally' in config and config['run_locally']:
             path_to_server_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = local_exp_directory
-            config_file = os.path.join(local_exp_directory, config['network_config_file_name'])
+            config_file = os.path.join(local_exp_directory, self.get_shard_config_name(config, shard_idx))
             stats_file = os.path.join(exp_directory,
-                    config['out_directory_name'], 'server-%d' % i,
-                    'server-%d-%d-stats-%d.json' % (i, k, run))
+                    config['out_directory_name'], 'server-%d' % shard_idx,
+                    'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
         else:
             path_to_server_bin = os.path.join(
                     config['base_remote_bin_directory_nfs'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = remote_exp_directory
             config_file = os.path.join(remote_exp_directory,
-                    config['network_config_file_name'])
+                    self.get_shard_config_name(config, shard_idx))
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'],
-                    'server-%d-%d-stats-%d.json' % (i, k, run))
+                    'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
 
         n = 2 * config['fault_tolerance'] + 1
-        xx = len(config['server_names']) // n
 
         replica_command = ' '.join([str(x) for x in [
             path_to_server_bin,
             '--config_path', config_file,
-            '--replica_idx', i // xx,
+            '--replica_idx', replica_idx,
             '--protocol', config['replication_protocol'],
             '--num_shards', config['num_shards'],
-            '--stats_file', stats_file,
-            '--group_idx', group]])
+            '--stats_file', stats_file]])
 
         if 'message_transport_type' in config['replication_protocol_settings']:
             replica_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']
@@ -353,29 +353,27 @@ class RssCodebase(ExperimentCodebase):
             replica_command = config['server_wrap_command'] % replica_command
 
         if 'pin_server_processes' in config and isinstance(config['pin_server_processes'], list) and len(config['pin_server_processes']) > 0:
-            core = config['pin_server_processes'][k % len(config['pin_server_processes'])]
+            core = config['pin_server_processes'][replica_idx % len(config['pin_server_processes'])]
             replica_command = 'taskset 0x%x %s' % (1 << core, replica_command)
 
         ## Wrapping additional information around command
         if 'run_locally' in config and config['run_locally']:
             stdout_file = os.path.join(exp_directory,
-                    config['out_directory_name'], 'server-%d' % i,
-                    'server-%d-%d-stdout-%d.log' % (i, k, run))
+                    config['out_directory_name'], 'server-%d' % shard_idx,
+                    'server-%d-%d-stdout-%d.log' % (shard_idx, replica_idx, run))
             stderr_file = os.path.join(exp_directory,
-                    config['out_directory_name'], 'server-%d' % i,
-                    'server-%d-%d-stderr-%d.log' % (i, k, run))
+                    config['out_directory_name'], 'server-%d' % shard_idx,
+                    'server-%d-%d-stderr-%d.log' % (shard_idx, replica_idx, run))
             replica_command = '%s 1> %s 2> %s' % (replica_command, stdout_file,
                     stderr_file)
         else:
             stdout_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'server-%d-%d-stdout-%d.log' % (
-                        i, k, run))
+                        shard_idx, replica_idx, run))
             stderr_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'server-%d-%d-stderr-%d.log' % (
-                        i, k, run))
-            #stderr_file = os.path.join('/mnt/ramdisk/',
-            #        config['out_directory_name'], 'server-%d-%d-stderr-%d.log' % (
-            #            i, k, run))
+                        shard_idx, replica_idx, run))
+
             if 'default_remote_shell' in config and config['default_remote_shell'] == 'bash':
                 replica_command = '%s 1> %s 2> %s' % (replica_command, stdout_file,
                     stderr_file)
@@ -401,25 +399,34 @@ class RssCodebase(ExperimentCodebase):
         replica_command = 'cd %s; %s' % (exp_directory, replica_command)
         return replica_command
 
+    def get_shard_config_name(self, config, shard_idx):
+        return "{}{}.config".format(config["shard_config_prefix"], shard_idx)
+
     def prepare_local_exp_directory(self, config, config_file):
         local_exp_directory = super().prepare_local_exp_directory(config, config_file)
-        config_file = os.path.join(local_exp_directory, config['network_config_file_name'])
-        with open(config_file, 'w') as f:
-            n = 2 * config['fault_tolerance'] + 1
-            x = len(config['server_names']) // n
-            for group in range(config['num_groups']):
-                process_idx = group // x
-                print('f %d' % config['fault_tolerance'], file=f)
-                print('group', file=f)
-                for i in range(n):
-                    server_idx = i * x + (group % x)
+        server_names = config["server_names"]
+        fault_tolerance = config["fault_tolerance"]
+        n = 2 * fault_tolerance + 1
+        shards = config["shards"]
+        assert(len(shards) == config["num_shards"])
+        server_base_port = config["server_port"]
+        server_ports = collections.defaultdict(lambda: server_base_port)
+        shard_idx = 0
+        for shard in shards:
+            assert(len(shard) == n)
+            shard_config_name = self.get_shard_config_name(config, shard_idx)
+            config_file = os.path.join(local_exp_directory, shard_config_name)
+            print(config_file)
+            with open(config_file, "w") as f:
+                print("f {}".format(fault_tolerance), file=f)
+                for replica in shard:
+                    assert(replica in server_names)
                     if 'run_locally' in config and config['run_locally']:
-                        print('replica %s:%d' % ('localhost',
-                            config['server_port'] + process_idx
-                            * len(config['server_names']) + server_idx), file=f)
-                    else:
-                        print('replica %s:%d' % (config['server_names'][server_idx],
-                            config['server_port'] + process_idx), file=f)
+                        replica = "localhost"
+                    port = server_ports[replica]
+                    print("replica {}:{}".format(replica, port), file=f)
+                    server_ports[replica] += 1
+            shard_idx += 1
 
         return local_exp_directory
 

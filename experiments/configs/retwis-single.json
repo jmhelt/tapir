@@ -3,10 +3,12 @@
   "client_protocol_mode": "lock",
   "server_names": ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
   "num_shards": 1,
+  "shard_config_prefix": "shard",
   "fault_tolerance": 1,
   "shards": [
     ["us-east-1-0", "us-east-1-1", "us-east-1-2"]
   ],
+  "server_port": 7087,
   "client_num_keys": 100000,
   "benchmark_name": "retwis",
   "client_key_selector": "uniform",
@@ -169,7 +171,6 @@
   "num_experiment_runs": 1,
   "out_directory_name": "out",
   "server_bin_name": "server",
-  "server_port": 7087,
   "src_directory": "/home/jhelt/git/rss/tapir/src",
   "make_collect_bins": [
     "store/benchmark/retwisClient",

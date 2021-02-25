@@ -37,14 +37,10 @@ def kill_servers(config, executor, kill_args=' -9'):
     for server in servers:
         if is_exp_remote(config):
             kill_commands[server_idx] = kill_remote_process_by_name_cmd(
-                os.path.join(config['base_remote_bin_directory_nfs'],
-                    config['bin_directory_name'],
-                    config['server_bin_name']), kill_args)
+                    config['server_bin_name'], kill_args)
         else:
             kill_commands[server_idx] = kill_remote_process_by_name_cmd(
-                os.path.join(config['src_directory'],
-                    config['bin_directory_name'],
-                    config['server_bin_name']), kill_args)
+                    config['server_bin_name'], kill_args)
 
         server_idx += 1
 
@@ -65,15 +61,11 @@ def kill_clients_no_config(config, n, m, executor):
             client_host = get_client_host(config, i, j)
             if is_exp_remote(config):
                 futures.append(executor.submit(kill_remote_process_by_name,
-                    os.path.join(config['base_remote_bin_directory_nfs'],
-                        config['bin_directory_name'],
-                        config['client_bin_name']), config['emulab_user'],
-                    client_host, ' -9'))
+                        config['client_bin_name'], config['emulab_user'],
+                        client_host, ' -9'))
             else:
                 futures.append(executor.submit(kill_process_by_name,
-                    os.path.join(config['src_directory'],
-                        config['bin_directory_name'],
-                        config['client_bin_name']), ' -9'))
+                        config['client_bin_name'], ' -9'))
     concurrent.futures.wait(futures)
 
 def kill_clients(config, executor):
@@ -82,16 +74,13 @@ def kill_clients(config, executor):
 def kill_master(config, remote_exp_directory):
     master_host = get_master_host(config)
     if is_exp_remote(config):
-        kill_remote_process_by_name(os.path.join(
-            config['base_remote_bin_directory_nfs'],
-            config['bin_directory_name'], config['master_bin_name']),
+        kill_remote_process_by_name(
+            config['master_bin_name'],
             config['emulab_user'], master_host, ' -9')
         kill_remote_process_by_port(config['master_port'],
                 config['emulab_user'], master_host, ' -9')
     else:
-        kill_process_by_name(os.path.join(
-            config['base_remote_bin_directory_nfs'],
-            config['bin_directory_name'], config['master_bin_name']), ' -9')
+        kill_process_by_name(config['master_bin_name'], ' -9')
         kill_process_by_port(config['master_port'], ' -9')
 
 def terminate_clients_on_timeout(timeout, cond, client_ssh_threads):
@@ -171,29 +160,34 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
 
 def start_servers(config, local_exp_directory, remote_exp_directory, run):
     server_threads = []
-    if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'hotstuff':
-        n = 5 * config['fault_tolerance'] + 1
-    elif config['replication_protocol'] == 'pbft':
-        n = 3 * config['fault_tolerance'] + 1
-    else:
-        n = 2 * config['fault_tolerance'] + 1
-    x = len(config['server_names']) // n
+    server_names = config["server_names"]
+    fault_tolerance = config["fault_tolerance"]
+    n = 2 * fault_tolerance + 1
+    shards = config["shards"]
+    assert(len(shards) == config["num_shards"])
+    server_base_port = config["server_port"]
+    server_ports = collections.defaultdict(lambda: server_base_port)
     start_commands = {}
-    for group in range(config['num_groups']):
-        process_idx = group // x
-        for i in range(n):
-            server_idx = (i * x + group) % len(config['server_names'])
+    shard_idx = 0
+    for shard in shards:
+        assert(len(shard) == n)
+        replica_idx = 0
+        for replica in shard:
+            assert(replica in server_names)
+            server_idx = server_names.index(replica)
             if is_exp_local(config):
                 os.makedirs(os.path.join(local_exp_directory,
-                    config['out_directory_name'], 'server-%d' % server_idx),
+                    config['out_directory_name'], 'server-%d' % shard_idx),
                     exist_ok=True)
 
-            server_command = get_replica_cmd(config, server_idx,
-                    process_idx, group, run, local_exp_directory, remote_exp_directory)
+            server_command = get_replica_cmd(config, shard_idx,
+                    replica_idx, run, local_exp_directory, remote_exp_directory)
             if not server_idx in start_commands:
                 start_commands[server_idx] = '(%s)' % server_command
             else:
                 start_commands[server_idx] += ' & (%s)' % server_command
+            replica_idx += 1
+        shard_idx += 1
 
     for idx, cmd in start_commands.items():
         if is_exp_remote(config):
@@ -201,8 +195,7 @@ def start_servers(config, local_exp_directory, remote_exp_directory, run):
             server_threads.append(run_remote_command_async(cmd,
                 config['emulab_user'], server_host, detach=False))
         else:
-            print(server_command)
-            server_threads.append(subprocess.Popen(cmd, shell=True))
+            server_threads.append(run_local_command_async(cmd))
         time.sleep(0.1)
     time.sleep(1)
     return server_threads
@@ -424,7 +417,6 @@ def run_experiment(config_file, client_config_idx, executor):
         remote_exp_directory = None
         if is_exp_remote(config):
             remote_exp_directory = prepare_remote_exp_directories(config, local_exp_directory, executor)
-        kill_clients(config, executor)
         for i in range(config['num_experiment_runs']):
             servers_alive = False
             retries = 0
@@ -681,3 +673,5 @@ def run_multiple_tail_at_scale(config_file):
             generate_tail_at_scale_plots(config, exp_dir, sub_out_directories)
             #generate_tail_at_scale_plots(config, 'experiments/emulab/2018-09-18-02-46-26', [[['experiments/emulab/2018-09-18-02-46-26/2018-09-18-02-46-31/2018-09-18-02-46-31/2018-09-18-02-47-03/out/']], [['experiments/emulab/2018-09-18-02-46-26/2018-09-18-02-48-14/2018-09-18-02-48-14/2018-09-18-02-48-32/out/']]])
 
+def get_shard_config_name(config, shard_idx):
+    return "{}{}.config".format(config["shard_config_prefix"], shard_idx)
