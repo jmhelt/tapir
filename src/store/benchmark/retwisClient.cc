@@ -29,7 +29,7 @@ int
 main(int argc, char **argv)
 {
     const char *configPath = NULL;
-    const char *keysPath = NULL;
+    // const char *keysPath = NULL;
     int duration = 10;
     int nShards = 1;
     int closestReplica = -1; // Closest replica id.
@@ -56,11 +56,11 @@ main(int argc, char **argv)
             break;
         }
 
-        case 'f': // Generated keys path
-        { 
-            keysPath = optarg;
-            break;
-        }
+        // case 'f': // Generated keys path
+        // { 
+        //     keysPath = optarg;
+        //     break;
+        // }
 
         case 'N': // Number of shards.
         { 
@@ -192,17 +192,24 @@ main(int argc, char **argv)
 
     // Read in the keys from a file.
     string key, value;
-    ifstream in;
-    in.open(keysPath);
-    if (!in) {
-        fprintf(stderr, "Could not read keys from: %s\n", keysPath);
-        exit(0);
-    }
-    for (int i = 0; i < nKeys; i++) {
-        getline(in, key);
+    for (size_t i = 0; i < static_cast<size_t>(nKeys); i++) {
+        key = std::to_string(i);
         keys.push_back(key);
+        if (i % 10000 == 0) {
+            Debug("Added key %lu", i);
+        }
     }
-    in.close();
+    // ifstream in;
+    // in.open(keysPath);
+    // if (!in) {
+    //     fprintf(stderr, "Could not read keys from: %s\n", keysPath);
+    //     exit(0);
+    // }
+    // for (int i = 0; i < nKeys; i++) {
+    //     getline(in, key);
+    //     keys.push_back(key);
+    // }
+    // in.close();
 
     struct timeval t0, t1, t2;
     int nTransactions = 0; // Number of transactions attempted.
