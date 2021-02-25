@@ -13,7 +13,7 @@ class RssCodebase(ExperimentCodebase):
             path_to_client_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['client_bin_name'])
             exp_directory = local_exp_directory
-            config_path = os.path.join(local_exp_directory, config['network_config_file_name'])
+            config_path = os.path.join(local_exp_directory, self.get_shard_config_prefix(config))
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'client-%d-%d' % (i, j),
                     'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
@@ -22,7 +22,7 @@ class RssCodebase(ExperimentCodebase):
                     config['base_remote_bin_directory_nfs'],
                     config['bin_directory_name'], config['client_bin_name'])
             exp_directory = remote_exp_directory
-            config_path = os.path.join(remote_exp_directory, config['network_config_file_name'])
+            config_path = os.path.join(remote_exp_directory, self.get_shard_config_prefix(config))
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'],
                     'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
@@ -33,16 +33,20 @@ class RssCodebase(ExperimentCodebase):
         client_id = i * config['client_nodes_per_server'] * config['client_processes_per_client_node'] + j * config['client_processes_per_client_node'] + k
         client_command = ' '.join([str(x) for x in [
             path_to_client_bin,
-            '--client_id', client_id,
-            '--benchmark', config['benchmark_name'],
-            '--exp_duration', config['client_experiment_length'],
-            '--warmup_secs', config['client_ramp_up'],
-            '--cooldown_secs', config['client_ramp_down'],
-            '--config_path', config_path,
-            '--num_shards', config['num_shards'],
-            '--protocol_mode', config['client_protocol_mode'],
-            '--stats_file', stats_file,
-            '--num_clients', client_threads]])
+            '-c', config_path,
+            '-N', config['num_shards'],
+            '-d', config['client_experiment_length'],
+            '-m', config['client_protocol_mode'],
+            '-e', 0,
+            '-s', 0]])
+            # '--client_id', client_id,
+            # '--benchmark', config['benchmark_name'],
+
+            # '--warmup_secs', config['client_ramp_up'],
+            # '--cooldown_secs', config['client_ramp_down'],
+
+            # '--stats_file', stats_file,
+            # '--num_clients', client_threads]])
 
         if config['server_emulate_wan']:
             client_command += ' --ping_replicas=true'
@@ -56,89 +60,35 @@ class RssCodebase(ExperimentCodebase):
                 client_command += ' --strong_unreplicated=%s' % str(config['replication_protocol_settings']['unreplicated']).lower()
 
 
-        if 'message_transport_type' in config['replication_protocol_settings']:
-            client_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']
-
-        if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'pbft' or config['replication_protocol'] == 'hotstuff':
-            if 'read_quorum' in config['replication_protocol_settings']:
-                client_command += ' --indicus_read_quorum %s' % config['replication_protocol_settings']['read_quorum']
-            if 'read_dep' in config['replication_protocol_settings']:
-                client_command += ' --indicus_read_dep %s' % config['replication_protocol_settings']['read_dep']
-            if 'read_messages' in config['replication_protocol_settings']:
-                client_command += ' --indicus_read_messages %s' % config['replication_protocol_settings']['read_messages']
-            if 'sign_messages' in config['replication_protocol_settings']:
-                client_command += ' --indicus_sign_messages=%s' % str(config['replication_protocol_settings']['sign_messages']).lower()
-                client_command += ' --indicus_key_path %s' % config['replication_protocol_settings']['key_path']
-            if 'validate_proofs' in config['replication_protocol_settings']:
-                client_command += ' --indicus_validate_proofs=%s' % str(config['replication_protocol_settings']['validate_proofs']).lower()
-            if 'hash_digest' in config['replication_protocol_settings']:
-                client_command += ' --indicus_hash_digest=%s' % str(config['replication_protocol_settings']['hash_digest']).lower()
-            if 'verify_deps' in config['replication_protocol_settings']:
-                client_command += ' --indicus_verify_deps=%s' % str(config['replication_protocol_settings']['verify_deps']).lower()
-            if 'max_dep_depth' in config['replication_protocol_settings']:
-                client_command += ' --indicus_max_dep_depth %d' % config['replication_protocol_settings']['max_dep_depth']
-            if 'signature_type' in config['replication_protocol_settings']:
-                client_command += ' --indicus_key_type %d' % config['replication_protocol_settings']['signature_type']
-            if 'sig_batch' in config['replication_protocol_settings']:
-                client_command += ' --indicus_sig_batch %d' % config['replication_protocol_settings']['sig_batch']
-            if 'merkle_branch_factor' in config['replication_protocol_settings']:
-                client_command += ' --indicus_merkle_branch_factor %d' % config['replication_protocol_settings']['merkle_branch_factor']
-            if 'inject_failure_type' in config['replication_protocol_settings']:
-                client_command += ' --indicus_inject_failure_type %s' % config['replication_protocol_settings']['inject_failure_type']
-            if 'inject_failure_proportion' in config['replication_protocol_settings']:
-                client_command += ' --indicus_inject_failure_proportion %d' % config['replication_protocol_settings']['inject_failure_proportion']
-            if 'inject_failure_ms' in config['replication_protocol_settings']:
-                client_command += ' --indicus_inject_failure_ms %d' % config['replication_protocol_settings']['inject_failure_ms']
-            if 'p1DecisionTimeout' in config['replication_protocol_settings']:
-                client_command += ' --indicus_phase1DecisionTimeout %s' % config['replication_protocol_settings']['p1DecisionTimeout']
-
-        if config['replication_protocol'] == 'morty' or config['replication_protocol'] == 'morty-context':
-            if 'send_writes' in config['replication_protocol_settings']:
-                client_command += ' --morty_send_writes=%s' % str(config['replication_protocol_settings']['send_writes']).lower()
-            if 'backoff' in config['replication_protocol_settings']:
-                client_command += ' --morty_backoff %d' % config['replication_protocol_settings']['backoff']
-            if 'max_backoff' in config['replication_protocol_settings']:
-                client_command += ' --morty_max_backoff %d' % config['replication_protocol_settings']['max_backoff']
-            if 'spec_wait' in config['replication_protocol_settings']:
-                client_command += ' --morty_spec_wait %d' % config['replication_protocol_settings']['spec_wait']
-            if 'spec_execution_limit' in config['replication_protocol_settings']:
-                client_command += ' --morty_spec_execution_limit %d' % config['replication_protocol_settings']['spec_execution_limit']
-            if 'prepare_delay_ms' in config['replication_protocol_settings']:
-                client_command += ' --morty_prepare_delay_ms %d' % config['replication_protocol_settings']['prepare_delay_ms']
-            if 'commit_delay_ms' in config['replication_protocol_settings']:
-                client_command += ' --morty_commit_delay_ms %d' % config['replication_protocol_settings']['commit_delay_ms']
-            if 'prepare_timeout_ms' in config['replication_protocol_settings']:
-                client_command += ' --morty_prepare_timeout_ms %d' % config['replication_protocol_settings']['prepare_timeout_ms']
-            if 'commit_single_branch' in config['replication_protocol_settings']:
-                client_command += ' --morty_commit_single_branch=%s' % str(config['replication_protocol_settings']['commit_single_branch']).lower()
-
-
+        # if 'message_transport_type' in config['replication_protocol_settings']:
+        #     client_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']
 
         if 'client_debug_stats' in config and config['client_debug_stats']:
             client_command += ' --debug_stats'
 
-        if 'client_message_timeout' in config:
-            client_command += ' --message_timeout %d' % config['client_message_timeout']
-        if 'client_abort_backoff' in config:
-            client_command += ' --abort_backoff %d' % config['client_abort_backoff']
-        if 'client_retry_aborted' in config:
-            client_command += ' --retry_aborted=%s' % (str(config['client_retry_aborted']).lower())
-        if 'client_max_attempts' in config:
-            client_command += ' --max_attempts %d' % config['client_max_attempts']
-        if 'client_max_backoff' in config:
-            client_command += ' --max_backoff %d' % config['client_max_backoff']
-        if 'client_rand_sleep' in config:
-            client_command += ' --delay %d' % config['client_rand_sleep']
+        # if 'client_message_timeout' in config:
+        #     client_command += ' --message_timeout %d' % config['client_message_timeout']
+        # if 'client_abort_backoff' in config:
+        #     client_command += ' --abort_backoff %d' % config['client_abort_backoff']
+        # if 'client_retry_aborted' in config:
+        #     client_command += ' --retry_aborted=%s' % (str(config['client_retry_aborted']).lower())
+        # if 'client_max_attempts' in config:
+        #     client_command += ' --max_attempts %d' % config['client_max_attempts']
+        # if 'client_max_backoff' in config:
+        #     client_command += ' --max_backoff %d' % config['client_max_backoff']
+        # if 'client_rand_sleep' in config:
+        #     client_command += ' --delay %d' % config['client_rand_sleep']
 
         if 'partitioner' in config:
             client_command += ' --partitioner %s' % config['partitioner']
 
         if config['benchmark_name'] == 'retwis':
-            client_command += ' --num_keys %d' % config['client_num_keys']
-            if 'client_key_selector' in config:
-                client_command += ' --key_selector %s' % config['client_key_selector']
-                if config['client_key_selector'] == 'zipf':
-                    client_command += ' --zipf_coefficient %f' % config['client_zipf_coefficient']
+            client_command += ' -k %d' % config['client_num_keys']
+            client_command += ' -z -1'
+            # if 'client_key_selector' in config:
+                # client_command += ' --key_selector %s' % config['client_key_selector']
+                # if config['client_key_selector'] == 'zipf':
+                #     client_command += ' --zipf_coefficient %f' % config['client_zipf_coefficient']
         elif config['benchmark_name'] == 'rw':
             client_command += ' --num_keys %d' % config['client_num_keys']
             client_command += ' --num_ops_txn %d' % config['rw_num_ops_txn']
@@ -399,8 +349,11 @@ class RssCodebase(ExperimentCodebase):
         replica_command = 'cd %s; %s' % (exp_directory, replica_command)
         return replica_command
 
+    def get_shard_config_prefix(self, config):
+        return config["shard_config_prefix"]
+
     def get_shard_config_name(self, config, shard_idx):
-        return "{}{}.config".format(config["shard_config_prefix"], shard_idx)
+        return "{}{}.config".format(self.get_shard_config_prefix(config), shard_idx)
 
     def prepare_local_exp_directory(self, config, config_file):
         local_exp_directory = super().prepare_local_exp_directory(config, config_file)
