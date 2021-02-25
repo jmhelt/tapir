@@ -41,10 +41,10 @@ def get_client_cmd(config, i, j, k, run, local_exp_directory,
     return __BUILDERS__[config['codebase_name']].get_client_cmd(config, i, j,
             k, run, local_exp_directory, remote_exp_directory)
 
-def get_replica_cmd(config, i, k, group, run, local_exp_directory,
+def get_replica_cmd(config, shard_idx, replica_idx, run, local_exp_directory,
         remote_exp_directory):
     return __BUILDERS__[config['codebase_name']].get_replica_cmd(config,
-            i, k, group, run, local_exp_directory, remote_exp_directory)
+            shard_idx, replica_idx, run, local_exp_directory, remote_exp_directory)
 
 def prepare_local_exp_directory(config, config_file):
     return __BUILDERS__[config['codebase_name']].prepare_local_exp_directory(config, config_file)

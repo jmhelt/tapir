@@ -22,6 +22,10 @@ def run_local_command_sync(command):
     print(command)
     subprocess.run(command, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
 
+def run_local_command_async(command):
+    print(command)
+    return subprocess.Popen(command, universal_newlines=True, shell=True)
+
 def ssh_args(command, remote_user, remote_host):
     return ["ssh", '-o', 'StrictHostKeyChecking=no',
         '-o', 'ControlMaster=auto',
@@ -101,13 +105,6 @@ def get_timestamped_exp_dir(config):
     now_string = time.strftime('%Y-%m-%d-%H-%M-%S',
             time.localtime())
     return os.path.join(config['base_local_exp_directory'], now_string)
-
-def prepare_local_exp_directory(config, config_file):
-    exp_directory = get_timestamped_exp_dir(config)
-    os.makedirs(exp_directory)
-    shutil.copy(config_file, os.path.join(exp_directory,
-        os.path.basename(config_file)))
-    return exp_directory
 
 def get_interface_for_ip(ip, remote_user, remote_host):
     return run_remote_command_sync('ifconfig | grep -B1 "inet addr:%s" | awk \'$1!="inet" && $1!="--" {print $1}\'' % ip, remote_user, remote_host).rstrip()
