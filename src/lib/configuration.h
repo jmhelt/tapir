@@ -33,6 +33,7 @@
 #define _LIB_CONFIGURATION_H_
 
 #include "replication/common/viewstamp.h"
+#include "lib/transport-proto.pb.h"
 
 #include <fstream>
 #include <stdbool.h>
@@ -61,6 +62,11 @@ struct ReplicaAddress
     }
     bool operator>=(const ReplicaAddress &other) const {
         return !(*this < other);
+    }
+
+    void serialize(ReplicaAddressMessage *msg) const {
+        msg->set_host(host.c_str());
+        msg->set_port(port.c_str());
     }
 };
 
