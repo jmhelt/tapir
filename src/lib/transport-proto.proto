@@ -1,0 +1,8 @@
+syntax = "proto2";
+
+// A serialized replica addr
+message ReplicaAddressMessage {
+    required string host = 1;
+    required string port = 2;
+}
+

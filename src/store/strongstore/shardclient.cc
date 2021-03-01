@@ -31,6 +31,8 @@
 
 #include "store/strongstore/shardclient.h"
 
+#include "lib/configuration.h"
+
 namespace strongstore {
 
 using namespace std;
@@ -165,12 +167,15 @@ ShardClient::Prepare(uint64_t id, const Transaction &txn,
 {
     Debug("[shard %i] Sending PREPARE: %lu", shard, id);
 
+    transport::ReplicaAddress coord{"localhost", "7087"};
+
     // create prepare request
     string request_str;
     Request request;
     request.set_op(Request::PREPARE);
     request.set_txnid(id);
     txn.serialize(request.mutable_prepare()->mutable_txn());
+    coord.serialize(request.mutable_prepare()->mutable_coord());;
     request.SerializeToString(&request_str);
 
     transport->Timer(0, [=]() {

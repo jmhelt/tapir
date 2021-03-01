@@ -35,6 +35,7 @@ namespace strongstore {
 
 using namespace std;
 using namespace proto;
+using namespace replication;
 
 Server::Server(Mode mode, uint64_t skew, uint64_t error) : mode(mode)
 {

@@ -11,7 +11,10 @@
 #include "store/strongstore/client.h"
 #include "store/weakstore/client.h"
 #include "store/tapirstore/client.h"
+
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 using namespace std;
 
@@ -222,6 +225,7 @@ main(int argc, char **argv)
     srand(t0.tv_sec + t0.tv_usec);
 
     while (1) {
+        std::this_thread::sleep_for(std::chrono::seconds{1});
         keyIdx.clear();
             
         // Begin a transaction.

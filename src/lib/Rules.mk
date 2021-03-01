@@ -7,7 +7,8 @@ SRCS += $(addprefix $(d), \
 	persistent_register.cc)
 
 PROTOS += $(addprefix $(d), \
-          latency-format.proto)
+          latency-format.proto \
+		  transport-proto.proto)
 
 LIB-hash := $(o)lookup3.o
 
@@ -21,7 +22,7 @@ LIB-io-utils := $(o)io_utils.o
 
 LIB-latency := $(o)latency.o $(o)latency-format.o $(LIB-message)
 
-LIB-configuration := $(o)configuration.o $(LIB-message)
+LIB-configuration := $(o)configuration.o $(o)transport-proto.o $(LIB-message)
 
 LIB-transport := $(o)transport.o $(LIB-message) $(LIB-configuration)
 
