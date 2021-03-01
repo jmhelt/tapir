@@ -163,6 +163,8 @@ Client::Prepare(uint64_t &ts)
     Debug("PREPARE Transaction");
     list<Promise *> promises;
 
+    // TODO: Choose coordinator 
+
     for (auto p : participants) {
         Debug("Sending prepare to shard [%d]", p);
         promises.push_back(new Promise(PREPARE_TIMEOUT));

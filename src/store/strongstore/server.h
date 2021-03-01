@@ -32,7 +32,7 @@
 #ifndef _STRONG_SERVER_H_
 #define _STRONG_SERVER_H_
 
-#include "lib/udptransport.h"
+#include "lib/transport.h"
 #include "replication/vr/replica.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
@@ -56,9 +56,9 @@ public:
     Server(Mode mode, uint64_t skew, uint64_t error);
     virtual ~Server();
 
-    virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2);
-    virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2);
-    virtual void UnloggedUpcall(const string &str1, string &str2);
+    virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2) override;
+    virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2) override;
+    virtual void UnloggedUpcall(const string &str1, string &str2) override;
     void Load(const string &key, const string &value, const Timestamp timestamp) override;
     virtual inline Stats &GetStats() override { return store->GetStats(); }
 
