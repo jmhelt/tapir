@@ -38,20 +38,33 @@
 #include <event2/event.h>
 #include <event2/thread.h>
 
-#include <memory>
 #include <random>
 
 #include <arpa/inet.h>
-#include <netinet/in.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <signal.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
+
+#include <netinet/in.h>
+#include <netinet/if_ether.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+
+#ifdef __linux__
+#include <linux/filter.h>
+#include <linux/if_ether.h>
+#endif /* __linux__ */
 
 const size_t MAX_UDP_MESSAGE_SIZE = 9000; // XXX
 const int SOCKET_BUF_SIZE = 10485760;
+
+const uint64_t NONFRAG_MAGIC = 0x20050318;
+const uint64_t FRAG_MAGIC = 0x20101010;
 
 using std::pair;
 
@@ -65,7 +78,7 @@ UDPTransportAddress *
 UDPTransportAddress::clone() const
 {
     UDPTransportAddress *c = new UDPTransportAddress(*this);
-    return c;    
+    return c;
 }
 
 bool operator==(const UDPTransportAddress &a, const UDPTransportAddress &b)
@@ -101,16 +114,18 @@ UDPTransport::LookupAddress(const transport::ReplicaAddress &addr)
         Panic("getaddrinfo returned a non IPv4 address");
     }
     UDPTransportAddress out =
-              UDPTransportAddress(*((sockaddr_in *)ai->ai_addr));
+        UDPTransportAddress(*((sockaddr_in *)ai->ai_addr));
     freeaddrinfo(ai);
     return out;
 }
 
 UDPTransportAddress
 UDPTransport::LookupAddress(const transport::Configuration &config,
-                            int idx)
+                            int groupIdx,
+                            int replicaIdx)
 {
-    const transport::ReplicaAddress &addr = config.replica(idx);
+    const transport::ReplicaAddress &addr = config.replica(groupIdx,
+                                                           replicaIdx);
     return LookupAddress(addr);
 }
 
@@ -145,7 +160,7 @@ BindToPort(int fd, const string &host, const string &port)
         // Set up the sockaddr so we're OK with any UDP socket
         memset(&sin, 0, sizeof(sin));
         sin.sin_family = AF_INET;
-        sin.sin_port = 0;        
+        sin.sin_port = 0;
     } else {
         // Otherwise, look up its hostname and port number (which
         // might be a service name)
@@ -164,14 +179,14 @@ BindToPort(int fd, const string &host, const string &port)
         ASSERT(ai->ai_family == AF_INET);
         ASSERT(ai->ai_socktype == SOCK_DGRAM);
         if (ai->ai_addr->sa_family != AF_INET) {
-            Panic("getaddrinfo returned a non IPv4 address");        
+            Panic("getaddrinfo returned a non IPv4 address");
         }
         sin = *(sockaddr_in *)ai->ai_addr;
-        
+
         freeaddrinfo(ai);
     }
 
-    Debug("Binding to %s:%d", inet_ntoa(sin.sin_addr), htons(sin.sin_port));
+    Notice("Binding to %s:%d", inet_ntoa(sin.sin_addr), htons(sin.sin_port));
 
     if (bind(fd, (sockaddr *)&sin, sizeof(sin)) < 0) {
         PPanic("Failed to bind to socket");
@@ -229,7 +244,9 @@ UDPTransport::~UDPTransport()
 
 void
 UDPTransport::ListenOnMulticastPort(const transport::Configuration
-                                    *canonicalConfig)
+                                    *canonicalConfig,
+                                    int groupIdx,
+                                    int replicaIdx)
 {
     if (!canonicalConfig->multicast()) {
         // No multicast address specified
@@ -238,44 +255,110 @@ UDPTransport::ListenOnMulticastPort(const transport::Configuration
 
     if (multicastFds.find(canonicalConfig) != multicastFds.end()) {
         // We're already listening
-        return;    
+        return;
     }
 
     int fd;
-    
-    // Create socket
-    if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        PPanic("Failed to create socket to listen for multicast");
-    }
-    
-    // Put it in non-blocking mode
-    if (fcntl(fd, F_SETFL, O_NONBLOCK, 1)) {
-        PWarning("Failed to set O_NONBLOCK on multicast socket");
-    }
-    
-    int n = 1;
-    if (setsockopt(fd, SOL_SOCKET,
-                   SO_REUSEADDR, (char *)&n, sizeof(n)) < 0) {
-        PWarning("Failed to set SO_REUSEADDR on multicast socket");
+    // If configuration has an interface for multicast,
+    // use raw socket with BPF
+    if (canonicalConfig->Interface(groupIdx, replicaIdx).size() > 0) {
+        #ifdef __linux__
+        char tcpdumpCommand [1024];
+        uint16_t groupMask = 1 << groupIdx;
+        sprintf(tcpdumpCommand, "tcpdump \"ip and udp and dst %s and (udp[0:2] & %u != 0)\" -ddd", canonicalConfig->multicast()->host.c_str(), groupMask);
+
+        FILE *tcpdumpOutput;
+        if ((tcpdumpOutput = popen(tcpdumpCommand, "r")) == NULL) {
+            PPanic("Failed to compile BPF filter using tcpdump");
+        }
+        int lineCount;
+        if (fscanf(tcpdumpOutput, "%d\n", &lineCount) < 1) {
+            PPanic("Failed to read filter line count");
+        }
+        struct ifreq ifopts;
+        struct sock_fprog filter;
+        filter.filter = (struct sock_filter *)calloc(sizeof(struct sock_filter)*lineCount, 1);
+        filter.len = lineCount;
+        for (int i = 0; i < lineCount; i++) {
+            if (fscanf(tcpdumpOutput, "%hu %hhu %hhu %u\n", &(filter.filter[i].code), &(filter.filter[i].jt), &(filter.filter[i].jf), &(filter.filter[i].k)) < 4) {
+                PPanic("Failed to read filter code line %d\n", i+1);
+            }
+        }
+        pclose(tcpdumpOutput);
+
+        if ((fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) < 0) {
+            PPanic("Failed to create raw socket to listen for multicast");
+        }
+
+        memset(&ifopts, 0, sizeof(ifopts));
+        strncpy(ifopts.ifr_name, canonicalConfig->Interface(groupIdx, replicaIdx).c_str(), IFNAMSIZ-1);
+        if (ioctl(fd, SIOCGIFINDEX, &ifopts) < 0) {
+            PPanic("Failed to set SIOCGIFINDEX");
+        }
+
+        if (setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof(filter)) < 0) {
+            PPanic("Failed to attach BPF filter");
+        }
+
+        // Put it in non-blocking mode
+        if (fcntl(fd, F_SETFL, O_NONBLOCK, 1)) {
+            PWarning("Failed to set O_NONBLOCK on multicast socket");
+        }
+
+        int n = 1;
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_REUSEADDR, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_REUSEADDR on multicast socket");
+        }
+
+        // Increase buffer size
+        n = SOCKET_BUF_SIZE;
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_RCVBUF, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_RCVBUF on socket");
+        }
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_SNDBUF, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_SNDBUF on socket");
+        }
+        this->rawFds.insert(fd);
+        #else
+        PPanic("BPF not supported on non-linux platform.");
+        #endif /* __linux__ */
+    } else {
+        // Create socket
+        if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            PPanic("Failed to create socket to listen for multicast");
+        }
+
+        // Put it in non-blocking mode
+        if (fcntl(fd, F_SETFL, O_NONBLOCK, 1)) {
+            PWarning("Failed to set O_NONBLOCK on multicast socket");
+        }
+
+        int n = 1;
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_REUSEADDR, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_REUSEADDR on multicast socket");
+        }
+
+        // Increase buffer size
+        n = SOCKET_BUF_SIZE;
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_RCVBUF, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_RCVBUF on socket");
+        }
+        if (setsockopt(fd, SOL_SOCKET,
+                       SO_SNDBUF, (char *)&n, sizeof(n)) < 0) {
+            PWarning("Failed to set SO_SNDBUF on socket");
+        }
+        // Bind to the specified address
+        BindToPort(fd,
+                   canonicalConfig->multicast()->host,
+                   canonicalConfig->multicast()->port);
     }
 
-    // Increase buffer size
-    n = SOCKET_BUF_SIZE;
-    if (setsockopt(fd, SOL_SOCKET,
-                   SO_RCVBUF, (char *)&n, sizeof(n)) < 0) {
-        PWarning("Failed to set SO_RCVBUF on socket");
-    }
-    if (setsockopt(fd, SOL_SOCKET,
-                   SO_SNDBUF, (char *)&n, sizeof(n)) < 0) {
-        PWarning("Failed to set SO_SNDBUF on socket");
-    }
 
-    
-    // Bind to the specified address
-    BindToPort(fd,
-               canonicalConfig->multicast()->host,
-               canonicalConfig->multicast()->port);
-    
     // Set up a libevent callback
     event *ev = event_new(libeventBase, fd,
                           EV_READ | EV_PERSIST,
@@ -287,21 +370,23 @@ UDPTransport::ListenOnMulticastPort(const transport::Configuration
     multicastFds[canonicalConfig] = fd;
     multicastConfigs[fd] = canonicalConfig;
 
-    Notice("Listening for multicast requests on %s:%s",
+    Notice("Listening for multicast requests on %s:%s (interface %s)",
            canonicalConfig->multicast()->host.c_str(),
-           canonicalConfig->multicast()->port.c_str());
+           canonicalConfig->multicast()->port.c_str(),
+           canonicalConfig->Interface(groupIdx, replicaIdx).c_str());
 }
 
 void
 UDPTransport::Register(TransportReceiver *receiver,
                        const transport::Configuration &config,
+                       int groupIdx,
                        int replicaIdx)
 {
     ASSERT(replicaIdx < config.n);
     struct sockaddr_in sin;
 
     const transport::Configuration *canonicalConfig =
-        RegisterConfiguration(receiver, config, replicaIdx);
+        RegisterConfiguration(receiver, config, groupIdx, replicaIdx);
 
     // Create socket
     int fd;
@@ -328,7 +413,7 @@ UDPTransport::Register(TransportReceiver *receiver,
             PWarning("Failed to set DSCP on socket");
         }
     }
-    
+
     // Increase buffer size
     n = SOCKET_BUF_SIZE;
     if (setsockopt(fd, SOL_SOCKET,
@@ -339,16 +424,16 @@ UDPTransport::Register(TransportReceiver *receiver,
                    SO_SNDBUF, (char *)&n, sizeof(n)) < 0) {
         PWarning("Failed to set SO_SNDBUF on socket");
     }
-    
+
     if (replicaIdx != -1) {
         // Registering a replica. Bind socket to the designated
         // host/port
-        const string &host = config.replica(replicaIdx).host;
-        const string &port = config.replica(replicaIdx).port;
+        const string &host = config.replica(groupIdx, replicaIdx).host;
+        const string &port = config.replica(groupIdx, replicaIdx).port;
         BindToPort(fd, host, port);
     } else {
         // Registering a client. Bind to any available host/port
-        BindToPort(fd, "", "any");        
+        BindToPort(fd, "", "any");
     }
 
     // Set up a libevent callback
@@ -369,61 +454,81 @@ UDPTransport::Register(TransportReceiver *receiver,
     receivers[fd] = receiver;
     fds[receiver] = fd;
 
-    Debug("Listening on UDP port %hu", ntohs(sin.sin_port));
+    Notice("Listening on UDP port %hu", ntohs(sin.sin_port));
 
     // If we are registering a replica, check whether we need to set
     // up a socket to listen on the multicast port.
     //
     // Don't do this if we're registering a client.
+
     if (replicaIdx != -1) {
-        ListenOnMulticastPort(canonicalConfig);
+        ListenOnMulticastPort(canonicalConfig, groupIdx, replicaIdx);
     }
 }
 
 static size_t
-SerializeMessage(const ::google::protobuf::Message &m,
-                 std::unique_ptr<char[]> *out)
+SerializeMessage(const string &data, const string &type,
+                 char **out, size_t meta_len, void *meta_data)
 {
-    string data = m.SerializeAsString();
-    string type = m.GetTypeName();
+    /* packet format:
+     * FRAG_MAGIC + meta_len + meta + type length + type + data length + data
+     */
     size_t typeLen = type.length();
     size_t dataLen = data.length();
-    ssize_t totalLen = (typeLen + sizeof(typeLen) +
-                       dataLen + sizeof(dataLen));
+    ssize_t totalLen = (sizeof(uint32_t) +
+                        sizeof(uint32_t) + meta_len +
+                        typeLen + sizeof(typeLen) +
+                        dataLen + sizeof(dataLen));
 
-    std::unique_ptr<char[]> unique_buf(new char[totalLen]);
-    char *buf = unique_buf.get();
+    char *buf = new char[totalLen];
 
     char *ptr = buf;
+    *(uint32_t *)ptr = NONFRAG_MAGIC;
+    ptr += sizeof(uint32_t);
+
+    *(uint32_t *)ptr = meta_len;
+    ptr += sizeof(uint32_t);
+    if (meta_len > 0 && meta_data != NULL) {
+        memcpy(ptr, meta_data, meta_len);
+    }
+    ptr += meta_len;
+
     *((size_t *) ptr) = typeLen;
     ptr += sizeof(size_t);
-    ASSERT(ptr-buf < totalLen);
-    ASSERT(ptr+typeLen-buf < totalLen);
+    ASSERT(ptr - buf < totalLen);
+    ASSERT(ptr + typeLen - buf < totalLen);
     memcpy(ptr, type.c_str(), typeLen);
     ptr += typeLen;
     *((size_t *) ptr) = dataLen;
     ptr += sizeof(size_t);
-    ASSERT(ptr-buf < totalLen);
-    ASSERT(ptr+dataLen-buf == totalLen);
+    ASSERT(ptr - buf < totalLen);
+    ASSERT(ptr + dataLen - buf == totalLen);
     memcpy(ptr, data.c_str(), dataLen);
     ptr += dataLen;
 
-    *out = std::move(unique_buf);
+    *out = buf;
     return totalLen;
 }
 
 bool
-UDPTransport::SendMessageInternal(TransportReceiver *src,
-                                  const UDPTransportAddress &dst,
-                                  const Message &m,
-                                  bool multicast)
+UDPTransport::_SendMessageInternal(TransportReceiver *src,
+                                   const UDPTransportAddress &dst,
+                                   const Message &m,
+                                   size_t meta_len,
+                                   void *meta_data)
 {
     sockaddr_in sin = dynamic_cast<const UDPTransportAddress &>(dst).addr;
 
     // Serialize message
-    std::unique_ptr<char[]> unique_buf;
-    size_t msgLen = SerializeMessage(m, &unique_buf);
-    char *buf = unique_buf.get();
+    char *buf;
+    string data, type;
+    data = m.SerializeAsString();
+    type = m.GetTypeName();
+    size_t msgLen = SerializeMessage(data,
+                                     type,
+                                     &buf,
+                                     meta_len,
+                                     meta_data);
 
     int fd = fds[src];
 
@@ -434,40 +539,55 @@ UDPTransport::SendMessageInternal(TransportReceiver *src,
         if (sendto(fd, buf, msgLen, 0,
                    (sockaddr *)&sin, sizeof(sin)) < 0) {
             PWarning("Failed to send message");
-            return false;
+            goto fail;
         }
     } else {
-        int numFrags = ((msgLen-1) / MAX_UDP_MESSAGE_SIZE) + 1;
+        msgLen -= sizeof(uint32_t);
+        char *bodyStart = buf + sizeof(uint32_t);
+        int numFrags = ((msgLen - 1) / MAX_UDP_MESSAGE_SIZE) + 1;
         Notice("Sending large %s message in %d fragments",
-               m.GetTypeName().c_str(), numFrags);
+               type.c_str(), numFrags);
         uint64_t msgId = ++lastFragMsgId;
         for (size_t fragStart = 0; fragStart < msgLen;
-             fragStart += MAX_UDP_MESSAGE_SIZE) {
+                fragStart += MAX_UDP_MESSAGE_SIZE) {
             size_t fragLen = std::min(msgLen - fragStart,
                                       MAX_UDP_MESSAGE_SIZE);
-            size_t fragHeaderLen = 3*sizeof(size_t) + sizeof(uint64_t);
+            size_t fragHeaderLen = 2 * sizeof(size_t) + sizeof(uint64_t) + sizeof(uint32_t);
             char fragBuf[fragLen + fragHeaderLen];
             char *ptr = fragBuf;
-            *((size_t *)ptr) = 0;
-            ptr += sizeof(size_t);
+            *((uint32_t *)ptr) = FRAG_MAGIC;
+            ptr += sizeof(uint32_t);
             *((uint64_t *)ptr) = msgId;
             ptr += sizeof(uint64_t);
             *((size_t *)ptr) = fragStart;
             ptr += sizeof(size_t);
             *((size_t *)ptr) = msgLen;
             ptr += sizeof(size_t);
-            memcpy(ptr, &buf[fragStart], fragLen);
+            memcpy(ptr, &bodyStart[fragStart], fragLen);
 
             if (sendto(fd, fragBuf, fragLen + fragHeaderLen, 0,
                        (sockaddr *)&sin, sizeof(sin)) < 0) {
                 PWarning("Failed to send message fragment %ld",
                          fragStart);
-                return false;
+                goto fail;
             }
         }
     }
 
+    delete [] buf;
     return true;
+
+fail:
+    delete [] buf;
+    return false;
+}
+
+bool
+UDPTransport::SendMessageInternal(TransportReceiver *src,
+                                  const UDPTransportAddress &dst,
+                                  const Message &m)
+{
+    return _SendMessageInternal(src, dst, m, 0, NULL);
 }
 
 void
@@ -479,44 +599,62 @@ UDPTransport::Run()
 void
 UDPTransport::Stop()
 {
+    // tp.stop();
     event_base_loopbreak(libeventBase);
 }
 
+void UDPTransport::Close(TransportReceiver *receiver) {
+}
+
 static void
-DecodePacket(const char *buf, size_t sz, string &type, string &msg)
+DecodePacket(const char *buf, size_t sz,
+             string &type, string &msg, void **meta_data)
 {
+    /* packet format:
+     * FRAG_MAGIC + meta_len + meta + type length + type + data length + data
+     */
+    ssize_t ssz = sz;
     const char *ptr = buf;
+
+    size_t meta_len = *(uint32_t *)ptr;
+    ptr += sizeof(uint32_t);
+
+    if (meta_len > 0) {
+        *meta_data = (void *)ptr;
+    }
+    ptr += meta_len;
+
     size_t typeLen = *((size_t *)ptr);
     ptr += sizeof(size_t);
+    ASSERT(ptr - buf < ssz);
 
-    ASSERT(ptr-buf < (int)sz);
-    ASSERT(ptr+typeLen-buf < (int)sz);
-
+    ASSERT(ptr + typeLen - buf < ssz);
     type = string(ptr, typeLen);
     ptr += typeLen;
 
     size_t msgLen = *((size_t *)ptr);
     ptr += sizeof(size_t);
+    ASSERT(ptr - buf < ssz);
 
-    ASSERT(ptr-buf < (int)sz);
-    ASSERT(ptr+msgLen-buf <= (int)sz);
-
+    ASSERT(ptr + msgLen - buf <= ssz);
     msg = string(ptr, msgLen);
     ptr += msgLen;
-    
+
 }
 
 void
-UDPTransport::OnReadable(int fd)
-{
+UDPTransport::OnReadable(int fd) {
     const int BUFSIZE = 65536;
-    
-    while (1) {
+    struct ip *iph;
+    size_t headerLen = sizeof(struct ether_header) + sizeof(struct ip) + sizeof(struct udphdr);
+
+    do {
         ssize_t sz;
         char buf[BUFSIZE];
+        char *msgbuf;
         sockaddr_in sender;
         socklen_t senderSize = sizeof(sender);
-        
+
         sz = recvfrom(fd, buf, BUFSIZE, 0,
                       (struct sockaddr *) &sender, &senderSize);
         if (sz == -1) {
@@ -526,165 +664,198 @@ UDPTransport::OnReadable(int fd)
                 PWarning("Failed to receive message from socket");
             }
         }
-        
-        UDPTransportAddress senderAddr(sender);
-        string msgType, msg;
+        msgbuf = buf;
 
-        // Take a peek at the first field. If it's all zeros, this is
-        // a fragment. Otherwise, we can decode it directly.
-        ASSERT(sizeof(size_t) - sz > 0);
-        size_t typeLen = *((size_t *)buf);
-        if (typeLen != 0) {
-            // Not a fragment. Decode the packet
-            DecodePacket(buf, sz, msgType, msg);
-        } else {
-            // This is a fragment. Decode the header
-            const char *ptr = buf;
-            ptr += sizeof(size_t);
-            ASSERT(ptr-buf < sz);
-            uint64_t msgId = *((uint64_t *)ptr);
-            ptr += sizeof(uint64_t);
-            ASSERT(ptr-buf < sz);
-            size_t fragStart = *((size_t *)ptr);
-            ptr += sizeof(size_t);
-            ASSERT(ptr-buf < sz);
-            size_t msgLen = *((size_t *)ptr);
-            ptr += sizeof(size_t);
-            ASSERT(ptr-buf < sz);
-            ASSERT(buf+sz-ptr == (ssize_t) std::min(msgLen-fragStart,
+        // If received on multicast fd and it is raw socket,
+        // parse packet header first.
+        if (rawFds.find(fd) != rawFds.end()) {
+            if ((size_t)sz < headerLen) {
+                continue;
+            }
+            iph = (struct ip *)(buf + sizeof(struct ether_header));
+            sender.sin_family = AF_INET;
+            sender.sin_addr.s_addr = iph->ip_src.s_addr;
+            senderSize = sizeof(sender);
+            sz -= headerLen;
+            msgbuf += headerLen;
+        }
+
+        ProcessPacket(fd, sender, senderSize, msgbuf, sz);
+    } while (0);
+}
+
+void
+UDPTransport::ProcessPacket(int fd, sockaddr_in sender, socklen_t senderSize,
+                            char *buf, ssize_t sz)
+{
+    UDPTransportAddress senderAddr(sender);
+    string msgType, msg;
+    void *meta_data = NULL;
+
+    // Take a peek at the first field. If it's all zeros, this is
+    // a fragment. Otherwise, we can decode it directly.
+    ASSERT(sizeof(uint32_t) - sz > 0);
+    uint32_t magic = *(uint32_t*)buf;
+
+    if (magic == NONFRAG_MAGIC) {
+        // Not a fragment. Decode the packet
+        DecodePacket(buf + sizeof(uint32_t), sz - sizeof(uint32_t),
+                     msgType, msg, &meta_data);
+    } else if (magic == FRAG_MAGIC) {
+        // This is a fragment. Decode the header
+        const char *ptr = buf;
+        ptr += sizeof(uint32_t);
+        ASSERT(ptr - buf < sz);
+        uint64_t msgId = *((uint64_t *)ptr);
+        ptr += sizeof(uint64_t);
+        ASSERT(ptr - buf < sz);
+        size_t fragStart = *((size_t *)ptr);
+        ptr += sizeof(size_t);
+        ASSERT(ptr - buf < sz);
+        size_t msgLen = *((size_t *)ptr);
+        ptr += sizeof(size_t);
+        ASSERT(ptr - buf < sz);
+        ASSERT(buf + sz - ptr == (ssize_t) std::min(msgLen - fragStart,
                                                     MAX_UDP_MESSAGE_SIZE));
-            Debug("Received fragment of %zd byte packet %lx starting at %zd",
-                   msgLen, msgId, fragStart);
-            UDPTransportFragInfo &info = fragInfo[senderAddr];
-            if (info.msgId == 0) {
-                info.msgId = msgId;
-                info.data.clear();
-            }
-            if (info.msgId != msgId) {
-                ASSERT(msgId > info.msgId);
-                Warning("Failed to reconstruct packet %lx", info.msgId);
-                info.msgId = msgId;
-                info.data.clear();
-            }
-            
-            if (fragStart != info.data.size()) {
-                Warning("Fragments out of order for packet %lx; "
-                        "expected start %zd, got %zd",
-                        msgId, info.data.size(), fragStart);
-                continue;
-            }
-            
-            info.data.append(string(ptr, buf+sz-ptr));
-            if (info.data.size() == msgLen) {
-                Debug("Completed packet reconstruction");
-                DecodePacket(info.data.c_str(), info.data.size(),
-                             msgType, msg);
-                info.msgId = 0;
-                info.data.clear();
-            } else {
-                continue;
-            }
+        Notice("Received fragment of %zd byte packet %lx starting at %zd",
+               msgLen, msgId, fragStart);
+        UDPTransportFragInfo &info = fragInfo[senderAddr];
+        if (info.msgId == 0) {
+            info.msgId = msgId;
+            info.data.clear();
         }
-        
-        // Dispatch
-        if (dropRate > 0.0) {
-            double roll = uniformDist(randomEngine);
-            if (roll < dropRate) {
-                Debug("Simulating packet drop of message type %s",
-                      msgType.c_str());
-                continue;
-            }
+        if (info.msgId != msgId) {
+            ASSERT(msgId > info.msgId);
+            Warning("Failed to reconstruct packet %lx", info.msgId);
+            info.msgId = msgId;
+            info.data.clear();
         }
 
-        if (!reorderBuffer.valid && (reorderRate > 0.0)) {
-            double roll = uniformDist(randomEngine);
-            if (roll < reorderRate) {
-                Debug("Simulating reorder of message type %s",
-                      msgType.c_str());
-                ASSERT(!reorderBuffer.valid);
-                reorderBuffer.valid = true;
-                reorderBuffer.addr = new UDPTransportAddress(senderAddr);
-                reorderBuffer.message = msg;
-                reorderBuffer.msgType = msgType;
-                reorderBuffer.fd = fd;
-                continue;
-            }
+        if (fragStart != info.data.size()) {
+            Warning("Fragments out of order for packet %lx; "
+                    "expected start %zd, got %zd",
+                    msgId, info.data.size(), fragStart);
+            return;
         }
 
-    deliver:
-        // Was this received on a multicast fd?
-        auto it = multicastConfigs.find(fd);
-        if (it != multicastConfigs.end()) {
-            // If so, deliver the message to all replicas for that
-            // config, *except* if that replica was the sender of the
-            // message.
-            const transport::Configuration *cfg = it->second;
-            for (auto &kv : replicaReceivers[cfg]) {
-                TransportReceiver *receiver = kv.second;
-                const UDPTransportAddress &raddr = 
-                    replicaAddresses[cfg].find(kv.first)->second;
+        info.data.append(string(ptr, buf + sz - ptr));
+        if (info.data.size() == msgLen) {
+            Debug("Completed packet reconstruction");
+            DecodePacket(info.data.c_str(), info.data.size(),
+                         msgType, msg, &meta_data);
+            info.msgId = 0;
+            info.data.clear();
+        } else {
+            return;
+        }
+    } else {
+        Warning("Received packet with bad magic number");
+        return;
+    }
+
+    // Dispatch
+    if (dropRate > 0.0) {
+        double roll = uniformDist(randomEngine);
+        if (roll < dropRate) {
+            Debug("Simulating packet drop of message type %s",
+                  msgType.c_str());
+            return;
+        }
+    }
+
+    if (!reorderBuffer.valid && (reorderRate > 0.0)) {
+        double roll = uniformDist(randomEngine);
+        if (roll < reorderRate) {
+            Debug("Simulating reorder of message type %s",
+                  msgType.c_str());
+            ASSERT(!reorderBuffer.valid);
+            reorderBuffer.valid = true;
+            reorderBuffer.addr = new UDPTransportAddress(senderAddr);
+            reorderBuffer.message = msg;
+            reorderBuffer.msgType = msgType;
+            reorderBuffer.fd = fd;
+            return;
+        }
+    }
+
+deliver:
+    // Was this received on a multicast fd?
+    auto it = multicastConfigs.find(fd);
+    if (it != multicastConfigs.end()) {
+        // If so, deliver the message to all replicas for that
+        // config, *except* if that replica was the sender of the
+        // message.
+        const transport::Configuration *cfg = it->second;
+        for (auto &kv : replicaReceivers[cfg]) {
+            int groupIdx = kv.first;
+            for (auto &kv2 : kv.second) {
+                uint32_t replicaIdx = kv2.first;
+                TransportReceiver *receiver = kv2.second;
+                const UDPTransportAddress &raddr =
+                    replicaAddresses[cfg][groupIdx].find(replicaIdx)->second;
                 // Don't deliver a message to the sending replica
                 if (raddr != senderAddr) {
-                    receiver->ReceiveMessage(senderAddr, msgType, msg);
+                    receiver->ReceiveMessage(senderAddr, msgType, msg, meta_data);
                 }
             }
-        } else {
-            TransportReceiver *receiver = receivers[fd];
-            receiver->ReceiveMessage(senderAddr, msgType, msg);
         }
+    } else {
+        TransportReceiver *receiver = receivers[fd];
+        receiver->ReceiveMessage(senderAddr, msgType, msg, meta_data);
+    }
 
-        if (reorderBuffer.valid) {
-            reorderBuffer.valid = false;
-            msg = reorderBuffer.message;
-            msgType = reorderBuffer.msgType;
-            fd = reorderBuffer.fd;
-            senderAddr = *(reorderBuffer.addr);
-            delete reorderBuffer.addr;
-            Debug("Delivering reordered packet of type %s",
-                  msgType.c_str());
-            goto deliver;       // XXX I am a bad person for this.
-        }
+    if (reorderBuffer.valid) {
+        reorderBuffer.valid = false;
+        msg = reorderBuffer.message;
+        msgType = reorderBuffer.msgType;
+        fd = reorderBuffer.fd;
+        senderAddr = *(reorderBuffer.addr);
+        delete reorderBuffer.addr;
+        Debug("Delivering reordered packet of type %s",
+              msgType.c_str());
+        goto deliver;       // XXX I am a bad person for this.
     }
 }
 
-int
-UDPTransport::Timer(uint64_t ms, timer_callback_t cb)
-{
-    std::lock_guard<std::mutex> lck (mtx);
+int UDPTransport::Timer(uint64_t ms, timer_callback_t cb) {
+  struct timeval tv;
+  tv.tv_sec = ms / 1000;
+  tv.tv_usec = (ms % 1000) * 1000;
 
+  return TimerInternal(tv, cb);
+}
+
+int UDPTransport::TimerMicro(uint64_t us, timer_callback_t cb) {
+  struct timeval tv;
+  tv.tv_sec = us / 1000000UL;
+  tv.tv_usec = us % 1000000UL;
+
+  return TimerInternal(tv, cb);
+}
+
+int UDPTransport::TimerInternal(struct timeval &tv, timer_callback_t cb) {
+    std::lock_guard<std::mutex> lck(this->timersLock);
     UDPTransportTimerInfo *info = new UDPTransportTimerInfo();
 
-    struct timeval tv;
-    tv.tv_sec = ms/1000;
-    tv.tv_usec = (ms % 1000) * 1000;
-    
     ++lastTimerId;
-    
+
     info->transport = this;
     info->id = lastTimerId;
     info->cb = cb;
     info->ev = event_new(libeventBase, -1, 0,
                          TimerCallback, info);
 
-    if (info->ev == NULL) {
-        Debug("Error creating new Timer event : %d", lastTimerId);
-    }
-
     timers[info->id] = info;
-    
-    int ret = event_add(info->ev, &tv);
-    if (ret != 0) {
-        Debug("Error adding new Timer event to eventbase %d", lastTimerId);
-    }
-    
+
+    event_add(info->ev, &tv);
+
     return info->id;
 }
 
 bool
 UDPTransport::CancelTimer(int id)
 {
-    std::lock_guard<std::mutex> lck (mtx);
-
+    std::lock_guard<std::mutex> l(this->timersLock);
     UDPTransportTimerInfo *info = timers[id];
 
     if (info == NULL) {
@@ -693,19 +864,15 @@ UDPTransport::CancelTimer(int id)
 
     event_del(info->ev);
     event_free(info->ev);
-    
     timers.erase(info->id);
-
-
     delete info;
-    
+
     return true;
 }
 
 void
 UDPTransport::CancelAllTimers()
 {
-    Debug("Cancelling all Timers");
     while (!timers.empty()) {
         auto kv = timers.begin();
         CancelTimer(kv->first);
@@ -716,8 +883,7 @@ void
 UDPTransport::OnTimer(UDPTransportTimerInfo *info)
 {
     {
-        std::lock_guard<std::mutex> lck (mtx);
-
+        std::lock_guard<std::mutex> l(this->timersLock);
         timers.erase(info->id);
         event_del(info->ev);
         event_free(info->ev);
@@ -727,6 +893,12 @@ UDPTransport::OnTimer(UDPTransportTimerInfo *info)
 
     delete info;
 }
+
+void UDPTransport::DispatchTP(std::function<void*()> f, std::function<void(void*)> cb) {
+  // tp.dispatch(f, cb, libeventBase);
+  Panic("unimplemented");
+}
+
 
 void
 UDPTransport::SocketCallback(evutil_socket_t fd, short what, void *arg)
@@ -783,5 +955,6 @@ UDPTransport::SignalCallback(evutil_socket_t fd, short what, void *arg)
 {
     Notice("Terminating on SIGTERM/SIGINT");
     UDPTransport *transport = (UDPTransport *)arg;
-    event_base_loopbreak(transport->libeventBase);
+    transport->Stop();
+    exit(1);
 }

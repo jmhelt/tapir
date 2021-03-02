@@ -32,13 +32,15 @@
 #ifndef _LIB_CONFIGURATION_H_
 #define _LIB_CONFIGURATION_H_
 
-#include "replication/common/viewstamp.h"
 #include "lib/transport-proto.pb.h"
+#include "replication/common/viewstamp.h"
 
 #include <fstream>
 #include <stdbool.h>
 #include <string>
 #include <vector>
+#include <map>
+#include <set>
 
 using std::string;
 
@@ -53,16 +55,6 @@ struct ReplicaAddress
     inline bool operator!=(const ReplicaAddress &other) const {
         return !(*this == other);
     }
-    bool operator<(const ReplicaAddress &other) const;
-    bool operator<=(const ReplicaAddress &other) const {
-        return *this < other || *this == other;
-    }
-    bool operator>(const ReplicaAddress &other) const {
-        return !(*this <= other);
-    }
-    bool operator>=(const ReplicaAddress &other) const {
-        return !(*this < other);
-    }
 
     void serialize(ReplicaAddressMessage *msg) const {
         msg->set_host(host.c_str());
@@ -70,46 +62,50 @@ struct ReplicaAddress
     }
 };
 
-
 class Configuration
 {
 public:
     Configuration(const Configuration &c);
-    Configuration(int n, int f, std::vector<ReplicaAddress> replicas,
-                  ReplicaAddress *multicastAddress = nullptr);
-    Configuration(std::ifstream &file);
+    Configuration(int g, int n, int f,
+                  std::map<int, std::vector<ReplicaAddress> > replicas,
+                  ReplicaAddress *multicastAddress = nullptr,
+                  ReplicaAddress *fcAddress = nullptr,
+                  std::map<int, std::vector<std::string> > interfaces = std::map<int, std::vector<std::string> >());
+    Configuration(std::istream &file);
     virtual ~Configuration();
-    ReplicaAddress replica(int idx) const;
+    ReplicaAddress replica(int group, int idx) const;
     const ReplicaAddress *multicast() const;
-    int GetLeaderIndex(view_t view) const;
+    const ReplicaAddress *fc() const;
+    std::string Interface(int group, int idx) const;
+    inline int GetLeaderIndex(view_t view) const {
+        return (view % n);
+    };
     int QuorumSize() const;
     int FastQuorumSize() const;
     bool operator==(const Configuration &other) const;
-    inline bool operator!=(const Configuration &other) const {
+    inline bool operator!= (const Configuration &other) const {
         return !(*this == other);
     }
-    bool operator<(const Configuration &other) const;
-    bool operator<=(const Configuration &other) const {
-        return *this < other || *this == other;
-    }
-    bool operator>(const Configuration &other) const {
-        return !(*this <= other);
-    }
-    bool operator>=(const Configuration &other) const {
-        return !(*this < other);
-    }
+    int replicaHost(int group, int idx) const;
+    bool IsLowestGroupOnHost(int group, int idx) const;
 
 public:
-    int n;                      // number of replicas
-    int f;                      // number of failures tolerated
+    int g;                      // number of groups
+    int n;                      // number of replicas per group
+    int f;                      // number of failures tolerated (assume homogeneous across groups)
 private:
-    std::vector<ReplicaAddress> replicas;
+    std::map<int, std::vector<ReplicaAddress> > replicas;
+    std::map<int, std::map<int, int>> replicaHosts;
+    std::map<int, std::map<std::string, int>> hosts;
+    std::map<std::string, std::set<int>> hostToGroups;
     ReplicaAddress *multicastAddress;
     bool hasMulticast;
+    ReplicaAddress *fcAddress;
+    bool hasFC;
+    std::map<int, std::vector<std::string> > interfaces;
 };
 
 }      // namespace transport
-
 
 namespace std {
 template <> struct hash<transport::ReplicaAddress>
@@ -128,13 +124,17 @@ template <> struct hash<transport::Configuration>
         {
             size_t out = 0;
             out = x.n * 37 + x.f;
-            for (int i = 0; i < x.n; i++) {
-                out *= 37;
-                out += hash<transport::ReplicaAddress>()(x.replica(i));
+            for (int i = 0; i < x.g; i++ ) {
+                for (int j = 0; j < x.n; j++) {
+                    out *= 37;
+                    out += hash<transport::ReplicaAddress>()(x.replica(i, j));
+                }
             }
             return out;
         }
 };
+
 }
+
 
 #endif  /* _LIB_CONFIGURATION_H_ */

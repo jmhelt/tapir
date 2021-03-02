@@ -308,18 +308,18 @@ int main(int argc, char **argv) {
   switch (proto) {
     case PROTO_TAPIR: {
       server = new tapirstore::Server(FLAGS_tapir_linearizable);
-      replica = new replication::ir::IRReplica(config, FLAGS_replica_idx,
+      replica = new replication::ir::IRReplica(config, FLAGS_group_idx, FLAGS_replica_idx,
           tport, dynamic_cast<replication::ir::IRAppReplica *>(server));
       break;
     }
     case PROTO_WEAK: {
-      server = new weakstore::Server(config, FLAGS_replica_idx, tport, new weakstore::Store());
+      server = new weakstore::Server(config, FLAGS_group_idx, FLAGS_replica_idx, tport, new weakstore::Store());
       break;
     }
     case PROTO_STRONG: {
       server = new strongstore::Server(strongMode, FLAGS_clock_skew,
           FLAGS_clock_error);
-      replica = new replication::vr::VRReplica(config,
+      replica = new replication::vr::VRReplica(config, FLAGS_group_idx,
           FLAGS_replica_idx, tport, 1,
           dynamic_cast<replication::AppReplica *>(server));
       break;
@@ -330,18 +330,28 @@ int main(int argc, char **argv) {
   }
 
   // parse keys
+  size_t loaded = 0;
+  size_t stored = 0;
+  std::vector<int> txnGroups;
   std::vector<std::string> keys;
   if (FLAGS_data_file_path.empty() && FLAGS_keys_path.empty()) {
     if (FLAGS_num_keys > 0) {
       if (FLAGS_preload_keys) {
         for (size_t i = 0; i < FLAGS_num_keys; ++i) {
-          server->Load(std::to_string(i), "", Timestamp(0, 0));
-          if (i % 10000 == 0) {
-            Debug("Loaded key %lu", i);
-            Debug("Loaded key %s", std::to_string(i).c_str());
+          string key = std::to_string(i);
+          string value = "";
+          if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx, txnGroups) == FLAGS_group_idx) {
+            if (i % 10000) {
+              Debug("Loaded key %s", key.c_str());
+            }
+            server->Load(key, value, Timestamp());
+            ++stored;
           }
+          ++loaded;
         }
       }
+
+      Debug("Stored %lu out of %lu key-value pairs from [0,%lu).", stored, loaded, FLAGS_num_keys);
     } else {
       std::cerr << "Specified neither keys file nor number of keys."
                 << std::endl;
@@ -355,17 +365,15 @@ int main(int argc, char **argv) {
                 << std::endl;
       return 1;
     }
-    size_t loaded = 0;
-    size_t stored = 0;
+
     Debug("Populating with data from %s.", FLAGS_data_file_path.c_str());
-    std::vector<int> txnGroups;
     while (!in.eof()) {
       std::string key;
       std::string value;
       int i = ReadBytesFromStream(&in, key);
       if (i == 0) {
         ReadBytesFromStream(&in, value);
-        if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx, txnGroups) % FLAGS_num_groups == FLAGS_group_idx) {
+        if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx, txnGroups) == FLAGS_group_idx) {
           server->Load(key, value, Timestamp());
           ++stored;
         }
@@ -385,7 +393,7 @@ int main(int argc, char **argv) {
     std::string key;
     std::vector<int> txnGroups;
     while (std::getline(in, key)) {
-      if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx, txnGroups) % FLAGS_num_groups == FLAGS_group_idx) {
+      if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx, txnGroups) == FLAGS_group_idx) {
         server->Load(key, "", Timestamp(0, 0));
       }
     }

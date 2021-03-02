@@ -2,14 +2,15 @@
   "replication_protocol": "strong",
   "client_protocol_mode": "span-lock",
   "server_names": ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
-  "num_shards": 1,
+  "num_shards": 2,
   "shard_config_prefix": "shard",
   "fault_tolerance": 1,
   "shards": [
+    ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
     ["us-east-1-0", "us-east-1-1", "us-east-1-2"]
   ],
   "server_port": 7087,
-  "client_num_keys": 100000,
+  "client_num_keys": 100,
   "benchmark_name": "retwis",
   "client_key_selector": "uniform",
   "client_zipf_coefficient": 0.75,
