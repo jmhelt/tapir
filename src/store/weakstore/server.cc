@@ -34,18 +34,19 @@ namespace weakstore {
 
 using namespace proto;
 
-Server::Server(const transport::Configuration &configuration, int myIdx,
-               Transport *transport, Store *store)
+Server::Server(const transport::Configuration &configuration, int groupIdx,
+    int myIdx, Transport *transport, Store *store)
     : store(store), configuration(configuration), transport(transport)
 {
-    transport->Register(this, configuration, myIdx);
+    transport->Register(this, configuration, groupIdx, myIdx);
 }
 
 Server::~Server() { }
 
 void
 Server::ReceiveMessage(const TransportAddress &remote,
-                       const string &type, const string &data)
+                       const string &type, const string &data,
+                       void *meta_data)
 {
     HandleMessage(remote, type, data);
 }

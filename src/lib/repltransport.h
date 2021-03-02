@@ -203,12 +203,19 @@ private:
 
 class ReplTransport : public TransportCommon<ReplTransportAddress> {
 public:
-    void Register(TransportReceiver *receiver,
+    virtual void Register(TransportReceiver *receiver,
                   const transport::Configuration &config,
+                  int groupIdx,
                   int replicaIdx) override;
-    int Timer(uint64_t ms, timer_callback_t cb) override;
-    bool CancelTimer(int id) override;
-    void CancelAllTimers() override;
+    virtual int Timer(uint64_t ms, timer_callback_t cb) override;
+    virtual int TimerMicro(uint64_t ms, timer_callback_t cb) override {
+      return Timer(0, cb);
+    }
+
+    virtual bool CancelTimer(int id) override;
+    virtual void CancelAllTimers() override;
+    
+    void DispatchTP(std::function<void*()> f, std::function<void(void*)> cb);
 
     // DeliverMessage(addr, i) delivers the ith queued inbound message to the
     // receiver with address addr. It's possible to send a message to the
@@ -220,16 +227,18 @@ public:
     void TriggerTimer(int timer_id);
 
     // Launch the REPL.
-    void Run() override;
-    void Stop() override;
+    virtual void Run() override;
+    virtual void Stop() override;
+    virtual void Close(TransportReceiver *receiver) override;
 
 protected:
-    bool SendMessageInternal(TransportReceiver *src,
-                             const ReplTransportAddress &dst, const Message &m,
-                             bool multicast = false) override;
-    ReplTransportAddress LookupAddress(const transport::Configuration &cfg,
-                                       int replicaIdx) override;
-    const ReplTransportAddress *LookupMulticastAddress(
+    virtual bool SendMessageInternal(TransportReceiver *src,
+                             const ReplTransportAddress &dst, const Message &m) override;
+    virtual ReplTransportAddress
+    LookupAddress(const transport::Configuration &cfg,
+                  int groupIdx,
+                  int replicaIdx);
+    virtual const ReplTransportAddress *LookupMulticastAddress(
         const transport::Configuration *cfg) override;
 
 private:
@@ -242,10 +251,10 @@ private:
     void PrintState() const;
 
     struct QueuedMessage {
-        ReplTransportAddress src;
+        const ReplTransportAddress *src;
         std::unique_ptr<Message> msg;
 
-        QueuedMessage(ReplTransportAddress src, std::unique_ptr<Message> msg)
+        QueuedMessage(const ReplTransportAddress *src, std::unique_ptr<Message> msg)
             : src(std::move(src)), msg(std::move(msg)) {}
     };
 

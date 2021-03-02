@@ -172,7 +172,7 @@ class RssCodebase(ExperimentCodebase):
             path_to_server_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = local_exp_directory
-            config_file = os.path.join(local_exp_directory, self.get_shard_config_name(config, shard_idx))
+            config_file = os.path.join(local_exp_directory, self.get_shard_config_name(config))
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'server-%d' % shard_idx,
                     'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
@@ -181,8 +181,7 @@ class RssCodebase(ExperimentCodebase):
                     config['base_remote_bin_directory_nfs'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = remote_exp_directory
-            config_file = os.path.join(remote_exp_directory,
-                    self.get_shard_config_name(config, shard_idx))
+            config_file = os.path.join(remote_exp_directory, self.get_shard_config_name(config))
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'],
                     'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
@@ -192,8 +191,10 @@ class RssCodebase(ExperimentCodebase):
         replica_command = ' '.join([str(x) for x in [
             path_to_server_bin,
             '--config_path', config_file,
+            '--group_idx', shard_idx,
             '--replica_idx', replica_idx,
             '--protocol', config['replication_protocol'],
+            '--num_groups', config['num_shards'],
             '--num_shards', config['num_shards'],
             '--stats_file', stats_file]])
 
@@ -352,8 +353,8 @@ class RssCodebase(ExperimentCodebase):
     def get_shard_config_prefix(self, config):
         return config["shard_config_prefix"]
 
-    def get_shard_config_name(self, config, shard_idx):
-        return "{}{}.config".format(self.get_shard_config_prefix(config), shard_idx)
+    def get_shard_config_name(self, config):
+        return "{}.config".format(self.get_shard_config_prefix(config))
 
     def prepare_local_exp_directory(self, config, config_file):
         local_exp_directory = super().prepare_local_exp_directory(config, config_file)
@@ -365,13 +366,13 @@ class RssCodebase(ExperimentCodebase):
         server_base_port = config["server_port"]
         server_ports = collections.defaultdict(lambda: server_base_port)
         shard_idx = 0
-        for shard in shards:
-            assert(len(shard) == n)
-            shard_config_name = self.get_shard_config_name(config, shard_idx)
-            config_file = os.path.join(local_exp_directory, shard_config_name)
-            print(config_file)
-            with open(config_file, "w") as f:
-                print("f {}".format(fault_tolerance), file=f)
+        config_file = os.path.join(local_exp_directory, self.get_shard_config_name(config))
+        print(config_file)
+        with open(config_file, "w") as f:
+            print("f {}".format(fault_tolerance), file=f)
+            for shard in shards:
+                print("group", file=f)
+                assert(len(shard) == n)
                 for replica in shard:
                     assert(replica in server_names)
                     if 'run_locally' in config and config['run_locally']:

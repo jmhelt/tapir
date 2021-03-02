@@ -45,7 +45,7 @@ class VRClient : public Client
 {
 public:
     VRClient(const transport::Configuration &config,
-             Transport *transport,
+             Transport *transport, int group,
              uint64_t clientid = 0);
     virtual ~VRClient();
     virtual void Invoke(const string &request,
@@ -57,7 +57,8 @@ public:
                                 error_continuation_t error_continuation = nullptr,
                                 uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT);
     virtual void ReceiveMessage(const TransportAddress &remote,
-                                const string &type, const string &data);
+                                const string &type, const string &data,
+                                void *meta_data);
 
 protected:
     int view;

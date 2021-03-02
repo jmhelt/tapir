@@ -672,6 +672,3 @@ def run_multiple_tail_at_scale(config_file):
                 print("%s took %f seconds!" % (config_name, time.time() - start))
             generate_tail_at_scale_plots(config, exp_dir, sub_out_directories)
             #generate_tail_at_scale_plots(config, 'experiments/emulab/2018-09-18-02-46-26', [[['experiments/emulab/2018-09-18-02-46-26/2018-09-18-02-46-31/2018-09-18-02-46-31/2018-09-18-02-47-03/out/']], [['experiments/emulab/2018-09-18-02-46-26/2018-09-18-02-48-14/2018-09-18-02-48-14/2018-09-18-02-48-32/out/']]])
-
-def get_shard_config_name(config, shard_idx):
-    return "{}{}.config".format(config["shard_config_prefix"], shard_idx)
