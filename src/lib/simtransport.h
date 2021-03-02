@@ -44,15 +44,15 @@ class SimulatedTransportAddress : public TransportAddress
 {
 public:
     SimulatedTransportAddress * clone() const;
+    SimulatedTransportAddress(int addr);
     int GetAddr() const;
     bool operator==(const SimulatedTransportAddress &other) const;
     inline bool operator!=(const SimulatedTransportAddress &other) const
     {
-        return !(*this == other);            
+        return !(*this == other);
     }
 private:
-    SimulatedTransportAddress(int addr);
-    
+
     int addr;
     friend class SimulatedTransport;
 };
@@ -69,24 +69,41 @@ public:
     void Register(TransportReceiver *receiver,
                   const transport::Configuration &config,
                   int replicaIdx);
+    void Register(TransportReceiver *receiver,
+                  const transport::Configuration &config,
+                  int groupIdx,
+                  int replicaIdx);
     void Run();
     void AddFilter(int id, filter_t filter);
     void RemoveFilter(int id);
     int Timer(uint64_t ms, timer_callback_t cb);
     bool CancelTimer(int id);
     void CancelAllTimers();
+    void Stop(bool immediately = false) override;
+    
+    void DispatchTP(std::function<void*()> f, std::function<void(void*)> cb);
 
 protected:
     bool SendMessageInternal(TransportReceiver *src,
                              const SimulatedTransportAddress &dstAddr,
                              const Message &m,
                              bool multicast);
-    
+
+    bool SendMessageToReplica(TransportReceiver *src,
+                             int groupIdx,
+                             int replicaIdx,
+                             const Message &m) override;
+
     SimulatedTransportAddress
     LookupAddress(const transport::Configuration &cfg, int idx);
+    SimulatedTransportAddress
+    LookupAddress(const transport::Configuration &cfg, int groupIdx, int idx);
     const SimulatedTransportAddress *
     LookupMulticastAddress(const transport::Configuration *cfg);
-    
+    bool SendMessageInternal(TransportReceiver *src,
+                             const SimulatedTransportAddress &dstAddr,
+                             const Message &m) override;
+
 private:
     struct QueuedMessage {
         int dst;
@@ -108,11 +125,14 @@ private:
     int lastAddr;
 //    std::map<int,int> replicas;
     std::map<int,int> replicaIdxs;
+    std::map<int, std::map<int,int>> g_replicaIdxs;
     std::multimap<int,filter_t> filters;
     std::multimap<uint64_t, PendingTimer> timers;
     int lastTimerId;
     uint64_t vtime;
     bool processTimers;
+    int fcAddress;
+    bool running;
 };
 
 #endif  // _LIB_SIMTRANSPORT_H_

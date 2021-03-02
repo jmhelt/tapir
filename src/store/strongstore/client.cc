@@ -36,8 +36,8 @@ using namespace std;
 namespace strongstore {
 
 Client::Client(Mode mode, string configPath, int nShards,
-                int closestReplica, TrueTime timeServer)
-    : transport(0.0, 0.0, 0), mode(mode), timeServer(timeServer)
+                int closestReplica, Partitioner *part, TrueTime timeServer)
+    : transport(0.0, 0.0, 0), mode(mode), part(part), timeServer(timeServer)
 {
     // Initialize all state here;
     client_id = 0;
@@ -63,13 +63,19 @@ Client::Client(Mode mode, string configPath, int nShards,
                     tssConfigPath.c_str());
         }
         transport::Configuration tssConfig(tssConfigStream);
-        tss = new replication::vr::VRClient(tssConfig, &transport);
+        tss = new replication::vr::VRClient(tssConfig, &transport, 0, client_id);
     }
 
     /* Start a client for each shard. */
+    string shardConfigPath = configPath + ".config";
+    ifstream configStream(shardConfigPath);
+    if (configStream.fail()) {
+        fprintf(stderr, "unable to read configuration file: %s\n",
+                configPath.c_str());
+    }
+    transport::Configuration config(configStream);
     for (int i = 0; i < nShards; i++) {
-        string shardConfigPath = configPath + to_string(i) + ".config";
-        ShardClient *shardclient = new ShardClient(mode, shardConfigPath,
+        ShardClient *shardclient = new ShardClient(mode, &config,
             &transport, client_id, i, closestReplica);
         bclient[i] = new BufferClient(shardclient);
     }
@@ -119,7 +125,8 @@ int
 Client::Get(const string &key, string &value)
 {
     // Contact the appropriate shard to get the value.
-    int i = key_to_shard(key, nshards);
+    std::vector<int> txnGroups(participants.begin(), participants.end());
+    int i = (*part)(key, nshards, -1, txnGroups);
 
     // If needed, add this shard to set of participants and send BEGIN.
     if (participants.find(i) == participants.end()) {
@@ -140,7 +147,8 @@ int
 Client::Put(const string &key, const string &value)
 {
     // Contact the appropriate shard to set the value.
-    int i = key_to_shard(key, nshards);
+    std::vector<int> txnGroups(participants.begin(), participants.end());
+    int i = (*part)(key, nshards, -1, txnGroups);
 
     // If needed, add this shard to set of participants and send BEGIN.
     if (participants.find(i) == participants.end()) {

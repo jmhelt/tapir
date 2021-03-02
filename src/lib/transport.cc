@@ -4,9 +4,7 @@
  * transport.cc:
  *   message-passing network interface; common definitions
  *
- * Copyright 2013-2015 Irene Zhang <iyzhang@cs.washington.edu>
- *                     Naveen Kr. Sharma <naveenks@cs.washington.edu>
- *                     Dan R. K. Ports  <drkp@cs.washington.edu>
+ * Copyright 2013 Dan R. K. Ports  <drkp@cs.washington.edu>
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -35,7 +33,9 @@
 
 TransportReceiver::~TransportReceiver()
 {
+  if (this->myAddress != nullptr) {
     delete this->myAddress;
+  }
 }
 
 void
@@ -44,14 +44,15 @@ TransportReceiver::SetAddress(const TransportAddress *addr)
     this->myAddress = addr;
 }
 
-const TransportAddress &
+const TransportAddress *
 TransportReceiver::GetAddress()
 {
-    return *(this->myAddress);
+    return this->myAddress;
 }
 
 Timeout::Timeout(Transport *transport, uint64_t ms, timer_callback_t cb)
-    : transport(transport), ms(ms), cb(cb)
+    : transport(transport), ms(ms), cb(std::move(cb)),
+      timeoutCb(std::bind(&Timeout::OnTimeout, this))
 {
     timerId = 0;
 }
@@ -79,13 +80,9 @@ uint64_t
 Timeout::Reset()
 {
     Stop();
-    
-    timerId = transport->Timer(ms, [this]() {
-            timerId = 0;
-            Reset();
-            cb();
-        });
-    
+
+    timerId = transport->Timer(ms, cb);
+
     return ms;
 }
 
@@ -102,4 +99,13 @@ bool
 Timeout::Active() const
 {
     return (timerId != 0);
+}
+
+void Timeout::OnTimeout() {
+    timerId = 0;
+    Reset();
+    cb();
+}
+
+void Transport::Flush() {
 }

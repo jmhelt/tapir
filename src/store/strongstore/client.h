@@ -38,6 +38,7 @@
 #include "replication/vr/client.h"
 #include "store/common/frontend/bufferclient.h"
 #include "store/common/frontend/client.h"
+#include "store/common/partitioner.h"
 #include "store/common/truetime.h"
 #include "store/strongstore/strong-proto.pb.h"
 #include "store/strongstore/shardclient.h"
@@ -51,7 +52,7 @@ class Client : public ::Client
 {
 public:
     Client(Mode mode, string configPath, int nshards,
-            int closestReplica, TrueTime timeServer);
+            int closestReplica, Partitioner *part, TrueTime timeServer);
     ~Client();
 
     // Overriding functions from ::Client
@@ -98,6 +99,9 @@ private:
 
     // Timestamp server shard.
     replication::vr::VRClient *tss; 
+
+    // Partitioner
+    Partitioner *part;
 
     // TrueTime server.
     TrueTime timeServer;

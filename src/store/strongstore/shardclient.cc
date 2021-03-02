@@ -38,23 +38,16 @@ namespace strongstore {
 using namespace std;
 using namespace proto;
 
-ShardClient::ShardClient(Mode mode, const string &configPath,
+ShardClient::ShardClient(Mode mode, transport::Configuration *config,
                        Transport *transport, uint64_t client_id, int
                        shard, int closestReplica)
     : transport(transport), client_id(client_id), shard(shard)
-{ 
-    ifstream configStream(configPath);
-    if (configStream.fail()) {
-        fprintf(stderr, "unable to read configuration file: %s\n",
-                configPath.c_str());
-    }
-    transport::Configuration config(configStream);
-
-    client = new replication::vr::VRClient(config, transport);
+{
+    client = new replication::vr::VRClient(*config, transport, shard, client_id);
 
     if (mode == MODE_OCC || mode == MODE_SPAN_OCC) {
         if (closestReplica == -1) {
-            replica = client_id % config.n;
+            replica = client_id % config->n;
         } else {
             replica = closestReplica;
         }

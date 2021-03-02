@@ -57,7 +57,7 @@ class ShardClient : public TxnClient
 public:
     /* Constructor needs path to shard config. */
     ShardClient(Mode mode,
-        const std::string &configPath, 
+        transport::Configuration *config,
         Transport *transport,
         uint64_t client_id,
         int shard,

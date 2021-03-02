@@ -97,6 +97,7 @@ main(int argc, char **argv)
         }
     }
 
+    Partitioner *part = new DefaultPartitioner();
     if (mode == MODE_TAPIR) {
         client = new tapirstore::Client(configPath, nShards,
                     closestReplica, TrueTime(0, 0));
@@ -105,7 +106,7 @@ main(int argc, char **argv)
                     closestReplica);
     } else if (mode == MODE_STRONG) {
         client = new strongstore::Client(strongmode, configPath,
-                    nShards, closestReplica, TrueTime(0, 0));
+                    nShards, closestReplica, part, TrueTime(0, 0));
     } else {
         fprintf(stderr, "option -m is required\n");
         exit(0);
