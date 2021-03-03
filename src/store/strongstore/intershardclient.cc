@@ -35,10 +35,17 @@ namespace strongstore
         }
     }
 
-    void InterShardClient::PrepareOK(int coordShard, uint64_t txnID, uint64_t prepareTS)
+    void InterShardClient::PrepareOK(int coordShard, uint64_t txnID, int participantShard, uint64_t prepareTS)
     {
-        Debug("PrepareOK: %d %lu %lu", coordShard, txnID, prepareTS);
+        Debug("PrepareOK: %d %lu %d %lu", coordShard, txnID, participantShard, prepareTS);
 
-        sclient[coordShard]->PrepareOK(txnID, prepareTS);
+        sclient[coordShard]->PrepareOK(txnID, participantShard, prepareTS);
+    }
+    
+    void InterShardClient::PrepareAbort(int coordShard, uint64_t txnID)
+    {
+        Debug("PrepareAbort: %d %lu", coordShard, txnID);
+
+        sclient[coordShard]->PrepareAbort(txnID);
     }
 };

@@ -53,7 +53,7 @@ public:
     int Get(uint64_t id, const std::string &key, std::pair<Timestamp, std::string> &value);
     int Get(uint64_t id, const std::string &key, const Timestamp &timestamp, std::pair<Timestamp, std::string> &value);
     int Prepare(uint64_t id, const Transaction &txn);
-    void Commit(uint64_t id, uint64_t timestamp);
+    bool Commit(uint64_t id, uint64_t timestamp);
     void Abort(uint64_t id, const Transaction &txn = Transaction());
     void Load(const std::string &key, const std::string &value, const Timestamp &timestamp);
 

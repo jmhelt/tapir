@@ -36,7 +36,7 @@
 #include "lib/configuration.h"
 #include "lib/udptransport.h"
 #include "replication/vr/client.h"
-#include "store/common/frontend/bufferclient.h"
+#include "store/strongstore/strongbufferclient.h"
 #include "store/common/frontend/client.h"
 #include "store/common/partitioner.h"
 #include "store/common/truetime.h"
@@ -72,6 +72,9 @@ private:
 
     // local Prepare function
     int Prepare(uint64_t &ts);
+
+    // choose coordinator from participants
+    int ChooseCoordinator(const std::set<int> &participants);
 
     // Unique ID for this client.
     uint64_t client_id;
