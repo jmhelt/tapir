@@ -207,7 +207,7 @@ Store::Prepare(uint64_t id, const Transaction &txn, const Timestamp &timestamp, 
     return REPLY_OK;
 }
     
-void
+bool
 Store::Commit(uint64_t id, uint64_t timestamp)
 {
 
@@ -221,6 +221,8 @@ Store::Commit(uint64_t id, uint64_t timestamp)
     Commit(p.first, p.second);
 
     prepared.erase(id);
+
+    return !p.second.getWriteSet().empty();
 }
 
 void

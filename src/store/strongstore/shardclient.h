@@ -36,14 +36,26 @@
 #include "lib/message.h"
 #include "lib/transport.h"
 #include "replication/vr/client.h"
-#include "store/common/frontend/client.h"
-#include "store/common/frontend/txnclient.h"
+#include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore
 {
+    // Timeouts for various operations
+    const int GET_TIMEOUT = 250;
+    const int GET_RETRIES = 3;
+    // Only used for QWStore
+    const int PUT_TIMEOUT = 250;
+    const int PREPARE_TIMEOUT = 1000;
+    const int PREPARE_RETRIES = 5;
+
+    const int COMMIT_TIMEOUT = 1000;
+    const int COMMIT_RETRIES = 5;
+
+    const int ABORT_TIMEOUT = 1000;
+    const int RETRY_TIMEOUT = 500000;
 
     enum Mode
     {
@@ -54,7 +66,7 @@ namespace strongstore
         MODE_SPAN_LOCK
     };
 
-    class ShardClient : public TxnClient
+    class ShardClient
     {
     public:
         /* Constructor needs path to shard config. */
@@ -81,11 +93,15 @@ namespace strongstore
                  Promise *promise = NULL);
         void Prepare(uint64_t id,
                      const Transaction &txn,
-                     const Timestamp &timestamp = Timestamp(),
+                     int coordShard,
+                     int nParticipants,
                      Promise *promise = NULL);
         void PrepareOK(uint64_t id,
+                       int participantShard,
                        uint64_t prepareTS,
                        Promise *promise = NULL);
+        void PrepareAbort(uint64_t id,
+                          Promise *promise = NULL);
         void Commit(uint64_t id,
                     const Transaction &txn,
                     uint64_t timestamp,
@@ -111,6 +127,7 @@ namespace strongstore
         void GetCallback(const std::string &, const std::string &);
         void PrepareCallback(const std::string &, const std::string &);
         void PrepareOKCallback(const string &, const string &);
+        void PrepareAbortCallback(const string &, const string &);
         void CommitCallback(const std::string &, const std::string &);
         void AbortCallback(const std::string &, const std::string &);
 

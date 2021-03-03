@@ -90,7 +90,7 @@ LockStore::Prepare(uint64_t id, const Transaction &txn)
     }
 }
 
-void
+bool
 LockStore::Commit(uint64_t id, uint64_t timestamp)
 {
     Debug("[%lu] COMMIT", id);
@@ -106,6 +106,8 @@ LockStore::Commit(uint64_t id, uint64_t timestamp)
     dropLocks(id, txn);
 
     prepared.erase(id);
+
+    return !txn.getWriteSet().empty();
 }
 
 void

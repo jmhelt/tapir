@@ -125,7 +125,7 @@ OCCStore::Prepare(uint64_t id, const Transaction &txn)
     return REPLY_OK;
 }
 
-void
+bool
 OCCStore::Commit(uint64_t id, uint64_t timestamp)
 {
     Debug("[%lu] COMMIT", id);
@@ -140,6 +140,8 @@ OCCStore::Commit(uint64_t id, uint64_t timestamp)
     }
 
     prepared.erase(id);
+
+    return !txn.getWriteSet().empty();
 }
 
 void

@@ -76,4 +76,10 @@ Replica::UnloggedUpcall(const string &op, string &res)
     app->UnloggedUpcall(op, res);
 }
 
+void
+Replica::LeaderStatusUpcall(bool AmLeader)
+{
+    app->LeaderStatusUpcall(AmLeader);
+}
+
 } // namespace replication

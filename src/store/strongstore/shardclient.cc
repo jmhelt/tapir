@@ -163,12 +163,9 @@ namespace strongstore
 
     void
     ShardClient::Prepare(uint64_t id, const Transaction &txn,
-                         const Timestamp &timestamp, Promise *promise)
+                         int coordShard, int nParticipants, Promise *promise)
     {
         Debug("[shard %i] Sending PREPARE: %lu", shard, id);
-
-        int coordShard = 0;
-        int coordReplica = 0;
 
         // create prepare request
         string request_str;
@@ -176,7 +173,7 @@ namespace strongstore
         request.set_op(Request::PREPARE);
         request.set_txnid(id);
         request.mutable_prepare()->set_coordinatorshard(coordShard);
-        request.mutable_prepare()->set_coordinatorreplica(coordReplica);
+        request.mutable_prepare()->set_nparticipants(nParticipants);
         txn.serialize(request.mutable_prepare()->mutable_txn());
         request.SerializeToString(&request_str);
 
@@ -191,6 +188,7 @@ namespace strongstore
     }
 
     void ShardClient::PrepareOK(uint64_t id,
+                                int participantShard, 
                                 uint64_t prepareTS,
                                 Promise *promise)
     {
@@ -201,6 +199,7 @@ namespace strongstore
         Request request;
         request.set_op(Request::PREPARE_OK);
         request.set_txnid(id);
+        request.mutable_prepareok()->set_participantshard(participantShard);
         request.mutable_prepareok()->set_timestamp(prepareTS);
         request.SerializeToString(&request_str);
 
@@ -208,6 +207,28 @@ namespace strongstore
             waiting = promise;
             client->Invoke(request_str,
                            bind(&ShardClient::PrepareOKCallback,
+                                this,
+                                placeholders::_1,
+                                placeholders::_2));
+        });
+    }
+
+    void ShardClient::PrepareAbort(uint64_t id,
+                                    Promise *promise)
+    {
+        Debug("[shard %i] Sending PREPARE_OK: %lu", shard, id);
+
+        // create prepare_ok request
+        string request_str;
+        Request request;
+        request.set_op(Request::PREPARE_ABORT);
+        request.set_txnid(id);
+        request.SerializeToString(&request_str);
+
+        transport->Timer(0, [=]() {
+            waiting = promise;
+            client->Invoke(request_str,
+                           bind(&ShardClient::PrepareAbortCallback,
                                 this,
                                 placeholders::_1,
                                 placeholders::_2));
@@ -309,7 +330,26 @@ namespace strongstore
         Reply reply;
 
         reply.ParseFromString(reply_str);
-        Debug("[shard %i] Received PREPARE callback [%d]", shard, reply.status());
+        Debug("[shard %i] Received COMMIT callback [%d]", shard, reply.status());
+
+        if (waiting != NULL)
+        {
+            Promise *w = waiting;
+            waiting = NULL;
+            ASSERT(reply.has_timestamp());
+            Debug("[shard %i] COMMIT timestamp [%lu]", shard, reply.timestamp());
+            w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
+        }
+    }
+
+    /* Callback from a shard replica on prepare_ok operation completion. */
+    void
+    ShardClient::PrepareOKCallback(const string &request_str, const string &reply_str)
+    {
+        Reply reply;
+
+        reply.ParseFromString(reply_str);
+        Debug("[shard %i] Received PREPARE_OK callback [%d]", shard, reply.status());
 
         if (waiting != NULL)
         {
@@ -326,14 +366,14 @@ namespace strongstore
         }
     }
 
-    /* Callback from a shard replica on prepare operation completion. */
+    /* Callback from a shard replica on prepare_abort operation completion. */
     void
-    ShardClient::PrepareOKCallback(const string &request_str, const string &reply_str)
+    ShardClient::PrepareAbortCallback(const string &request_str, const string &reply_str)
     {
         Reply reply;
 
         reply.ParseFromString(reply_str);
-        Debug("[shard %i] Received PREPARE_OK callback [%d]", shard, reply.status());
+        Debug("[shard %i] Received PREPARE_ABORT callback [%d]", shard, reply.status());
 
         if (waiting != NULL)
         {
