@@ -1,6 +1,5 @@
 syntax = "proto2";
 
-import "lib/transport-proto.proto";
 import "store/common/common-proto.proto";
 
 package strongstore.proto;
@@ -12,8 +11,13 @@ message GetMessage {
 
 message PrepareMessage {
     required TransactionMessage txn = 1;
-    required ReplicaAddressMessage coord = 2;
-    optional uint64 timestamp = 3;
+    required int32 coordinatorShard = 2;
+    required int32 coordinatorReplica = 3;
+    optional uint64 timestamp = 4;
+}
+
+message PrepareOKMessage {
+    required uint64 timestamp = 1;
 }
 
 message CommitMessage {
@@ -28,15 +32,18 @@ message Request {
      enum Operation {
           GET = 1;
           PREPARE = 2;
-          COMMIT = 3;
-          ABORT = 4;
+          PREPARE_OK = 3;
+          PREPARE_ABORT = 4;
+          COMMIT = 5;
+          ABORT = 6;
      }	
      required Operation op = 1;
      required uint64 txnid = 2;
      optional GetMessage get = 3;
      optional PrepareMessage prepare = 4;
-     optional CommitMessage commit = 5;
-     optional AbortMessage abort = 6;
+     optional PrepareOKMessage prepareOK = 5;
+     optional CommitMessage commit = 6;
+     optional AbortMessage abort = 7;
 }
 
 message Reply {
