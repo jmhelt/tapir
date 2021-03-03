@@ -1,8 +1,8 @@
 // -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
 /***********************************************************************
  *
- * store/strongstore/server.h:
- *   A single transactional server replica.
+ * store/strongstore/strongclient.h:
+ *   Single shard strong consistency transactional client interface.
  *
  * Copyright 2015 Irene Zhang <iyzhang@cs.washington.edu>
  *                Naveen Kr. Sharma <naveenks@cs.washington.edu>
@@ -29,43 +29,34 @@
  *
  **********************************************************************/
 
-#ifndef _STRONG_SERVER_H_
-#define _STRONG_SERVER_H_
+#ifndef _STRONG_INTERSHARDCLIENT_H_
+#define _STRONG_INTERSHARDCLIENT_H_
 
+#include "lib/message.h"
 #include "lib/transport.h"
-#include "replication/vr/replica.h"
-#include "store/common/truetime.h"
-#include "store/server.h"
-#include "store/strongstore/intershardclient.h"
-#include "store/strongstore/occstore.h"
-#include "store/strongstore/lockstore.h"
-#include "store/strongstore/strong-proto.pb.h"
+#include "replication/vr/client.h"
+#include "store/strongstore/shardclient.h"
+
+#include <vector>
+
 
 namespace strongstore
 {
 
-    class Server : public replication::AppReplica, public ::Server
+    class InterShardClient
     {
     public:
-        Server(InterShardClient &shardClient, int groupIdx, int myIdx,
-               Mode mode, uint64_t skew, uint64_t error);
-        virtual ~Server();
+        InterShardClient(transport::Configuration &config, Transport *transport, int nShards);
+        ~InterShardClient();
 
-        virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2) override;
-        virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2) override;
-        virtual void UnloggedUpcall(const string &str1, string &str2) override;
-        void Load(const string &key, const string &value, const Timestamp timestamp) override;
-        virtual inline Stats &GetStats() override { return store->GetStats(); }
+        void PrepareOK(int coordShard, uint64_t txnID, uint64_t prepareTS);
 
     private:
-        InterShardClient &shardClient;
-        int groupIdx;
-        int myIdx;
-        Mode mode;
-        TxnStore *store;
-        TrueTime timeServer;
+        uint64_t clientID;
+        int nShards;
+        std::vector<ShardClient*> sclient;
     };
 
 } // namespace strongstore
 
-#endif /* _STRONG_SERVER_H_ */
+#endif /* _STRONG_INTERSHARDCLIENT_H_ */

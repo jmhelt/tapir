@@ -31,177 +31,229 @@
 
 #include "store/strongstore/server.h"
 
-namespace strongstore {
-
-using namespace std;
-using namespace proto;
-using namespace replication;
-
-Server::Server(Mode mode, uint64_t skew, uint64_t error) : mode(mode)
+namespace strongstore
 {
-    timeServer = TrueTime(skew, error);
 
-    switch (mode) {
-    case MODE_LOCK:
-    case MODE_SPAN_LOCK:
-        store = new strongstore::LockStore();
-        break;
-    case MODE_OCC:
-    case MODE_SPAN_OCC:
-        store = new strongstore::OCCStore();
-        break;
-    default:
-        NOT_REACHABLE();
-    }
-}
+    using namespace std;
+    using namespace proto;
+    using namespace replication;
 
-Server::~Server()
-{
-    delete store;
-}
+    Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
+                   Mode mode, uint64_t skew, uint64_t error) : shardClient(shardClient), groupIdx(groupIdx), myIdx(myIdx),
+                                                               mode(mode)
+    {
+        timeServer = TrueTime(skew, error);
 
-void
-Server::LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2)
-{
-    Debug("Received LeaderUpcall: %lu %s", opnum, str1.c_str());
-
-    Request request;
-    Reply reply;
-    int status;
-    
-    request.ParseFromString(str1);
-
-    switch (request.op()) {
-    case strongstore::proto::Request::GET:
-        if (request.get().has_timestamp()) {
-            pair<Timestamp, string> val;
-            status = store->Get(request.txnid(), request.get().key(),
-                               request.get().timestamp(), val);
-            if (status == 0) {
-                reply.set_value(val.second);
-            }
-        } else {
-            pair<Timestamp, string> val;
-            status = store->Get(request.txnid(), request.get().key(), val);
-            if (status == 0) {
-                reply.set_value(val.second);
-                reply.set_timestamp(val.first.getTimestamp());
-            }
+        switch (mode)
+        {
+        case MODE_LOCK:
+        case MODE_SPAN_LOCK:
+            store = new strongstore::LockStore();
+            break;
+        case MODE_OCC:
+        case MODE_SPAN_OCC:
+            store = new strongstore::OCCStore();
+            break;
+        default:
+            NOT_REACHABLE();
         }
-        replicate = false;
-        reply.set_status(status);
-        reply.SerializeToString(&str2);
-        break;
-    case strongstore::proto::Request::PREPARE:
-        // Prepare is the only case that is conditionally run at the leader
-        status = store->Prepare(request.txnid(),
-                                Transaction(request.prepare().txn()));
+    }
 
-        // if prepared, then replicate result
-        if (status == 0) {
-            replicate = true;
-            // get a prepare timestamp and send along to replicas
-            if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC) {
-                request.mutable_prepare()->set_timestamp(timeServer.GetTime());
+    Server::~Server()
+    {
+        delete store;
+    }
+
+    void
+    Server::LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2)
+    {
+        Debug("Received LeaderUpcall: %lu %s", opnum, str1.c_str());
+
+        Request request;
+        Reply reply;
+        int status;
+
+        request.ParseFromString(str1);
+
+        switch (request.op())
+        {
+        case strongstore::proto::Request::GET:
+            if (request.get().has_timestamp())
+            {
+                pair<Timestamp, string> val;
+                status = store->Get(request.txnid(), request.get().key(),
+                                    request.get().timestamp(), val);
+                if (status == 0)
+                {
+                    reply.set_value(val.second);
+                }
             }
-            request.SerializeToString(&str2);
-        } else {
-            // if abort, don't replicate
+            else
+            {
+                pair<Timestamp, string> val;
+                status = store->Get(request.txnid(), request.get().key(), val);
+                if (status == 0)
+                {
+                    reply.set_value(val.second);
+                    reply.set_timestamp(val.first.getTimestamp());
+                }
+            }
             replicate = false;
             reply.set_status(status);
             reply.SerializeToString(&str2);
-        }
-        break;
-    case strongstore::proto::Request::COMMIT:
-        replicate = true;
-        str2 = str1;
-        break;
-    case strongstore::proto::Request::ABORT:
-        replicate = true;
-        str2 = str1;
-        break;
-    default:
-        Panic("Unrecognized operation.");
-    }
-}
+            break;
+        case strongstore::proto::Request::PREPARE:
+            // Prepare is the only case that is conditionally run at the leader
+            status = store->Prepare(request.txnid(),
+                                    Transaction(request.prepare().txn()));
 
-/* Gets called when a command is issued using client.Invoke(...) to this
+            // if prepared, then replicate result
+            if (status == 0)
+            {
+                replicate = true;
+                // get a prepare timestamp and send along to replicas
+                if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
+                {
+                    request.mutable_prepare()->set_timestamp(timeServer.GetTime());
+                }
+                request.SerializeToString(&str2);
+            }
+            else
+            {
+                // if abort, don't replicate
+                replicate = false;
+                reply.set_status(status);
+                reply.SerializeToString(&str2);
+            }
+            break;
+        case strongstore::proto::Request::PREPARE_OK:
+            Debug("Received Prepare OK");
+            replicate = true;
+            str2 = str1;
+            // Decision d = coordinator->ReceivePrepareOK();
+            // if (d == Decision::COMMIT)
+            // {
+            //     status = store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
+            //     d = coordinator->ReceivePrepareOKCoord(status);
+            // }
+
+            // if (d == Decision::COMMIT)
+            // {
+            //     replicate = true;
+            //     request.mutable_prepareok()->set_timestamp();
+            //     request.SerializeToString(&str2);
+            // }
+            // else if (d == Decision::ABORT)
+            // {
+            //     replicate = false;
+            //     // TODO: Reply to client
+            // }
+            break;
+        case strongstore::proto::Request::COMMIT:
+            replicate = true;
+            str2 = str1;
+            break;
+        case strongstore::proto::Request::ABORT:
+            replicate = true;
+            str2 = str1;
+            break;
+        default:
+            Panic("Unrecognized operation.");
+        }
+    }
+
+    /* Gets called when a command is issued using client.Invoke(...) to this
  * replica group. 
  * opnum is the operation number.
  * str1 is the request string passed by the client.
  * str2 is the reply which will be sent back to the client.
  */
-void
-Server::ReplicaUpcall(opnum_t opnum,
-              const string &str1,
-              string &str2)
-{
-    Debug("Received Upcall: %lu %s", opnum, str1.c_str());
-    Request request;
-    Reply reply;
-    int status = 0;
-    
-    request.ParseFromString(str1);
+    void
+    Server::ReplicaUpcall(opnum_t opnum,
+                          const string &str1,
+                          string &str2)
+    {
+        Debug("Received Upcall: %lu %s", opnum, str1.c_str());
+        Request request;
+        Reply reply;
+        int status = 0;
 
-    switch (request.op()) {
-    case strongstore::proto::Request::GET:
-        return;
-    case strongstore::proto::Request::PREPARE:
-        // get a prepare timestamp and return to client
-        store->Prepare(request.txnid(),
-                       Transaction(request.prepare().txn()));
-        if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC) {
-            reply.set_timestamp(request.prepare().timestamp());
+        request.ParseFromString(str1);
+
+        switch (request.op())
+        {
+        case strongstore::proto::Request::GET:
+            return;
+        case strongstore::proto::Request::PREPARE:
+            // get a prepare timestamp and return to client
+            store->Prepare(request.txnid(),
+                           Transaction(request.prepare().txn()));
+            if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
+            {
+                reply.set_timestamp(request.prepare().timestamp());
+            }
+
+            shardClient.PrepareOK(request.prepare().coordinatorshard(), request.txnid(), timeServer.GetTime());
+
+            break;
+        case strongstore::proto::Request::PREPARE_OK:
+            Debug("Replicated PrepareOK");
+            break;
+        case strongstore::proto::Request::PREPARE_ABORT:
+            break;
+        case strongstore::proto::Request::COMMIT:
+            store->Commit(request.txnid(), request.commit().timestamp());
+            break;
+        case strongstore::proto::Request::ABORT:
+            store->Abort(request.txnid(), Transaction(request.abort().txn()));
+            break;
+        default:
+            Panic("Unrecognized operation.");
         }
-        break;
-    case strongstore::proto::Request::COMMIT:
-        store->Commit(request.txnid(), request.commit().timestamp());
-        break;
-    case strongstore::proto::Request::ABORT:
-        store->Abort(request.txnid(), Transaction(request.abort().txn()));
-        break;
-    default:
-        Panic("Unrecognized operation.");
+        reply.set_status(status);
+        reply.SerializeToString(&str2);
     }
-    reply.set_status(status);
-    reply.SerializeToString(&str2);
-}
 
-void
-Server::UnloggedUpcall(const string &str1, string &str2)
-{
-    Request request;
-    Reply reply;
-    int status;
-    
-    request.ParseFromString(str1);
+    void
+    Server::UnloggedUpcall(const string &str1, string &str2)
+    {
+        Request request;
+        Reply reply;
+        int status;
 
-    ASSERT(request.op() == strongstore::proto::Request::GET);
+        request.ParseFromString(str1);
 
-    if (request.get().has_timestamp()) {
-        pair<Timestamp, string> val;
-        status = store->Get(request.txnid(), request.get().key(),
-                            request.get().timestamp(), val);
-        if (status == 0) {
-            reply.set_value(val.second);
+        ASSERT(request.op() == strongstore::proto::Request::GET);
+
+        if (request.get().has_timestamp())
+        {
+            pair<Timestamp, string> val;
+            status = store->Get(request.txnid(), request.get().key(),
+                                request.get().timestamp(), val);
+            if (status == 0)
+            {
+                reply.set_value(val.second);
+            }
         }
-    } else {
-        pair<Timestamp, string> val;
-        status = store->Get(request.txnid(), request.get().key(), val);
-        if (status == 0) {
-            reply.set_value(val.second);
-            reply.set_timestamp(val.first.getTimestamp());
+        else
+        {
+            pair<Timestamp, string> val;
+            status = store->Get(request.txnid(), request.get().key(), val);
+            if (status == 0)
+            {
+                reply.set_value(val.second);
+                reply.set_timestamp(val.first.getTimestamp());
+            }
         }
+
+        reply.set_status(status);
+        reply.SerializeToString(&str2);
     }
-    
-    reply.set_status(status);
-    reply.SerializeToString(&str2);
-}
 
-void
-Server::Load(const string &key, const string &value, const Timestamp timestamp)
-{
-    store->Load(key, value, timestamp);
-}
+    void
+    Server::Load(const string &key, const string &value, const Timestamp timestamp)
+    {
+        store->Load(key, value, timestamp);
+    }
 
 } // namespace strongstore
