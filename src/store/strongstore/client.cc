@@ -56,6 +56,7 @@ Client::Client(Mode mode, string configPath, int nShards,
 
     /* Start a client for time stamp server. */
     if (mode == MODE_OCC) {
+        // TODO: Fix this config path
         string tssConfigPath = configPath + ".tss.config";
         ifstream tssConfigStream(tssConfigPath);
         if (tssConfigStream.fail()) {
@@ -67,8 +68,7 @@ Client::Client(Mode mode, string configPath, int nShards,
     }
 
     /* Start a client for each shard. */
-    string shardConfigPath = configPath + ".config";
-    ifstream configStream(shardConfigPath);
+    ifstream configStream(configPath);
     if (configStream.fail()) {
         fprintf(stderr, "unable to read configuration file: %s\n",
                 configPath.c_str());
