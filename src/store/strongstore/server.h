@@ -36,6 +36,7 @@
 #include "replication/vr/replica.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
+#include "store/strongstore/coordinator.h"
 #include "store/strongstore/intershardclient.h"
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/lockstore.h"
@@ -54,16 +55,20 @@ namespace strongstore
         virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2) override;
         virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2) override;
         virtual void UnloggedUpcall(const string &str1, string &str2) override;
+        virtual void LeaderStatusUpcall(bool AmLeader) override { AmLeader = AmLeader; }
         void Load(const string &key, const string &value, const Timestamp timestamp) override;
         virtual inline Stats &GetStats() override { return store->GetStats(); }
 
     private:
+        TrueTime timeServer;
+        Coordinator coordinator;
         InterShardClient &shardClient;
+        uint64_t timeMaxWrite;
         int groupIdx;
         int myIdx;
         Mode mode;
         TxnStore *store;
-        TrueTime timeServer;
+        bool AmLeader;
     };
 
 } // namespace strongstore

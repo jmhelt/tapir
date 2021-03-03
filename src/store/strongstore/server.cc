@@ -31,6 +31,8 @@
 
 #include "store/strongstore/server.h"
 
+#include <algorithm>
+
 namespace strongstore
 {
 
@@ -39,8 +41,9 @@ namespace strongstore
     using namespace replication;
 
     Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
-                   Mode mode, uint64_t skew, uint64_t error) : shardClient(shardClient), groupIdx(groupIdx), myIdx(myIdx),
-                                                               mode(mode)
+                   Mode mode, uint64_t skew, uint64_t error) : timeServer{skew, error}, coordinator{timeServer},
+                                                               shardClient(shardClient), timeMaxWrite{0},
+                                                               groupIdx(groupIdx), myIdx(myIdx), mode(mode), AmLeader{false}
     {
         timeServer = TrueTime(skew, error);
 
@@ -72,6 +75,7 @@ namespace strongstore
         Request request;
         Reply reply;
         int status;
+        CommitDecision cd;
 
         request.ParseFromString(str1);
 
@@ -103,51 +107,120 @@ namespace strongstore
             reply.SerializeToString(&str2);
             break;
         case strongstore::proto::Request::PREPARE:
-            // Prepare is the only case that is conditionally run at the leader
-            status = store->Prepare(request.txnid(),
-                                    Transaction(request.prepare().txn()));
 
-            // if prepared, then replicate result
-            if (status == 0)
+            if (groupIdx == request.prepare().coordinatorshard()) // I am coordinator
             {
-                replicate = true;
-                // get a prepare timestamp and send along to replicas
-                if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
+                Debug("Coordinator for transaction: %lu", request.txnid());
+                Decision d = coordinator.StartTransaction(request.txnid(), request.prepare().nparticipants(), Transaction(request.prepare().txn()));
+                if (d == Decision::TRY_COORD)
                 {
-                    request.mutable_prepare()->set_timestamp(timeServer.GetTime());
+                    Debug("Trying fast path commit");
+                    status = store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
+                    if (!status)
+                    {
+                        cd = coordinator.ReceivePrepareOK(request.txnid(), groupIdx, timeMaxWrite + 1);
+                        ASSERT(cd.d == Decision::COMMIT);
+
+                        // request.clear_prepare();
+                        request.set_op(proto::Request::COMMIT);
+                        request.mutable_commit()->set_timestamp(cd.commitTime);
+
+                        replicate = true;
+                        request.SerializeToString(&str2);
+                    }
+                    else // Failed to commit
+                    {
+                        Debug("Fast path commit failed");
+                        coordinator.Abort(request.txnid());
+                        replicate = false;
+                        reply.set_status(status);
+                        reply.SerializeToString(&str2);
+                    }
                 }
-                request.SerializeToString(&str2);
+                else // Wait for other participants
+                {
+                    Debug("Waiting for other participants");
+                    replicate = false;
+                }
             }
-            else
+            else // I am participant
             {
-                // if abort, don't replicate
-                replicate = false;
-                reply.set_status(status);
-                reply.SerializeToString(&str2);
+                Debug("Participant for transaction: %lu", request.txnid());
+                status = store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
+                if (!status)
+                {
+                    request.mutable_prepare()->set_timestamp(timeMaxWrite + 1);
+
+                    replicate = true;
+                    request.SerializeToString(&str2);
+                }
+                else
+                {
+                    Debug("Prepare failed");
+                    store->Abort(request.txnid(), Transaction(request.prepare().txn()));
+                    shardClient.PrepareAbort(request.prepare().coordinatorshard(), request.txnid());
+                    replicate = false;
+                    reply.set_status(status);
+                    reply.SerializeToString(&str2);
+                }
             }
+
+            // // Prepare is the only case that is conditionally run at the leader
+            // status = store->Prepare(request.txnid(),
+            //                         Transaction(request.prepare().txn()));
+
+            // // if prepared, then replicate result
+            // if (status == 0)
+            // {
+            //     replicate = true;
+            //     // get a prepare timestamp and send along to replicas
+            //     if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
+            //     {
+            //         request.mutable_prepare()->set_timestamp(timeServer.GetTime());
+            //     }
+            //     request.SerializeToString(&str2);
+            // }
+            // else
+            // {
+            //     // if abort, don't replicate
+            //     replicate = false;
+            //     reply.set_status(status);
+            //     reply.SerializeToString(&str2);
+            // }
             break;
         case strongstore::proto::Request::PREPARE_OK:
             Debug("Received Prepare OK");
-            replicate = true;
-            str2 = str1;
-            // Decision d = coordinator->ReceivePrepareOK();
-            // if (d == Decision::COMMIT)
-            // {
-            //     status = store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
-            //     d = coordinator->ReceivePrepareOKCoord(status);
-            // }
+            cd = coordinator.ReceivePrepareOK(request.txnid(), request.prepareok().participantshard(), request.prepareok().timestamp());
+            if (cd.d == Decision::TRY_COORD)
+            {
+                Debug("Received Prepare OK from all participants");
+                status = store->Prepare(request.txnid(), coordinator.GetTransaction(request.txnid()));
+                if (!status)
+                {
+                    cd = coordinator.ReceivePrepareOK(request.txnid(), groupIdx, timeMaxWrite + 1);
+                    ASSERT(cd.d == Decision::COMMIT);
 
-            // if (d == Decision::COMMIT)
-            // {
-            //     replicate = true;
-            //     request.mutable_prepareok()->set_timestamp();
-            //     request.SerializeToString(&str2);
-            // }
-            // else if (d == Decision::ABORT)
-            // {
-            //     replicate = false;
-            //     // TODO: Reply to client
-            // }
+                    request.clear_prepareok();
+                    request.set_op(proto::Request::COMMIT);
+                    request.mutable_commit()->set_timestamp(cd.commitTime);
+
+                    replicate = true;
+                    request.SerializeToString(&str2);
+                }
+                else // Failed to commit
+                {
+                    Debug("Fast path commit failed");
+                    coordinator.Abort(request.txnid());
+                    replicate = false;
+                    reply.set_status(status);
+                    reply.SerializeToString(&str2);
+                }
+            }
+            else // Wait for other participants
+            {
+                Debug("Waiting for other participants");
+                replicate = false;
+            }
             break;
         case strongstore::proto::Request::COMMIT:
             replicate = true;
@@ -186,14 +259,12 @@ namespace strongstore
             return;
         case strongstore::proto::Request::PREPARE:
             // get a prepare timestamp and return to client
-            store->Prepare(request.txnid(),
-                           Transaction(request.prepare().txn()));
-            if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
-            {
-                reply.set_timestamp(request.prepare().timestamp());
-            }
+            store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
 
-            shardClient.PrepareOK(request.prepare().coordinatorshard(), request.txnid(), timeServer.GetTime());
+            if (AmLeader)
+            {
+                shardClient.PrepareOK(request.prepare().coordinatorshard(), request.txnid(), groupIdx, request.prepare().timestamp());
+            }
 
             break;
         case strongstore::proto::Request::PREPARE_OK:
@@ -202,7 +273,19 @@ namespace strongstore
         case strongstore::proto::Request::PREPARE_ABORT:
             break;
         case strongstore::proto::Request::COMMIT:
-            store->Commit(request.txnid(), request.commit().timestamp());
+            Debug("Received COMMIT");
+            if (request.has_prepare()) // Fast path commit
+            {
+                Debug("Fast path COMMIT");
+                store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
+            }
+            if (store->Commit(request.txnid(), request.commit().timestamp()))
+            {
+                timeMaxWrite = std::max(timeMaxWrite, request.commit().timestamp());
+            }
+            coordinator.Commit(request.txnid());
+            reply.set_timestamp(request.commit().timestamp());
+            Debug("COMMIT timestamp: %lu", request.commit().timestamp());
             break;
         case strongstore::proto::Request::ABORT:
             store->Abort(request.txnid(), Transaction(request.abort().txn()));

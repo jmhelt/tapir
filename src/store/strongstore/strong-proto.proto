@@ -12,12 +12,13 @@ message GetMessage {
 message PrepareMessage {
     required TransactionMessage txn = 1;
     required int32 coordinatorShard = 2;
-    required int32 coordinatorReplica = 3;
+    required int32 nParticipants = 3;
     optional uint64 timestamp = 4;
 }
 
 message PrepareOKMessage {
     required uint64 timestamp = 1;
+    required int32 participantShard = 2;
 }
 
 message CommitMessage {

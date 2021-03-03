@@ -89,6 +89,7 @@ VRReplica::VRReplica(transport::Configuration config, int groupIdx, int myIdx,
             CloseBatch();
         });
 
+    LeaderStatusUpcall(AmLeader());
     if (AmLeader()) {
         nullCommitTimeout->Start();
     } else {
@@ -227,6 +228,7 @@ VRReplica::EnterView(view_t newview)
     view = newview;
     status = STATUS_NORMAL;
     lastBatchEnd = lastOp;
+    LeaderStatusUpcall(AmLeader());
 
     if (AmLeader()) {
         viewChangeTimeout->Stop();
@@ -250,6 +252,7 @@ VRReplica::StartViewChange(view_t newview)
 
     view = newview;
     status = STATUS_VIEW_CHANGE;
+    LeaderStatusUpcall(AmLeader());
 
     viewChangeTimeout->Reset();
     nullCommitTimeout->Stop();

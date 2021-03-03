@@ -2,11 +2,12 @@
   "replication_protocol": "strong",
   "client_protocol_mode": "span-lock",
   "server_names": ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
-  "num_shards": 1,
+  "num_shards": 2,
   "shard_config": "shard.config",
   "replica_config": "replica.config",
   "fault_tolerance": 1,
   "shards": [
+    ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
     ["us-east-1-0", "us-east-1-1", "us-east-1-2"]
   ],
   "server_port": 7087,
@@ -36,7 +37,7 @@
   "server_debug_output": true,
   "server_debug_stats": false,
   "client_debug_stats": false,
-  "client_experiment_length": 10,
+  "client_experiment_length": 5,
   "client_ramp_down": 0,
   "client_ramp_up": 0,
   "default_remote_shell": "bash",

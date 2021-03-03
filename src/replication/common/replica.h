@@ -61,6 +61,8 @@ public:
     virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2) { };
     // Invoke call back for unreplicated operations run on only one replica
     virtual void UnloggedUpcall(const string &str1, string &str2) { };
+    // Invoke callback on leader status change
+    virtual void LeaderStatusUpcall(const bool AmLeader) { };
 };
 
 class Replica : public TransportReceiver
@@ -78,6 +80,7 @@ protected:
     void UnloggedUpcall(const string &op, string &res);
     template<class MSG> void ExecuteUnlogged(const UnloggedRequest & msg,
                                                MSG &reply);
+    void LeaderStatusUpcall(bool AmLeader);
     
 protected:
     transport::Configuration configuration;

@@ -235,7 +235,8 @@ main(int argc, char **argv)
         status = true;
 
         // Decide which type of retwis transaction it is going to be.
-        ttype = rand() % 100;
+        // ttype = rand() % 100;
+        ttype = 0;
 
         if (ttype < 5) {
             Debug("Transaction: Add user");
