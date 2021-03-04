@@ -38,6 +38,7 @@
 #include "lib/transport.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #define RDebug(fmt, ...) Debug("[%d] " fmt, myIdx, ##__VA_ARGS__)
 #define RNotice(fmt, ...) Notice("[%d] " fmt, myIdx, ##__VA_ARGS__)
@@ -131,33 +132,39 @@ VRReplica::CommitUpTo(opnum_t upto)
         /* Execute it */
         RDebug("Executing request " FMT_OPNUM, lastCommitted);
         ReplyMessage reply;
-        Execute(lastCommitted, entry->request, reply);
-
-        reply.set_view(entry->viewstamp.view);
-        reply.set_opnum(entry->viewstamp.opnum);
-        reply.set_clientreqid(entry->request.clientreqid());
+        std::unordered_set<RequestID> resClientIDs{{entry->request.clientid(), entry->request.clientreqid()}};
+        Execute(lastCommitted, entry->request, reply, resClientIDs);
         
         /* Mark it as committed */
         log.SetStatus(lastCommitted, LOG_STATE_COMMITTED);
 
-        // Store reply in the client table
-        ClientTableEntry &cte =
-            clientTable[entry->request.clientid()];
-        if (cte.lastReqId <= entry->request.clientreqid()) {
-            cte.lastReqId = entry->request.clientreqid();
-            cte.replied = true;
-            cte.reply = reply;            
-        } else {
-            // We've subsequently prepared another operation from the
-            // same client. So this request must have been completed
-            // at the client, and there's no need to record the
-            // result.
-        }
-        
-        /* Send reply */
-        auto iter = clientAddresses.find(entry->request.clientid());
-        if (iter != clientAddresses.end()) {
-            transport->SendMessage(this, *iter->second, reply);
+        reply.set_view(entry->viewstamp.view);
+        reply.set_opnum(entry->viewstamp.opnum);
+
+        for (RequestID rid : resClientIDs) {
+            Debug("Responding to request: %lu %lu", rid.clientID, rid.requestID);
+            reply.set_clientreqid(rid.requestID);
+
+            // Store reply in the client table
+            ClientTableEntry &cte = clientTable[rid.clientID];
+            ASSERT(cte.replied == false);
+            if (cte.lastReqId <= rid.requestID) {
+                cte.lastReqId = rid.requestID;
+                cte.replied = true;
+                cte.reply = reply;            
+            } else {
+                // We've subsequently prepared another operation from the
+                // same client. So this request must have been completed
+                // at the client, and there's no need to record the
+                // result.
+            }
+
+            /* Send reply */
+            auto iter = clientAddresses.find(rid.clientID);
+            if (iter != clientAddresses.end()) {
+                Debug("Sent");
+                transport->SendMessage(this, *iter->second, reply);
+            }
         }
     }
 }
@@ -456,23 +463,30 @@ VRReplica::HandleRequest(const TransportAddress &remote,
     // Leader Upcall
     bool replicate = false;
     string res;
-    LeaderUpcall(lastCommitted, msg.req().op(), replicate, res);
-    ClientTableEntry &cte =
-        clientTable[msg.req().clientid()];
+    RequestID rid{msg.req().clientid(), msg.req().clientreqid()};
+    Debug("Received request: %lu %lu", rid.clientID, rid.requestID);
+    std::unordered_set<RequestID> resClientIDs{rid};
+    LeaderUpcall(lastCommitted, msg.req().op(), replicate, res, resClientIDs);
 
     // Check whether this request should be committed to replicas
     if (!replicate) {
-        RDebug("Executing request failed. Not committing to replicas");
+        RDebug("Not replicating to replicas");
         ReplyMessage reply;
-
         reply.set_reply(res);
         reply.set_view(0);
         reply.set_opnum(0);
-        reply.set_clientreqid(msg.req().clientreqid());
-        cte.replied = true;
-        cte.reply = reply;
-        transport->SendMessage(this, remote, reply);
+        for (RequestID rid : resClientIDs) {
+            Debug("Responding to request: %lu %lu", rid.clientID, rid.requestID);
+            ClientTableEntry &cte = clientTable[rid.clientID];
+            ASSERT(cte.replied == false);
+            reply.set_clientreqid(rid.requestID);
+            cte.replied = true;
+            cte.reply = reply;
+            transport->SendMessage(this, *clientAddresses[rid.clientID], reply);
+        }
+
     } else {
+        ASSERT(resClientIDs.size() == 1 && *resClientIDs.begin() == rid);
         Request request;
         request.set_op(res);
         request.set_clientid(msg.req().clientid());

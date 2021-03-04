@@ -162,7 +162,7 @@ VRClient::HandleReply(const TransportAddress &remote,
     uint64_t reqId = msg.clientreqid();
     auto it = pendingReqs.find(reqId);
     if (it == pendingReqs.end()) {
-        Debug("Received reply when no request was pending");
+        Debug("Received reply when no request was pending: %lu %lu", clientid, reqId);
         return;
     }
 

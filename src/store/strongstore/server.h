@@ -52,10 +52,13 @@ namespace strongstore
                Mode mode, uint64_t skew, uint64_t error);
         virtual ~Server();
 
-        virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2) override;
-        virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2) override;
+        virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2, std::unordered_set<replication::RequestID> &resRequestIDs) override;
+        virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2, std::unordered_set<replication::RequestID> &resRequestIDs) override;
         virtual void UnloggedUpcall(const string &str1, string &str2) override;
-        virtual void LeaderStatusUpcall(bool AmLeader) override { AmLeader = AmLeader; }
+        virtual void LeaderStatusUpcall(bool l) override {
+            Debug("Updating AmLeader: %d", l);
+            AmLeader = l;
+        }
         void Load(const string &key, const string &value, const Timestamp timestamp) override;
         virtual inline Stats &GetStats() override { return store->GetStats(); }
 
