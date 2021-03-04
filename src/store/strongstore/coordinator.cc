@@ -26,6 +26,13 @@ namespace strongstore
         return search->second.GetTransaction();
     }
 
+    int Coordinator::GetNParticipants(uint64_t txnID)
+    {
+        auto search = preparedTransactions.find(txnID);
+        ASSERT(search != preparedTransactions.end());
+        return search->second.GetNParticipants();
+    }
+
     Decision Coordinator::StartTransaction(replication::RequestID requestID, uint64_t txnID, int nParticipants, Transaction transaction)
     {
         uint64_t timeStart;

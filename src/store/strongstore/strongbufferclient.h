@@ -57,12 +57,6 @@ namespace strongstore
         // Prepare (Spanner requires a prepare timestamp)
         void Prepare(int coordShard, int nParticipants, Promise *promise = NULL);
 
-        // Commit the ongoing transaction.
-        void Commit(uint64_t timestamp = 0, Promise *promise = NULL);
-
-        // Abort the running transaction.
-        void Abort(Promise *promise = NULL);
-
     private:
         // Underlying single shard transaction client implementation.
         ShardClient *txnclient;

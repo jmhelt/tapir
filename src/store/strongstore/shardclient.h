@@ -99,13 +99,10 @@ namespace strongstore
         void PrepareOK(uint64_t id,
                        int participantShard,
                        uint64_t prepareTS,
-                       Promise *promise = NULL);
+                       replication::Client::continuation_t continuation);
         void PrepareAbort(uint64_t id,
                           Promise *promise = NULL);
-        void Commit(uint64_t id,
-                    const Transaction &txn,
-                    uint64_t timestamp,
-                    Promise *promise = NULL);
+        void Commit(int coordShard, uint64_t id, uint64_t timestamp);
         void Abort(uint64_t id,
                    const Transaction &txn,
                    Promise *promise = NULL);

@@ -23,6 +23,7 @@ message PrepareOKMessage {
 
 message CommitMessage {
     required uint64 timestamp = 1;
+    required int32 coordinatorShard = 2;
 }
 
 message AbortMessage {

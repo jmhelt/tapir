@@ -1,6 +1,7 @@
 
 #include "store/strongstore/intershardclient.h"
 
+#include <functional>
 #include <random>
 
 using namespace std;
@@ -39,9 +40,27 @@ namespace strongstore
     {
         Debug("PrepareOK: %d %lu %d %lu", coordShard, txnID, participantShard, prepareTS);
 
-        sclient[coordShard]->PrepareOK(txnID, participantShard, prepareTS);
+        sclient[coordShard]->PrepareOK(txnID, participantShard, prepareTS,
+                    std::bind(&InterShardClient::PrepareOKCallback,
+                                this,
+                                coordShard,
+                                txnID,
+                                participantShard,
+                                placeholders::_1,
+                                placeholders::_2));
     }
-    
+
+    void InterShardClient::PrepareOKCallback(int coordShard, uint64_t txnID, int participantShard, const string &request_str, const string &reply_str)
+    {
+        proto::Reply reply;
+        reply.ParseFromString(reply_str);
+        Debug("[shard %i] Received PREPARE_OK callback [%d]", participantShard, reply.status());
+
+        ASSERT(reply.has_timestamp());
+
+        sclient[participantShard]->Commit(coordShard, txnID, reply.timestamp());
+    }
+
     void InterShardClient::PrepareAbort(int coordShard, uint64_t txnID)
     {
         Debug("PrepareAbort: %d %lu", coordShard, txnID);
