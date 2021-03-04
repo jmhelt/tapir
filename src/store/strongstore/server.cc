@@ -125,6 +125,7 @@ namespace strongstore
 
                         request.set_op(proto::Request::COMMIT);
                         request.mutable_commit()->set_timestamp(cd.commitTime);
+                        request.mutable_commit()->set_coordinatorshard(groupIdx);
 
                         replicate = true;
                         request.SerializeToString(&str2);
@@ -171,7 +172,7 @@ namespace strongstore
                 }
             }
             break;
-        case strongstore::proto::Request::PREPARE_OK:
+        case strongstore::proto::Request::PREPARE_OK: // Only coordinator receives prepare OK
             Debug("Received Prepare OK");
             cd = coordinator.ReceivePrepareOK(requestID, request.txnid(), request.prepareok().participantshard(), request.prepareok().timestamp());
             if (cd.d == Decision::TRY_COORD)
@@ -185,7 +186,12 @@ namespace strongstore
 
                     request.clear_prepareok();
                     request.set_op(proto::Request::COMMIT);
+                    coordinator.GetTransaction(request.txnid()).serialize(request.mutable_prepare()->mutable_txn());
+                    request.mutable_prepare()->set_coordinatorshard(groupIdx);
+                    request.mutable_prepare()->set_nparticipants(coordinator.GetNParticipants(request.txnid()));
+                    request.mutable_prepare()->set_timestamp(cd.commitTime);
                     request.mutable_commit()->set_timestamp(cd.commitTime);
+                    request.mutable_commit()->set_coordinatorshard(groupIdx);
 
                     replicate = true;
                     request.SerializeToString(&str2);
@@ -269,20 +275,23 @@ namespace strongstore
                 timeMaxWrite = std::max(timeMaxWrite, request.commit().timestamp());
             }
 
-            Debug("AmLeader: %d", AmLeader);
-            if (AmLeader) {
-                Debug("Replying to client and shards");
-                // Reply to client and shards
-                reply.set_timestamp(request.commit().timestamp());
-                requestIDs = coordinator.GetRequestIDs(request.txnid());
-                resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
-            } else {
-                // Only leader needs to respond to client
-                resRequestIDs.erase(resRequestIDs.begin());
-            }
+            if (groupIdx == request.commit().coordinatorshard()) // I am coordinator
+            {
+                Debug("AmLeader: %d", AmLeader);
+                if (AmLeader) {
+                    Debug("Replying to client and shards");
+                    // Reply to client and shards
+                    reply.set_timestamp(request.commit().timestamp());
+                    requestIDs = coordinator.GetRequestIDs(request.txnid());
+                    resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
+                } else {
+                    // Only leader needs to respond to client
+                    resRequestIDs.erase(resRequestIDs.begin());
+                }
 
-            Debug("COMMIT timestamp: %lu", request.commit().timestamp());
-            coordinator.Commit(request.txnid());
+                Debug("COMMIT timestamp: %lu", request.commit().timestamp());
+                coordinator.Commit(request.txnid());
+            }
             break;
         case strongstore::proto::Request::ABORT:
             store->Abort(request.txnid(), Transaction(request.abort().txn()));

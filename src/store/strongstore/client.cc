@@ -292,10 +292,7 @@ namespace strongstore
     Client::Abort()
     {
         Debug("ABORT Transaction");
-        for (auto p : participants)
-        {
-            bclient[p]->Abort();
-        }
+        NOT_REACHABLE();
     }
 
     /* Return statistics of most recent transaction. */

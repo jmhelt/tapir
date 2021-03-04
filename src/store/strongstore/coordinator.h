@@ -44,6 +44,11 @@ namespace strongstore
             timeCommit_ = std::max(timeCommit_, timeStart);
         }
 
+        int GetNParticipants()
+        {
+            return nParticipants_;
+        }
+
         void SetNParticipants(int nParticipants)
         {
             nParticipants_ = nParticipants;
@@ -108,6 +113,8 @@ namespace strongstore
         std::unordered_set<replication::RequestID> GetRequestIDs(uint64_t txnID);
 
         Transaction GetTransaction(uint64_t txnID);
+
+        int GetNParticipants(uint64_t txnID);
 
         Decision StartTransaction(replication::RequestID requestID, uint64_t txnID, int nParticipants, Transaction transaction);
 

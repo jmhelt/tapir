@@ -190,7 +190,7 @@ namespace strongstore
     void ShardClient::PrepareOK(uint64_t id,
                                 int participantShard, 
                                 uint64_t prepareTS,
-                                Promise *promise)
+                                replication::Client::continuation_t continuation)
     {
         Debug("[shard %i] Sending PREPARE_OK: %lu", shard, id);
 
@@ -204,12 +204,12 @@ namespace strongstore
         request.SerializeToString(&request_str);
 
         transport->Timer(0, [=]() {
-            waiting = promise;
             client->Invoke(request_str,
-                           bind(&ShardClient::PrepareOKCallback,
-                                this,
-                                placeholders::_1,
-                                placeholders::_2));
+                           continuation);
+                        //    bind(&ShardClient::PrepareOKCallback,
+                        //         this,
+                        //         placeholders::_1,
+                        //         placeholders::_2));
         });
     }
 
@@ -236,8 +236,7 @@ namespace strongstore
     }
 
     void
-    ShardClient::Commit(uint64_t id, const Transaction &txn,
-                        uint64_t timestamp, Promise *promise)
+    ShardClient::Commit(int coordShard, uint64_t id, uint64_t timestamp)
     {
 
         Debug("[shard %i] Sending COMMIT: %lu", shard, id);
@@ -248,12 +247,11 @@ namespace strongstore
         request.set_op(Request::COMMIT);
         request.set_txnid(id);
         request.mutable_commit()->set_timestamp(timestamp);
+        request.mutable_commit()->set_coordinatorshard(coordShard);
         request.SerializeToString(&request_str);
 
         blockingBegin = new Promise(COMMIT_TIMEOUT);
         transport->Timer(0, [=]() {
-            waiting = promise;
-
             client->Invoke(request_str,
                            bind(&ShardClient::CommitCallback,
                                 this,
@@ -399,15 +397,6 @@ namespace strongstore
         reply.ParseFromString(reply_str);
         ASSERT(reply.status() == REPLY_OK);
 
-        ASSERT(blockingBegin != NULL);
-        blockingBegin->Reply(0);
-
-        if (waiting != NULL)
-        {
-            Promise *w = waiting;
-            waiting = NULL;
-            w->Reply(reply.status());
-        }
         Debug("[shard %i] Received COMMIT callback [%d]", shard, reply.status());
     }
 
