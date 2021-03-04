@@ -62,8 +62,7 @@ enum transmode_t {
 /**
  * System settings.
  */
-DEFINE_string(shard_config_path, "", "path to shard configuration file");
-DEFINE_string(rep_config_path, "", "path to replication configuration file");
+DEFINE_string(config_path, "", "path to replication configuration file");
 DEFINE_uint64(replica_idx, 0, "index of replica in replication configuration file");
 DEFINE_uint64(group_idx, 0, "index of the shard to which this replica belongs");
 DEFINE_uint64(num_shards, 1, "number of shards in the system");
@@ -216,19 +215,11 @@ int main(int argc, char **argv) {
   Notice("Starting server.");
 
   // parse replication configuration
-  std::ifstream rep_config_stream(FLAGS_rep_config_path);
-  if (rep_config_stream.fail()) {
-    std::cerr << "Unable to read configuration file: " << FLAGS_rep_config_path
+  std::ifstream config_stream(FLAGS_config_path);
+  if (config_stream.fail()) {
+    std::cerr << "Unable to read configuration file: " << FLAGS_config_path
               << std::endl;
   }
-
-  // parse shard configuration
-  std::ifstream shard_config_stream(FLAGS_shard_config_path);
-  if (shard_config_stream.fail()) {
-    std::cerr << "Unable to read configuration file: " << FLAGS_shard_config_path
-              << std::endl;
-  }
-
 
   // parse protocol and mode
   protocol_t proto = PROTO_UNKNOWN;
@@ -254,12 +245,11 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  transport::Configuration rep_config(rep_config_stream);
-  transport::Configuration shard_config(shard_config_stream);
+  transport::Configuration config(config_stream);
 
-  if (FLAGS_replica_idx >= static_cast<uint64_t>(rep_config.n)) {
+  if (FLAGS_replica_idx >= static_cast<uint64_t>(config.n)) {
     std::cerr << "Replica index " << FLAGS_replica_idx << " is out of bounds"
-                 "; only " << rep_config.n << " replicas defined" << std::endl;
+                 "; only " << config.n << " replicas defined" << std::endl;
   }
 
   if (proto == PROTO_UNKNOWN) {
@@ -317,20 +307,20 @@ int main(int argc, char **argv) {
   switch (proto) {
     case PROTO_TAPIR: {
       server = new tapirstore::Server(FLAGS_tapir_linearizable);
-      replica = new replication::ir::IRReplica(rep_config, FLAGS_group_idx, FLAGS_replica_idx,
+      replica = new replication::ir::IRReplica(config, FLAGS_group_idx, FLAGS_replica_idx,
           tport, dynamic_cast<replication::ir::IRAppReplica *>(server));
       break;
     }
     case PROTO_WEAK: {
-      server = new weakstore::Server(rep_config, FLAGS_group_idx, FLAGS_replica_idx, tport, new weakstore::Store());
+      server = new weakstore::Server(config, FLAGS_group_idx, FLAGS_replica_idx, tport, new weakstore::Store());
       break;
     }
     case PROTO_STRONG: {
-      strongstore::InterShardClient *shardClient = new strongstore::InterShardClient(rep_config, tport, FLAGS_num_shards);
+      strongstore::InterShardClient *shardClient = new strongstore::InterShardClient(config, tport, FLAGS_num_shards);
       server = new strongstore::Server(*shardClient, FLAGS_group_idx,
           FLAGS_replica_idx, strongMode, FLAGS_clock_skew,
           FLAGS_clock_error);
-      replica = new replication::vr::VRReplica(rep_config, FLAGS_group_idx,
+      replica = new replication::vr::VRReplica(config, FLAGS_group_idx,
           FLAGS_replica_idx, tport, 1,
           dynamic_cast<replication::AppReplica *>(server));
       break;
