@@ -12,6 +12,13 @@ namespace strongstore
     {
     }
 
+    std::unordered_set<replication::RequestID> Coordinator::GetRequestIDs(uint64_t txnID)
+    {
+        auto search = preparedTransactions.find(txnID);
+        ASSERT(search != preparedTransactions.end());
+        return search->second.GetRequestIDs();
+    }
+
     Transaction Coordinator::GetTransaction(uint64_t txnID)
     {
         auto search = preparedTransactions.find(txnID);
@@ -19,18 +26,18 @@ namespace strongstore
         return search->second.GetTransaction();
     }
 
-    Decision Coordinator::StartTransaction(uint64_t txnID, int nParticipants, Transaction transaction)
+    Decision Coordinator::StartTransaction(replication::RequestID requestID, uint64_t txnID, int nParticipants, Transaction transaction)
     {
         uint64_t timeStart;
         uint64_t error;
         tt.GetTimeAndError(timeStart, error);
         timeStart += error;
 
-        Debug("Coordinator: StartTransaction %lu %lu %d", txnID, timeStart, nParticipants);
+        Debug("Coordinator: StartTransaction %lu %lu %lu %lu %d", requestID.clientID, requestID.requestID, txnID, timeStart, nParticipants);
         auto search = preparedTransactions.find(txnID);
         if (search == preparedTransactions.end())
         {
-            preparedTransactions.insert({txnID, {timeStart, nParticipants, transaction}});
+            preparedTransactions.insert({txnID, {requestID, timeStart, nParticipants, transaction}});
             search = preparedTransactions.find(txnID);
         }
         else
@@ -38,6 +45,7 @@ namespace strongstore
             search->second.SetTimeStart(timeStart);
             search->second.SetNParticipants(nParticipants);
             search->second.SetTransaction(transaction);
+            search->second.AddRequestID(requestID);
         }
 
         if (search->second.TryCoord())
@@ -50,16 +58,16 @@ namespace strongstore
         }
     }
 
-    CommitDecision Coordinator::ReceivePrepareOK(uint64_t txnID, int shardID, uint64_t timePrepare)
+    CommitDecision Coordinator::ReceivePrepareOK(replication::RequestID requestID, uint64_t txnID, int shardID, uint64_t timePrepare)
     {
         auto search = preparedTransactions.find(txnID);
         if (search == preparedTransactions.end())
         {
-            preparedTransactions.insert({txnID, {shardID}});
+            preparedTransactions.insert({txnID, {requestID, shardID}});
             search = preparedTransactions.find(txnID);
         }
 
-        search->second.PrepareOK(shardID, timePrepare);
+        search->second.PrepareOK(requestID, shardID, timePrepare);
 
         if (search->second.CanCommit())
         {
