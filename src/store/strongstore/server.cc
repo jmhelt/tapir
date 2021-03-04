@@ -68,7 +68,7 @@ namespace strongstore
     }
 
     void
-    Server::LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2)
+    Server::LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2, std::unordered_set<replication::RequestID> &resRequestIDs)
     {
         Debug("Received LeaderUpcall: %lu %s", opnum, str1.c_str());
 
@@ -76,6 +76,8 @@ namespace strongstore
         Reply reply;
         int status;
         CommitDecision cd;
+        replication::RequestID requestID = *resRequestIDs.begin();
+        std::unordered_set<replication::RequestID> requestIDs;
 
         request.ParseFromString(str1);
 
@@ -111,17 +113,16 @@ namespace strongstore
             if (groupIdx == request.prepare().coordinatorshard()) // I am coordinator
             {
                 Debug("Coordinator for transaction: %lu", request.txnid());
-                Decision d = coordinator.StartTransaction(request.txnid(), request.prepare().nparticipants(), Transaction(request.prepare().txn()));
+                Decision d = coordinator.StartTransaction(requestID, request.txnid(), request.prepare().nparticipants(), Transaction(request.prepare().txn()));
                 if (d == Decision::TRY_COORD)
                 {
                     Debug("Trying fast path commit");
                     status = store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
                     if (!status)
                     {
-                        cd = coordinator.ReceivePrepareOK(request.txnid(), groupIdx, timeMaxWrite + 1);
+                        cd = coordinator.ReceivePrepareOK(requestID, request.txnid(), groupIdx, timeMaxWrite + 1);
                         ASSERT(cd.d == Decision::COMMIT);
 
-                        // request.clear_prepare();
                         request.set_op(proto::Request::COMMIT);
                         request.mutable_commit()->set_timestamp(cd.commitTime);
 
@@ -132,6 +133,7 @@ namespace strongstore
                     {
                         Debug("Fast path commit failed");
                         coordinator.Abort(request.txnid());
+                        // Reply to client
                         replicate = false;
                         reply.set_status(status);
                         reply.SerializeToString(&str2);
@@ -141,6 +143,8 @@ namespace strongstore
                 {
                     Debug("Waiting for other participants");
                     replicate = false;
+                    // Delay response to client
+                    resRequestIDs.erase(resRequestIDs.begin());
                 }
             }
             else // I am participant
@@ -158,46 +162,25 @@ namespace strongstore
                 {
                     Debug("Prepare failed");
                     store->Abort(request.txnid(), Transaction(request.prepare().txn()));
+                    // Send message to coordinator
                     shardClient.PrepareAbort(request.prepare().coordinatorshard(), request.txnid());
+                    // Reply to client
                     replicate = false;
                     reply.set_status(status);
                     reply.SerializeToString(&str2);
                 }
             }
-
-            // // Prepare is the only case that is conditionally run at the leader
-            // status = store->Prepare(request.txnid(),
-            //                         Transaction(request.prepare().txn()));
-
-            // // if prepared, then replicate result
-            // if (status == 0)
-            // {
-            //     replicate = true;
-            //     // get a prepare timestamp and send along to replicas
-            //     if (mode == MODE_SPAN_LOCK || mode == MODE_SPAN_OCC)
-            //     {
-            //         request.mutable_prepare()->set_timestamp(timeServer.GetTime());
-            //     }
-            //     request.SerializeToString(&str2);
-            // }
-            // else
-            // {
-            //     // if abort, don't replicate
-            //     replicate = false;
-            //     reply.set_status(status);
-            //     reply.SerializeToString(&str2);
-            // }
             break;
         case strongstore::proto::Request::PREPARE_OK:
             Debug("Received Prepare OK");
-            cd = coordinator.ReceivePrepareOK(request.txnid(), request.prepareok().participantshard(), request.prepareok().timestamp());
+            cd = coordinator.ReceivePrepareOK(requestID, request.txnid(), request.prepareok().participantshard(), request.prepareok().timestamp());
             if (cd.d == Decision::TRY_COORD)
             {
                 Debug("Received Prepare OK from all participants");
                 status = store->Prepare(request.txnid(), coordinator.GetTransaction(request.txnid()));
                 if (!status)
                 {
-                    cd = coordinator.ReceivePrepareOK(request.txnid(), groupIdx, timeMaxWrite + 1);
+                    cd = coordinator.ReceivePrepareOK(requestID, request.txnid(), groupIdx, timeMaxWrite + 1);
                     ASSERT(cd.d == Decision::COMMIT);
 
                     request.clear_prepareok();
@@ -211,6 +194,8 @@ namespace strongstore
                 {
                     Debug("Fast path commit failed");
                     coordinator.Abort(request.txnid());
+                    requestIDs = coordinator.GetRequestIDs(request.txnid());
+                    resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
                     replicate = false;
                     reply.set_status(status);
                     reply.SerializeToString(&str2);
@@ -220,6 +205,8 @@ namespace strongstore
             {
                 Debug("Waiting for other participants");
                 replicate = false;
+                // Delay response to client
+                resRequestIDs.erase(resRequestIDs.begin());
             }
             break;
         case strongstore::proto::Request::COMMIT:
@@ -244,12 +231,14 @@ namespace strongstore
     void
     Server::ReplicaUpcall(opnum_t opnum,
                           const string &str1,
-                          string &str2)
+                          string &str2,
+                          std::unordered_set<replication::RequestID> &resRequestIDs)
     {
         Debug("Received Upcall: %lu %s", opnum, str1.c_str());
         Request request;
         Reply reply;
-        int status = 0;
+        std::unordered_set<replication::RequestID> requestIDs;
+        int status = REPLY_OK;
 
         request.ParseFromString(str1);
 
@@ -266,11 +255,7 @@ namespace strongstore
                 shardClient.PrepareOK(request.prepare().coordinatorshard(), request.txnid(), groupIdx, request.prepare().timestamp());
             }
 
-            break;
-        case strongstore::proto::Request::PREPARE_OK:
-            Debug("Replicated PrepareOK");
-            break;
-        case strongstore::proto::Request::PREPARE_ABORT:
+            // Reply to client
             break;
         case strongstore::proto::Request::COMMIT:
             Debug("Received COMMIT");
@@ -283,9 +268,21 @@ namespace strongstore
             {
                 timeMaxWrite = std::max(timeMaxWrite, request.commit().timestamp());
             }
-            coordinator.Commit(request.txnid());
-            reply.set_timestamp(request.commit().timestamp());
+
+            Debug("AmLeader: %d", AmLeader);
+            if (AmLeader) {
+                Debug("Replying to client and shards");
+                // Reply to client and shards
+                reply.set_timestamp(request.commit().timestamp());
+                requestIDs = coordinator.GetRequestIDs(request.txnid());
+                resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
+            } else {
+                // Only leader needs to respond to client
+                resRequestIDs.erase(resRequestIDs.begin());
+            }
+
             Debug("COMMIT timestamp: %lu", request.commit().timestamp());
+            coordinator.Commit(request.txnid());
             break;
         case strongstore::proto::Request::ABORT:
             store->Abort(request.txnid(), Transaction(request.abort().txn()));

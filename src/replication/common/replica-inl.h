@@ -35,10 +35,10 @@ template<class MSG>
 void
 Replica::Execute(opnum_t opnum,
                  const Request &msg,
-                 MSG &reply)
+                 MSG &reply, std::unordered_set<RequestID> &resClientIDs)
 {
     string res;
-    ReplicaUpcall(opnum, msg.op(), res);
+    ReplicaUpcall(opnum, msg.op(), res, resClientIDs);
 
     reply.set_reply(res);
 }

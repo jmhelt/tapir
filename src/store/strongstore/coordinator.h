@@ -6,6 +6,7 @@
 #include "lib/message.h"
 #include "store/common/transaction.h"
 #include "store/common/truetime.h"
+#include "replication/common/replica.h"
 
 #include <vector>
 #include <unordered_set>
@@ -31,8 +32,11 @@ namespace strongstore
     class PreparedTransaction
     {
     public:
-        PreparedTransaction(int shardID) : timeCommit_{0}, nParticipants_{-1}, okParticipants_{{shardID}} {}
-        PreparedTransaction(uint64_t timeStart, int nParticipants, Transaction transaction) : timeCommit_{timeStart}, nParticipants_{nParticipants}, okParticipants_{}, transaction_{transaction} {}
+        PreparedTransaction(replication::RequestID requestID, int shardID)
+            : timeCommit_{0}, nParticipants_{-1}, okParticipants_{{shardID}}, requestIDs_{{requestID}} {}
+        PreparedTransaction(replication::RequestID requestID, uint64_t timeStart, int nParticipants, Transaction transaction)
+            : timeCommit_{timeStart}, nParticipants_{nParticipants}, okParticipants_{}, requestIDs_{{requestID}}, transaction_{transaction} {}
+        
         ~PreparedTransaction() {}
 
         void SetTimeStart(uint64_t timeStart)
@@ -45,6 +49,16 @@ namespace strongstore
             nParticipants_ = nParticipants;
         }
 
+        std::unordered_set<replication::RequestID> GetRequestIDs()
+        {
+            return requestIDs_;
+        }
+
+        void AddRequestID(replication::RequestID requestID)
+        {
+            requestIDs_.insert(requestID);
+        }
+
         Transaction GetTransaction()
         {
             return transaction_;
@@ -55,10 +69,11 @@ namespace strongstore
             transaction_ = transaction;
         }
 
-        void PrepareOK(int shardID, uint64_t prepareTime)
+        void PrepareOK(replication::RequestID requestID, int shardID, uint64_t prepareTime)
         {
             timeCommit_ = std::max(timeCommit_, prepareTime);
             okParticipants_.insert(shardID);
+            requestIDs_.insert(requestID);
         }
 
         bool TryCoord()
@@ -80,6 +95,7 @@ namespace strongstore
         uint64_t timeCommit_;
         int nParticipants_;
         std::unordered_set<int> okParticipants_;
+        std::unordered_set<replication::RequestID> requestIDs_;
         Transaction transaction_;
     };
 
@@ -89,11 +105,13 @@ namespace strongstore
         Coordinator(TrueTime &tt);
         ~Coordinator();
 
+        std::unordered_set<replication::RequestID> GetRequestIDs(uint64_t txnID);
+
         Transaction GetTransaction(uint64_t txnID);
 
-        Decision StartTransaction(uint64_t txnID, int nParticipants, Transaction transaction);
+        Decision StartTransaction(replication::RequestID requestID, uint64_t txnID, int nParticipants, Transaction transaction);
 
-        CommitDecision ReceivePrepareOK(uint64_t txnID, int shardID, uint64_t timePrepare);
+        CommitDecision ReceivePrepareOK(replication::RequestID requestID, uint64_t txnID, int shardID, uint64_t timePrepare);
 
         void Commit(uint64_t txnID);
 

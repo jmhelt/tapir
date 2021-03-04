@@ -54,18 +54,18 @@ Replica::~Replica()
 }
 
 void
-Replica::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate, string &res)
+Replica::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate, string &res, std::unordered_set<RequestID> &resClientIDs)
 {
     Debug("Making leader upcall for operation %s", op.c_str());
-    app->LeaderUpcall(opnum, op, replicate, res);
+    app->LeaderUpcall(opnum, op, replicate, res, resClientIDs);
     Debug("Upcall result: %s %s", replicate ? "yes":"no", res.c_str());
 }
 
 void
-Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res)
+Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res, std::unordered_set<RequestID> &resClientIDs)
 {
     Debug("Making upcall for operation %s", op.c_str());
-    app->ReplicaUpcall(opnum, op, res);
+    app->ReplicaUpcall(opnum, op, res, resClientIDs);
     
     Debug("Upcall result: %s", res.c_str());
 }
