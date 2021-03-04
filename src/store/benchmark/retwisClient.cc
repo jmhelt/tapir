@@ -330,7 +330,8 @@ main(int argc, char **argv)
         if (((t2.tv_sec-t0.tv_sec)*1000000 + (t2.tv_usec-t0.tv_usec)) > duration*1000000) 
             break;
     }
-
+    
+    std::this_thread::sleep_for(std::chrono::seconds{3});
     fprintf(stderr, "# Client exiting..\n");
     return 0;
 }

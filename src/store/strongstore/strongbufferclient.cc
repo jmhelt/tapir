@@ -100,18 +100,4 @@ namespace strongstore
     {
         txnclient->Prepare(tid, txn, coordShard, nParticipants, promise);
     }
-
-    void
-    BufferClient::Commit(uint64_t timestamp, Promise *promise)
-    {
-        txnclient->Commit(tid, txn, timestamp, promise);
-    }
-
-    /* Aborts the ongoing transaction. */
-    void
-    BufferClient::Abort(Promise *promise)
-    {
-        txnclient->Abort(tid, Transaction(), promise);
-    }
-
 };
