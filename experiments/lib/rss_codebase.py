@@ -13,7 +13,7 @@ class RssCodebase(ExperimentCodebase):
             path_to_client_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['client_bin_name'])
             exp_directory = local_exp_directory
-            config_path = os.path.join(local_exp_directory, config["replica_config"])
+            config_path = os.path.join(local_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'client-%d-%d' % (i, j),
                     'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
@@ -22,7 +22,7 @@ class RssCodebase(ExperimentCodebase):
                     config['base_remote_bin_directory_nfs'],
                     config['bin_directory_name'], config['client_bin_name'])
             exp_directory = remote_exp_directory
-            config_path = os.path.join(remote_exp_directory, config["replica_config"])
+            config_path = os.path.join(remote_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'],
                     'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
@@ -172,8 +172,7 @@ class RssCodebase(ExperimentCodebase):
             path_to_server_bin = os.path.join(config['src_directory'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = local_exp_directory
-            rep_config_file = os.path.join(local_exp_directory, config["replica_config"])
-            shard_config_file = os.path.join(local_exp_directory, config["shard_config"])
+            config_file = os.path.join(local_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'], 'server-%d' % shard_idx,
                     'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
@@ -182,8 +181,7 @@ class RssCodebase(ExperimentCodebase):
                     config['base_remote_bin_directory_nfs'],
                     config['bin_directory_name'], config['server_bin_name'])
             exp_directory = remote_exp_directory
-            rep_config_file = os.path.join(remote_exp_directory, config["replica_config"])
-            shard_config_file = os.path.join(remote_exp_directory, config["shard_config"])
+            config_file = os.path.join(remote_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
                     config['out_directory_name'],
                     'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
@@ -192,8 +190,7 @@ class RssCodebase(ExperimentCodebase):
 
         replica_command = ' '.join([str(x) for x in [
             path_to_server_bin,
-            '--rep_config_path', rep_config_file,
-            '--shard_config_path', shard_config_file,            
+            '--config_path', config_file,      
             '--group_idx', shard_idx,
             '--replica_idx', replica_idx,
             '--protocol', config['replication_protocol'],
@@ -362,16 +359,12 @@ class RssCodebase(ExperimentCodebase):
         server_base_port = config["server_port"]
         server_ports = collections.defaultdict(lambda: server_base_port)
         shard_idx = 0
-        rep_config_file = os.path.join(local_exp_directory, config["replica_config"])
-        shard_config_file = os.path.join(local_exp_directory, config["shard_config"])
-        print(rep_config_file)
-        print(shard_config_file)
-        with open(rep_config_file, "w") as rcf, open(shard_config_file, "w") as scf:
-            print("f {}".format(fault_tolerance), file=rcf)
-            print("f {}".format(fault_tolerance), file=scf)
+        config_file = os.path.join(local_exp_directory, config["shard_config"])
+        print(config_file)
+        with open(config_file, "w") as f:
+            print("f {}".format(fault_tolerance), file=f)
             for shard in shards:
-                print("group", file=rcf)
-                print("group", file=scf)
+                print("group", file=f)
                 assert(len(shard) == n)
                 for replica in shard:
                     assert(replica in server_names)
@@ -379,11 +372,7 @@ class RssCodebase(ExperimentCodebase):
                         replica = "localhost"
                     # replica config
                     port = server_ports[replica]
-                    print("replica {}:{}".format(replica, port), file=rcf)
-                    server_ports[replica] += 1
-                    # shard config
-                    port = server_ports[replica]
-                    print("replica {}:{}".format(replica, port), file=scf)
+                    print("replica {}:{}".format(replica, port), file=f)
                     server_ports[replica] += 1
             shard_idx += 1
 
