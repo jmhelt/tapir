@@ -6,20 +6,18 @@
  *
  **********************************************************************/
 
-#include "store/common/truetime.h"
 #include "store/common/frontend/client.h"
+#include "store/common/truetime.h"
 #include "store/strongstore/client.h"
-#include "store/weakstore/client.h"
 #include "store/tapirstore/client.h"
+#include "store/weakstore/client.h"
 
 using namespace std;
 
-int
-main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     const char *configPath = NULL;
     int nShards = 1;
-    int closestReplica = -1; // Closest replica id.
+    int closestReplica = -1;  // Closest replica id.
 
     Client *client;
     enum {
@@ -35,78 +33,74 @@ main(int argc, char **argv)
     int opt;
     while ((opt = getopt(argc, argv, "c:N:m:r:")) != -1) {
         switch (opt) {
-        case 'c': // Configuration path
-        { 
-            configPath = optarg;
-            break;
-        }
-
-        case 'N': // Number of shards.
-        { 
-            char *strtolPtr;
-            nShards = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') ||
-                (nShards <= 0)) {
-                fprintf(stderr, "option -n requires a numeric arg\n");
-            }
-            break;
-        }
-
-        case 'm': // Mode to run in [occ/lock/...]
-        {
-            if (strcasecmp(optarg, "txn-l") == 0) {
-                mode = MODE_TAPIR;
-            } else if (strcasecmp(optarg, "txn-s") == 0) {
-                mode = MODE_TAPIR;
-            } else if (strcasecmp(optarg, "qw") == 0) {
-                mode = MODE_WEAK;
-            } else if (strcasecmp(optarg, "occ") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_OCC;
-            } else if (strcasecmp(optarg, "lock") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_LOCK;
-            } else if (strcasecmp(optarg, "span-occ") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_SPAN_OCC;
-            } else if (strcasecmp(optarg, "span-lock") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_SPAN_LOCK;
-            } else {
-                fprintf(stderr, "unknown mode '%s'\n", optarg);
-                exit(0);
-            }
-            break;
-        }
-
-        case 'r':
-        {
-            char *strtolPtr;
-            closestReplica = strtod(optarg, &strtolPtr);
-            if ((*optarg == '\0') || (*strtolPtr != '\0'))
+            case 'c':  // Configuration path
             {
-                fprintf(stderr,
-                        "option -r requires a numeric arg\n");
+                configPath = optarg;
+                break;
             }
-            break;
-        }
 
-        default:
-            fprintf(stderr, "Unknown argument %s\n", argv[optind]);
-            break;
+            case 'N':  // Number of shards.
+            {
+                char *strtolPtr;
+                nShards = strtoul(optarg, &strtolPtr, 10);
+                if ((*optarg == '\0') || (*strtolPtr != '\0') ||
+                    (nShards <= 0)) {
+                    fprintf(stderr, "option -n requires a numeric arg\n");
+                }
+                break;
+            }
+
+            case 'm':  // Mode to run in [occ/lock/...]
+            {
+                if (strcasecmp(optarg, "txn-l") == 0) {
+                    mode = MODE_TAPIR;
+                } else if (strcasecmp(optarg, "txn-s") == 0) {
+                    mode = MODE_TAPIR;
+                } else if (strcasecmp(optarg, "qw") == 0) {
+                    mode = MODE_WEAK;
+                } else if (strcasecmp(optarg, "occ") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_OCC;
+                } else if (strcasecmp(optarg, "lock") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_LOCK;
+                } else if (strcasecmp(optarg, "span-occ") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_SPAN_OCC;
+                } else if (strcasecmp(optarg, "span-lock") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_SPAN_LOCK;
+                } else {
+                    fprintf(stderr, "unknown mode '%s'\n", optarg);
+                    exit(0);
+                }
+                break;
+            }
+
+            case 'r': {
+                char *strtolPtr;
+                closestReplica = strtod(optarg, &strtolPtr);
+                if ((*optarg == '\0') || (*strtolPtr != '\0')) {
+                    fprintf(stderr, "option -r requires a numeric arg\n");
+                }
+                break;
+            }
+
+            default:
+                fprintf(stderr, "Unknown argument %s\n", argv[optind]);
+                break;
         }
     }
 
     Partitioner *part = new DefaultPartitioner();
     if (mode == MODE_TAPIR) {
-        client = new tapirstore::Client(configPath, nShards,
-                    closestReplica, TrueTime(0, 0));
+        client = new tapirstore::Client(configPath, nShards, closestReplica,
+                                        TrueTime(0));
     } else if (mode == MODE_WEAK) {
-        client = new weakstore::Client(configPath, nShards,
-                    closestReplica);
+        client = new weakstore::Client(configPath, nShards, closestReplica);
     } else if (mode == MODE_STRONG) {
-        client = new strongstore::Client(strongmode, configPath,
-                    nShards, closestReplica, part, TrueTime(0, 0));
+        client = new strongstore::Client(strongmode, configPath, nShards,
+                                         closestReplica, part);
     } else {
         fprintf(stderr, "option -m is required\n");
         exit(0);
@@ -121,8 +115,7 @@ main(int argc, char **argv)
         fflush(stdout);
 
         clen = 0;
-        while ((c = getchar()) != '\n')
-            cmd[clen++] = c;
+        while ((c = getchar()) != '\n') cmd[clen++] = c;
         cmd[clen] = '\0';
 
         if (clen == 0) continue;

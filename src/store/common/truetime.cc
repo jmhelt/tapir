@@ -8,54 +8,25 @@
 
 #include "store/common/truetime.h"
 
-TrueTime::TrueTime() {
-    simError = 0;
-    simSkew = 0;
+#include <chrono>
+
+TrueTime::TrueTime() { error_ = 0; }
+
+TrueTime::TrueTime(uint64_t error) : error_{error} {
+    Debug("TrueTime variance: error=%lu", error_);
 }
 
-TrueTime::TrueTime(uint64_t skew, uint64_t errorBound)
-{
-    simError = errorBound;
-    if (skew == 0) {
-        simSkew = 0;
-    } else {
-        struct timeval t1;
-        gettimeofday(&t1, NULL);
-        srand(t1.tv_sec + t1.tv_usec);
-        uint64_t r = rand();
-        simSkew = (r % skew) - (skew / 2);
-    }
+uint64_t TrueTime::GetTime() {
+    auto now = std::chrono::system_clock::now();
+    long count = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     now.time_since_epoch())
+                     .count();
 
-    Debug("TrueTime variance: skew=%lu error=%lu", simSkew, simError);
-}    
-
-uint64_t
-TrueTime::GetTime()
-{
-    struct timeval now;
-    uint64_t timestamp;
-
-    gettimeofday(&now, NULL);
-
-    now.tv_usec += simSkew;
-    if (now.tv_usec > 999999) {
-        now.tv_usec -= 1000000;
-        now.tv_sec++;
-    } else if (now.tv_usec < 0) {
-        now.tv_usec += 1000000;
-        now.tv_sec--;
-    }
-
-    timestamp = ((uint64_t)now.tv_sec << 32) | (uint64_t) (now.tv_usec);
-
-    Debug("Time: %lx %lx %lx", now.tv_sec,now.tv_usec,timestamp);
-
-    return timestamp;
+    return static_cast<uint64_t>(count);
 }
 
-void
-TrueTime::GetTimeAndError(uint64_t &time, uint64_t &error)
-{
-   time = GetTime();
-   error = simError;
+TrueTimeInterval TrueTime::Now() {
+    uint64_t time = GetTime();
+    Debug("Now: %lu", error_);
+    return {time - error_, time + error_};
 }

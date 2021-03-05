@@ -31,27 +31,22 @@
 #ifndef _COMMON_REPLICA_INL_H_
 #define _COMMON_REPLICA_INL_H_
 
-template<class MSG>
-void
-Replica::Execute(opnum_t opnum,
-                 const Request &msg,
-                 MSG &reply, std::unordered_set<RequestID> &resClientIDs)
-{
+template <class MSG>
+void Replica::Execute(opnum_t opnum, const Request &msg, MSG &reply,
+                      std::unordered_set<RequestID> &response_client_ids,
+                      uint64_t &response_delay_ms) {
     string res;
-    ReplicaUpcall(opnum, msg.op(), res, resClientIDs);
+    ReplicaUpcall(opnum, msg.op(), res, response_client_ids, response_delay_ms);
 
     reply.set_reply(res);
 }
 
-template<class MSG>
-void
-Replica::ExecuteUnlogged(const UnloggedRequest &msg,
-                           MSG &reply)
-{
+template <class MSG>
+void Replica::ExecuteUnlogged(const UnloggedRequest &msg, MSG &reply) {
     string res;
     UnloggedUpcall(msg.op(), res);
 
     reply.set_reply(res);
 }
 
-#endif // _COMMON_REPLICA_INL_H_
+#endif  // _COMMON_REPLICA_INL_H_

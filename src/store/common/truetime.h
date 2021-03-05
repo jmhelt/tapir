@@ -9,24 +9,39 @@
 #ifndef _TRUETIME_H_
 #define _TRUETIME_H_
 
-#include "lib/message.h"
-
 #include <sys/time.h>
+
 #include <cstdlib>
 
-class TrueTime
-{
- public:
-    TrueTime();
-    TrueTime(uint64_t skew, uint64_t errorBound);
-    ~TrueTime() { };
-   
-    uint64_t GetTime();
-    void GetTimeAndError(uint64_t &time, uint64_t &error);
+#include "lib/message.h"
 
-private:
-	uint64_t simError;
-	uint64_t simSkew;
+class TrueTimeInterval {
+   public:
+    TrueTimeInterval(uint64_t earliest, uint64_t latest)
+        : earliest_{earliest}, latest_{latest} {}
+
+    ~TrueTimeInterval() {}
+
+    uint64_t earliest() { return earliest_; }
+    uint64_t latest() { return latest_; }
+
+   private:
+    uint64_t earliest_;
+    uint64_t latest_;
 };
 
-#endif  /* _TRUETIME_H_ */
+class TrueTime {
+   public:
+    TrueTime();
+    TrueTime(uint64_t errorBound);
+    ~TrueTime(){};
+
+    uint64_t GetTime();
+
+    TrueTimeInterval Now();
+
+   private:
+    uint64_t error_;
+};
+
+#endif /* _TRUETIME_H_ */

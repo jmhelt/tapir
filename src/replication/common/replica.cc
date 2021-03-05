@@ -31,55 +31,50 @@
  *
  **********************************************************************/
 
-#include "replication/common/log.h"
 #include "replication/common/replica.h"
-
-#include "lib/message.h"
 
 #include <stdlib.h>
 
+#include "lib/message.h"
+#include "replication/common/log.h"
+
 namespace replication {
-    
+
 Replica::Replica(const transport::Configuration &configuration, int groupIdx,
-    int myIdx, Transport *transport, AppReplica *app)
-    : configuration(configuration), groupIdx(groupIdx), myIdx(myIdx),
-      transport(transport), app(app)
-{
+                 int myIdx, Transport *transport, AppReplica *app)
+    : configuration(configuration),
+      groupIdx(groupIdx),
+      myIdx(myIdx),
+      transport(transport),
+      app(app) {
     transport->Register(this, configuration, groupIdx, myIdx);
 }
 
-Replica::~Replica()
-{
-    
-}
+Replica::~Replica() {}
 
-void
-Replica::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate, string &res, std::unordered_set<RequestID> &resClientIDs)
-{
+void Replica::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
+                           string &res,
+                           std::unordered_set<RequestID> &response_client_ids) {
     Debug("Making leader upcall for operation %s", op.c_str());
-    app->LeaderUpcall(opnum, op, replicate, res, resClientIDs);
-    Debug("Upcall result: %s %s", replicate ? "yes":"no", res.c_str());
+    app->LeaderUpcall(opnum, op, replicate, res, response_client_ids);
+    Debug("Upcall result: %s %s", replicate ? "yes" : "no", res.c_str());
 }
 
-void
-Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res, std::unordered_set<RequestID> &resClientIDs)
-{
+void Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res,
+                            std::unordered_set<RequestID> &response_client_ids,
+                            uint64_t &response_delay_ms) {
     Debug("Making upcall for operation %s", op.c_str());
-    app->ReplicaUpcall(opnum, op, res, resClientIDs);
-    
+    app->ReplicaUpcall(opnum, op, res, response_client_ids, response_delay_ms);
+
     Debug("Upcall result: %s", res.c_str());
 }
 
-void
-Replica::UnloggedUpcall(const string &op, string &res)
-{
+void Replica::UnloggedUpcall(const string &op, string &res) {
     app->UnloggedUpcall(op, res);
 }
 
-void
-Replica::LeaderStatusUpcall(bool AmLeader)
-{
+void Replica::LeaderStatusUpcall(bool AmLeader) {
     app->LeaderStatusUpcall(AmLeader);
 }
 
-} // namespace replication
+}  // namespace replication
