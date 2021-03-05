@@ -33,7 +33,7 @@ class TrueTimeInterval {
 class TrueTime {
    public:
     TrueTime();
-    TrueTime(uint64_t errorBound);
+    TrueTime(uint64_t error);
     ~TrueTime(){};
 
     uint64_t GetTime();
