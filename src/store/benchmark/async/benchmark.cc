@@ -59,79 +59,11 @@ enum transmode_t {
 DEFINE_uint64(client_id, 0, "unique identifier for client");
 DEFINE_string(config_path, "", "path to shard configuration file");
 DEFINE_uint64(num_shards, 1, "number of shards in the system");
-DEFINE_uint64(num_groups, 1, "number of replica groups in the system");
 DEFINE_bool(ping_replicas, false, "determine latency to replicas via pings");
-
-DEFINE_bool(strong_unreplicated, false,
-            "use unreplicated client/server to"
-            " avoid overhead from replication (for StrongStore)");
-
-DEFINE_bool(morty_send_writes, true,
-            "send uncommitted writes during execution"
-            " (for Morty)");
-DEFINE_uint64(morty_backoff, 0,
-              "exponential factor for backing off reexecution"
-              " (for Morty)");
-DEFINE_uint64(morty_max_backoff, 0,
-              "maximum backoff for a txn reexecution"
-              " (for Morty)");
-DEFINE_uint64(morty_spec_wait, 0,
-              "milliseconds to delay committing non-speculative"
-              " branch (for Morty)");
-DEFINE_int64(morty_spec_execution_limit, -1,
-             "limit of the number of speculative"
-             " executions. -1 indicates no limit (for Morty)");
-DEFINE_uint64(morty_prepare_delay_ms, 0,
-              "number of milliseconds to delay sending"
-              " prepare (for Morty)");
-DEFINE_uint64(morty_commit_delay_ms, 0,
-              "number of milliseconds to delay sending"
-              " commit(for Morty)");
-DEFINE_uint64(morty_prepare_timeout_ms, 100,
-              "timeout for aborting a txn when not"
-              " receiving prepare replies (for Morty)");
-DEFINE_bool(morty_commit_single_branch, false,
-            "send uncommitted writes during"
-            " execution (for Morty)");
 
 DEFINE_bool(tapir_sync_commit, true,
             "wait until commit phase completes before"
             " sending additional transactions (for TAPIR)");
-
-DEFINE_bool(indicus_sign_messages, false,
-            "add signatures to messages as"
-            " necessary to prevent impersonation (for Indicus)");
-DEFINE_bool(indicus_validate_proofs, false,
-            "send and validate proofs as"
-            " necessary to check Byzantine behavior (for Indicus)");
-DEFINE_bool(indicus_hash_digest, false,
-            "use hash function compute transaction"
-            " digest (for Indicus)");
-DEFINE_bool(indicus_verify_deps, true,
-            "check signatures of transaction"
-            " depdendencies (for Indicus)");
-DEFINE_uint64(indicus_sig_batch, 1,
-              "signature batch size"
-              " sig batch size (for Indicus)");
-DEFINE_uint64(indicus_merkle_branch_factor, 2,
-              "branch factor of merkle tree"
-              " of batch (for Indicus)");
-DEFINE_string(indicus_key_path, "",
-              "path to directory containing public and"
-              " private keys (for Indicus)");
-DEFINE_int64(indicus_max_dep_depth, -1,
-             "maximum length of dependency chain"
-             " allowed by honest replicas [-1 is no maximum, -2 is no deps] "
-             "(for Indicus)");
-DEFINE_uint64(indicus_key_type, 2,
-              "key type (see create keys for mappings)"
-              " key type (for Indicus)");
-DEFINE_uint64(indicus_inject_failure_ms, 0,
-              "number of milliseconds to wait"
-              " before injecting a failure (for Indicus)");
-DEFINE_uint64(indicus_inject_failure_proportion, 0,
-              "proportion of clients that"
-              " will inject a failure (for Indicus)");
 
 DEFINE_bool(debug_stats, false, "record stats related to debugging");
 
