@@ -12,8 +12,8 @@ namespace retwis {
 
 class RetwisTransaction : public SyncTransaction {
    public:
-    RetwisTransaction(KeySelector *keySelector, int numKeys,
-                      std::mt19937 &rand);
+    RetwisTransaction(KeySelector *keySelector, int numKeys, std::mt19937 &rand,
+                      uint32_t timeout);
     virtual ~RetwisTransaction();
 
    protected:

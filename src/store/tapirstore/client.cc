@@ -35,10 +35,9 @@ namespace tapirstore {
 
 using namespace std;
 
-Client::Client(const string configPath, int nShards,
-                int closestReplica, TrueTime timeServer)
-    : nshards(nShards), transport(0.0, 0.0, 0, false), timeServer(timeServer)
-{
+Client::Client(transport::Configuration *config, uint64_t nShards,
+               int closestReplica, TrueTime timeServer)
+    : nshards(nShards), transport(0.0, 0.0, 0, false), timeServer(timeServer) {
     // Initialize all state here;
     client_id = 0;
     while (client_id == 0) {
@@ -47,7 +46,7 @@ Client::Client(const string configPath, int nShards,
         uniform_int_distribution<uint64_t> dis;
         client_id = dis(gen);
     }
-    t_id = (client_id/10000)*10000;
+    t_id = (client_id / 10000) * 10000;
 
     bclient.reserve(nshards);
 
@@ -55,13 +54,13 @@ Client::Client(const string configPath, int nShards,
 
     /* Start a client for each shard. */
     for (uint64_t i = 0; i < nshards; i++) {
-        string shardConfigPath = configPath + to_string(i) + ".config";
-        ShardClient *shardclient = new ShardClient(shardConfigPath,
-                &transport, client_id, i, closestReplica);
+        ShardClient *shardclient =
+            new ShardClient(config, &transport, client_id, i, closestReplica);
         bclient[i] = new BufferClient(shardclient);
     }
 
-    Debug("Tapir client [%lu] created! %lu %lu", client_id, nshards, bclient.size());
+    Debug("Tapir client [%lu] created! %lu %lu", client_id, nshards,
+          bclient.size());
 
     /* Run the transport in a new thread. */
     clientTransport = new thread(&Client::run_client, this);
@@ -69,8 +68,7 @@ Client::Client(const string configPath, int nShards,
     Debug("Tapir client [%lu] created! %lu", client_id, bclient.size());
 }
 
-Client::~Client()
-{
+Client::~Client() {
     transport.Stop();
     for (auto b : bclient) {
         delete b;
@@ -79,29 +77,21 @@ Client::~Client()
 }
 
 /* Runs the transport event loop. */
-void
-Client::run_client()
-{
-    transport.Run();
-}
+void Client::run_client() { transport.Run(); }
 
 /* Begins a transaction. All subsequent operations before a commit() or
  * abort() are part of this transaction.
  *
  * Return a TID for the transaction.
  */
-void
-Client::Begin()
-{
+void Client::Begin() {
     Debug("BEGIN [%lu]", t_id + 1);
     t_id++;
     participants.clear();
 }
 
 /* Returns the value corresponding to the supplied key. */
-int
-Client::Get(const string &key, string &value)
-{
+int Client::Get(const string &key, string &value) {
     Debug("GET [%lu : %s]", t_id, key.c_str());
 
     // Contact the appropriate shard to get the value.
@@ -121,18 +111,14 @@ Client::Get(const string &key, string &value)
     return promise.GetReply();
 }
 
-string
-Client::Get(const string &key)
-{
+string Client::Get(const string &key) {
     string value;
     Get(key, value);
     return value;
 }
 
 /* Sets the value corresponding to the supplied key. */
-int
-Client::Put(const string &key, const string &value)
-{
+int Client::Put(const string &key, const string &value) {
     Debug("PUT [%lu : %s]", t_id, key.c_str());
 
     // Contact the appropriate shard to set the value.
@@ -151,9 +137,7 @@ Client::Put(const string &key, const string &value)
     return promise.GetReply();
 }
 
-int
-Client::Prepare(Timestamp &timestamp)
-{
+int Client::Prepare(Timestamp &timestamp) {
     // 1. Send commit-prepare to all shards.
     uint64_t proposed = 0;
     list<Promise *> promises;
@@ -173,28 +157,28 @@ Client::Prepare(Timestamp &timestamp)
     for (auto p : promises) {
         uint64_t proposed = p->GetTimestamp().getTimestamp();
 
-        switch(p->GetReply()) {
-        case REPLY_OK:
-            Debug("PREPARE [%lu] OK", t_id);
-            continue;
-        case REPLY_FAIL:
-            // abort!
-            Debug("PREPARE [%lu] ABORT", t_id);
-            return REPLY_FAIL;
-        case REPLY_RETRY:
-            status = REPLY_RETRY;
+        switch (p->GetReply()) {
+            case REPLY_OK:
+                Debug("PREPARE [%lu] OK", t_id);
+                continue;
+            case REPLY_FAIL:
+                // abort!
+                Debug("PREPARE [%lu] ABORT", t_id);
+                return REPLY_FAIL;
+            case REPLY_RETRY:
+                status = REPLY_RETRY;
                 if (proposed > ts) {
                     ts = proposed;
                 }
                 break;
-        case REPLY_TIMEOUT:
-            status = REPLY_RETRY;
-            break;
-        case REPLY_ABSTAIN:
-            // just ignore abstains
-            break;
-        default:
-            break;
+            case REPLY_TIMEOUT:
+                status = REPLY_RETRY;
+                break;
+            case REPLY_ABSTAIN:
+                // just ignore abstains
+                break;
+            default:
+                break;
         }
         delete p;
     }
@@ -214,9 +198,7 @@ Client::Prepare(Timestamp &timestamp)
 }
 
 /* Attempts to commit the ongoing transaction. */
-bool
-Client::Commit()
-{
+bool Client::Commit() {
     // Implementing 2 Phase Commit
     Timestamp timestamp(timeServer.GetTime(), client_id);
     int status;
@@ -232,7 +214,7 @@ Client::Commit()
 
     if (status == REPLY_OK) {
         Debug("COMMIT [%lu]", t_id);
-        
+
         for (auto p : participants) {
             bclient[p]->Commit(0);
         }
@@ -245,9 +227,7 @@ Client::Commit()
 }
 
 /* Aborts the ongoing transaction. */
-void
-Client::Abort()
-{
+void Client::Abort() {
     Debug("ABORT [%lu]", t_id);
 
     for (auto p : participants) {
@@ -256,11 +236,9 @@ Client::Abort()
 }
 
 /* Return statistics of most recent transaction. */
-vector<int>
-Client::Stats()
-{
+vector<int> Client::Stats() {
     vector<int> v;
     return v;
 }
 
-} // namespace tapirstore
+}  // namespace tapirstore
