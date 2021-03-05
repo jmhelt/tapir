@@ -37,7 +37,7 @@
   "server_debug_output": true,
   "server_debug_stats": false,
   "client_debug_stats": false,
-  "client_experiment_length": 30,
+  "client_experiment_length": 10,
   "client_ramp_down": 0,
   "client_ramp_up": 0,
   "default_remote_shell": "bash",

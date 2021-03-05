@@ -113,17 +113,14 @@ namespace strongstore
         int replica;          // which replica to use for reads
 
         replication::vr::VRClient *client; // Client proxy.
-        Promise *waiting;                  // waiting thread
         Promise *blockingBegin;            // block until finished
 
         /* Timeout for Get requests, which only go to one replica. */
-        void GetTimeout();
+        void GetTimeout(Promise *promise);
 
         /* Callbacks for hearing back from a shard for an operation. */
-        void GetCallback(const std::string &, const std::string &);
+        void GetCallback(Promise *promise, const std::string &, const std::string &);
         void PrepareCallback(Promise *promise, const std::string &, const std::string &);
-        void PrepareOKCallback(const string &, const string &);
-        void PrepareAbortCallback(const string &, const string &);
         void CommitCallback(const std::string &, const std::string &);
         void AbortCallback(const std::string &, const std::string &);
 
