@@ -33,66 +33,81 @@
 #ifndef _COMMON_REPLICA_H_
 #define _COMMON_REPLICA_H_
 
+#include <unordered_set>
 
 #include "lib/configuration.h"
+#include "lib/transport.h"
 #include "replication/common/log.h"
 #include "replication/common/request.pb.h"
-#include "lib/transport.h"
 #include "replication/common/viewstamp.h"
 
 namespace replication {
-    
+
 class Replica;
 
-enum ReplicaStatus {
-    STATUS_NORMAL,
-    STATUS_VIEW_CHANGE,
-    STATUS_RECOVERING
-};
+enum ReplicaStatus { STATUS_NORMAL, STATUS_VIEW_CHANGE, STATUS_RECOVERING };
 
 class RequestID {
-public:
-    uint64_t clientID;
-    uint64_t requestID;
+   public:
+    uint64_t client_id;
+    uint64_t request_id;
+
+    RequestID(uint64_t client_id, uint64_t request_id)
+        : client_id{client_id}, request_id{request_id} {}
+    ~RequestID() {}
 };
 
-inline bool operator==(const RequestID& lhs, const RequestID& rhs) {
-    return lhs.clientID == rhs.clientID && lhs.requestID == rhs.requestID;
+inline bool operator==(const RequestID &lhs, const RequestID &rhs) {
+    return lhs.client_id == rhs.client_id && lhs.request_id == rhs.request_id;
 }
 
-class AppReplica
-{
-public:
-    AppReplica() { };
-    virtual ~AppReplica() { };
-    // Invoke callback on the leader, with the option to replicate on success 
-    virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2, std::unordered_set<RequestID> &resClientIDs) { replicate = true; str2 = str1; };
+class AppReplica {
+   public:
+    AppReplica(){};
+    virtual ~AppReplica(){};
+    // Invoke callback on the leader, with the option to replicate on success
+    virtual void LeaderUpcall(
+        opnum_t opnum, const string &str1, bool &replicate, string &str2,
+        std::unordered_set<RequestID> &response_client_ids) {
+        replicate = true;
+        str2 = str1;
+    };
     // Invoke callback on all replicas
-    virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2, std::unordered_set<RequestID> &resClientIDs) { };
+    virtual void ReplicaUpcall(
+        opnum_t opnum, const string &str1, string &str2,
+        std::unordered_set<RequestID> &response_client_ids,
+        uint64_t &response_delay_ms){};
     // Invoke call back for unreplicated operations run on only one replica
-    virtual void UnloggedUpcall(const string &str1, string &str2) { };
+    virtual void UnloggedUpcall(const string &str1, string &str2){};
     // Invoke callback on leader status change
-    virtual void LeaderStatusUpcall(const bool AmLeader) { Debug("Wrong LeaderStatusUpcall"); };
+    virtual void LeaderStatusUpcall(const bool AmLeader) {
+        Debug("Wrong LeaderStatusUpcall");
+    };
 };
 
-class Replica : public TransportReceiver
-{
-public:
-    Replica(const transport::Configuration &config, int groupIdx, int myIdx, Transport *transport, AppReplica *app);
+class Replica : public TransportReceiver {
+   public:
+    Replica(const transport::Configuration &config, int groupIdx, int myIdx,
+            Transport *transport, AppReplica *app);
     virtual ~Replica();
-    
-protected:
-    void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate, string &res, std::unordered_set<RequestID> &resClientIDs);
-    void ReplicaUpcall(opnum_t opnum, const string &op, string &res, std::unordered_set<RequestID> &resClientIDs);
-    template<class MSG> void Execute(opnum_t opnum,
-                                     const Request & msg,
-                                     MSG &reply, std::unordered_set<RequestID> &resClientIDs);
+
+   protected:
+    void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
+                      string &res,
+                      std::unordered_set<RequestID> &response_client_ids);
+    void ReplicaUpcall(opnum_t opnum, const string &op, string &res,
+                       std::unordered_set<RequestID> &response_client_ids,
+                       uint64_t &response_delay_ms);
+    template <class MSG>
+    void Execute(opnum_t opnum, const Request &msg, MSG &reply,
+                 std::unordered_set<RequestID> &response_client_ids,
+                 uint64_t &response_delay_ms);
     void UnloggedUpcall(const string &op, string &res);
-    template<class MSG> void ExecuteUnlogged(const UnloggedRequest & msg,
-                                               MSG &reply);
+    template <class MSG>
+    void ExecuteUnlogged(const UnloggedRequest &msg, MSG &reply);
     void LeaderStatusUpcall(bool AmLeader);
-    
-protected:
+
+   protected:
     transport::Configuration configuration;
     int groupIdx;
     int myIdx;
@@ -100,23 +115,20 @@ protected:
     AppReplica *app;
     ReplicaStatus status;
 };
-    
+
 #include "replica-inl.h"
 
-} // namespace replication
+}  // namespace replication
 
+namespace std {
+template <>
+struct hash<replication::RequestID> {
+    std::size_t operator()(replication::RequestID const &rid) const noexcept {
+        std::size_t h1 = std::hash<std::uint64_t>{}(rid.client_id);
+        std::size_t h2 = std::hash<std::uint64_t>{}(rid.request_id);
+        return h1 ^ (h2 << 1);  // or use boost::hash_combine
+    }
+};
+}  // namespace std
 
-namespace std
-{
-    template<> struct hash<replication::RequestID>
-    {
-        std::size_t operator()(replication::RequestID const& rid) const noexcept
-        {
-            std::size_t h1 = std::hash<std::uint64_t>{}(rid.clientID);
-            std::size_t h2 = std::hash<std::uint64_t>{}(rid.requestID);
-            return h1 ^ (h2 << 1); // or use boost::hash_combine
-        }
-    };
-}
-
-#endif  /* _COMMON_REPLICA_H */
+#endif /* _COMMON_REPLICA_H */

@@ -28,31 +28,30 @@
  * SOFTWARE.
  *
  **********************************************************************/
- 
+
 #ifndef _TAPIR_CLIENT_H_
 #define _TAPIR_CLIENT_H_
 
+#include <thread>
+
 #include "lib/assert.h"
-#include "lib/message.h"
 #include "lib/configuration.h"
+#include "lib/message.h"
 #include "lib/udptransport.h"
 #include "replication/ir/client.h"
+#include "store/common/frontend/bufferclient.h"
+#include "store/common/frontend/client.h"
 #include "store/common/timestamp.h"
 #include "store/common/truetime.h"
-#include "store/common/frontend/client.h"
-#include "store/common/frontend/bufferclient.h"
 #include "store/tapirstore/shardclient.h"
 #include "store/tapirstore/tapir-proto.pb.h"
 
-#include <thread>
-
 namespace tapirstore {
 
-class Client : public ::Client
-{
-public:
-    Client(const std::string configPath, int nShards,
-	   int closestReplica, TrueTime timeserver = TrueTime(0,0));
+class Client : public ::Client {
+   public:
+    Client(const std::string configPath, int nShards, int closestReplica,
+           TrueTime timeserver = TrueTime(0));
     virtual ~Client();
 
     // Overriding functions from ::Client.
@@ -65,7 +64,7 @@ public:
     void Abort();
     std::vector<int> Stats();
 
-private:
+   private:
     // Unique ID for this client.
     uint64_t client_id;
 
@@ -83,7 +82,7 @@ private:
 
     // Transport used by IR client proxies.
     UDPTransport transport;
-    
+
     // Thread running the transport event loop.
     std::thread *clientTransport;
 
@@ -100,6 +99,6 @@ private:
     void run_client();
 };
 
-} // namespace tapirstore
+}  // namespace tapirstore
 
 #endif /* _TAPIR_CLIENT_H_ */

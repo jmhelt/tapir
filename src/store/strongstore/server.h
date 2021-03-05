@@ -38,42 +38,48 @@
 #include "store/server.h"
 #include "store/strongstore/coordinator.h"
 #include "store/strongstore/intershardclient.h"
-#include "store/strongstore/occstore.h"
 #include "store/strongstore/lockstore.h"
+#include "store/strongstore/occstore.h"
 #include "store/strongstore/strong-proto.pb.h"
 
-namespace strongstore
-{
+namespace strongstore {
 
-    class Server : public replication::AppReplica, public ::Server
-    {
-    public:
-        Server(InterShardClient &shardClient, int groupIdx, int myIdx,
-               Mode mode, uint64_t skew, uint64_t error);
-        virtual ~Server();
+class Server : public replication::AppReplica, public ::Server {
+   public:
+    Server(InterShardClient &shardClient, int groupIdx, int myIdx, Mode mode,
+           uint64_t error);
+    virtual ~Server();
 
-        virtual void LeaderUpcall(opnum_t opnum, const string &str1, bool &replicate, string &str2, std::unordered_set<replication::RequestID> &resRequestIDs) override;
-        virtual void ReplicaUpcall(opnum_t opnum, const string &str1, string &str2, std::unordered_set<replication::RequestID> &resRequestIDs) override;
-        virtual void UnloggedUpcall(const string &str1, string &str2) override;
-        virtual void LeaderStatusUpcall(bool l) override {
-            Debug("Updating AmLeader: %d", l);
-            AmLeader = l;
-        }
-        void Load(const string &key, const string &value, const Timestamp timestamp) override;
-        virtual inline Stats &GetStats() override { return store->GetStats(); }
+    virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
+                              string &response,
+                              std::unordered_set<replication::RequestID>
+                                  &response_request_ids) override;
+    virtual void ReplicaUpcall(
+        opnum_t opnum, const string &op, string &response,
+        std::unordered_set<replication::RequestID> &response_request_ids,
+        uint64_t &response_delay_ms) override;
 
-    private:
-        TrueTime timeServer;
-        Coordinator coordinator;
-        InterShardClient &shardClient;
-        uint64_t timeMaxWrite;
-        int groupIdx;
-        int myIdx;
-        Mode mode;
-        TxnStore *store;
-        bool AmLeader;
-    };
+    virtual void UnloggedUpcall(const string &op, string &response) override;
+    virtual void LeaderStatusUpcall(bool l) override {
+        Debug("Updating AmLeader: %d", l);
+        AmLeader = l;
+    }
+    void Load(const string &key, const string &value,
+              const Timestamp timestamp) override;
+    virtual inline Stats &GetStats() override { return store->GetStats(); }
 
-} // namespace strongstore
+   private:
+    TrueTime timeServer;
+    Coordinator coordinator;
+    InterShardClient &shardClient;
+    uint64_t timeMaxWrite;
+    int groupIdx;
+    int myIdx;
+    Mode mode;
+    TxnStore *store;
+    bool AmLeader;
+};
+
+}  // namespace strongstore
 
 #endif /* _STRONG_SERVER_H_ */
