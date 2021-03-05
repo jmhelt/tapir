@@ -226,7 +226,7 @@ main(int argc, char **argv)
     srand(t0.tv_sec + t0.tv_usec);
 
     while (1) {
-        std::this_thread::sleep_for(std::chrono::seconds{1});
+        // std::this_thread::sleep_for(std::chrono::seconds{1});
         keyIdx.clear();
             
         // Begin a transaction.
@@ -235,8 +235,7 @@ main(int argc, char **argv)
         status = true;
 
         // Decide which type of retwis transaction it is going to be.
-        // ttype = rand() % 100;
-        ttype = 0;
+        ttype = rand() % 100;
 
         if (ttype < 5) {
             Debug("Transaction: Add user");
