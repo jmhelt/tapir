@@ -62,8 +62,7 @@ namespace strongstore
             replica = 0;
         }
 
-        waiting = NULL;
-        blockingBegin = NULL;
+        blockingBegin = nullptr;
     }
 
     ShardClient::~ShardClient()
@@ -78,11 +77,11 @@ namespace strongstore
         Debug("[shard %i] BEGIN: %lu", shard, id);
 
         // Wait for any previous pending requests.
-        if (blockingBegin != NULL)
+        if (blockingBegin != nullptr)
         {
             blockingBegin->GetReply();
             delete blockingBegin;
-            blockingBegin = NULL;
+            blockingBegin = nullptr;
         }
     }
 
@@ -102,18 +101,18 @@ namespace strongstore
         request.SerializeToString(&request_str);
 
         // set to 1 second by default
-        int timeout = (promise != NULL) ? promise->GetTimeout() : 1000;
+        int timeout = (promise != nullptr) ? promise->GetTimeout() : 1000;
 
         transport->Timer(0, [=]() {
-            waiting = promise;
             client->InvokeUnlogged(replica,
                                    request_str,
                                    bind(&ShardClient::GetCallback,
                                         this,
+                                        promise,
                                         placeholders::_1,
                                         placeholders::_2),
                                    bind(&ShardClient::GetTimeout,
-                                        this),
+                                        this, promise),
                                    timeout); // timeout in ms
         });
     }
@@ -135,18 +134,18 @@ namespace strongstore
         request.SerializeToString(&request_str);
 
         // set to 1 second by default
-        int timeout = (promise != NULL) ? promise->GetTimeout() : 1000;
+        int timeout = (promise != nullptr) ? promise->GetTimeout() : 1000;
 
         transport->Timer(0, [=]() {
-            waiting = promise;
             client->InvokeUnlogged(replica,
                                    request_str,
                                    bind(&ShardClient::GetCallback,
                                         this,
+                                        promise,
                                         placeholders::_1,
                                         placeholders::_2),
                                    bind(&ShardClient::GetTimeout,
-                                        this),
+                                        this, promise),
                                    timeout); // timeout in ms
         });
     }
@@ -178,7 +177,6 @@ namespace strongstore
         request.SerializeToString(&request_str);
 
         transport->Timer(0, [=]() {
-            waiting = promise;
             client->Invoke(request_str,
                            bind(&ShardClient::PrepareCallback,
                                 this,
@@ -278,36 +276,32 @@ namespace strongstore
     }
 
     void
-    ShardClient::GetTimeout()
+    ShardClient::GetTimeout(Promise *promise)
     {
-        if (waiting != NULL)
+        if (promise != nullptr)
         {
-            Promise *w = waiting;
-            waiting = NULL;
-            w->Reply(REPLY_TIMEOUT);
+            promise->Reply(REPLY_TIMEOUT);
         }
     }
 
     /* Callback from a shard replica on get operation completion. */
     void
-    ShardClient::GetCallback(const string &request_str, const string &reply_str)
+    ShardClient::GetCallback(Promise *promise, const string &request_str, const string &reply_str)
     {
         /* Replies back from a shard. */
         Reply reply;
         reply.ParseFromString(reply_str);
 
         Debug("[shard %i] Received GET callback [%d]", shard, reply.status());
-        if (waiting != NULL)
+        if (promise != nullptr)
         {
-            Promise *w = waiting;
-            waiting = NULL;
             if (reply.has_timestamp())
             {
-                w->Reply(reply.status(), Timestamp(reply.timestamp()), reply.value());
+                promise->Reply(reply.status(), Timestamp(reply.timestamp()), reply.value());
             }
             else
             {
-                w->Reply(reply.status(), reply.value());
+                promise->Reply(reply.status(), reply.value());
             }
         }
     }
@@ -321,7 +315,7 @@ namespace strongstore
         reply.ParseFromString(reply_str);
         Debug("[shard %i] Received COMMIT callback [%d]", shard, reply.status());
 
-        if (promise != NULL)
+        if (promise != nullptr)
         {
             switch (reply.status())
             {
@@ -335,54 +329,6 @@ namespace strongstore
                 break;
             default:
                 NOT_REACHABLE();
-            }
-        }
-    }
-
-    /* Callback from a shard replica on prepare_ok operation completion. */
-    void
-    ShardClient::PrepareOKCallback(const string &request_str, const string &reply_str)
-    {
-        Reply reply;
-
-        reply.ParseFromString(reply_str);
-        Debug("[shard %i] Received PREPARE_OK callback [%d]", shard, reply.status());
-
-        if (waiting != NULL)
-        {
-            Promise *w = waiting;
-            waiting = NULL;
-            if (reply.has_timestamp())
-            {
-                w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
-            }
-            else
-            {
-                w->Reply(reply.status(), Timestamp());
-            }
-        }
-    }
-
-    /* Callback from a shard replica on prepare_abort operation completion. */
-    void
-    ShardClient::PrepareAbortCallback(const string &request_str, const string &reply_str)
-    {
-        Reply reply;
-
-        reply.ParseFromString(reply_str);
-        Debug("[shard %i] Received PREPARE_ABORT callback [%d]", shard, reply.status());
-
-        if (waiting != NULL)
-        {
-            Promise *w = waiting;
-            waiting = NULL;
-            if (reply.has_timestamp())
-            {
-                w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
-            }
-            else
-            {
-                w->Reply(reply.status(), Timestamp());
             }
         }
     }
