@@ -36,6 +36,7 @@
 
 #include "lib/assert.h"
 #include "lib/configuration.h"
+#include "lib/latency.h"
 #include "lib/message.h"
 #include "lib/udptransport.h"
 #include "replication/vr/client.h"
@@ -50,7 +51,8 @@ namespace strongstore {
 
 class Client : public ::Client {
    public:
-    Client(Mode mode, string configPath, int nshards, int closestReplica,
+    Client(Mode mode, transport::Configuration *config, uint64_t id,
+           uint64_t nshards, int closestReplica, Transport *transport,
            Partitioner *part);
     ~Client();
 
@@ -63,18 +65,13 @@ class Client : public ::Client {
     std::vector<int> Stats();
 
    private:
-    /* Private helper functions. */
-    void run_client();  // Runs the transport event loop.
-
-    // timestamp server call back
-    void tssCallback(const string &request, const string &reply);
-
     // local Prepare function
     int Prepare(uint64_t &ts);
 
     // choose coordinator from participants
     int ChooseCoordinator(const std::set<int> &participants);
 
+    transport::Configuration *config;
     // Unique ID for this client.
     uint64_t client_id;
 
@@ -82,36 +79,28 @@ class Client : public ::Client {
     uint64_t t_id;
 
     // Number of shards in SpanStore.
-    long nshards;
+    uint64_t nshards;
 
     // List of participants in the ongoing transaction.
     std::set<int> participants;
 
     // Transport used by paxos client proxies.
-    UDPTransport transport;
-
-    // Thread running the transport event loop.
-    std::thread *clientTransport;
+    Transport *transport;
 
     // Buffering client for each shard.
     std::vector<BufferClient *> bclient;
+    std::vector<ShardClient *> sclient;
 
     // Mode in which spanstore runs.
     Mode mode;
 
-    // Timestamp server shard.
-    replication::vr::VRClient *tss;
-
     // Partitioner
     Partitioner *part;
 
-    // Synchronization variables.
-    std::condition_variable cv;
-    std::mutex cv_m;
-    string replica_reply;
+    uint64_t lastReqId;
+    std::unordered_map<std::string, uint32_t> statInts;
 
-    // Time spend sleeping for commit.
-    int commit_sleep;
+    Latency_t opLat;
 };
 
 }  // namespace strongstore

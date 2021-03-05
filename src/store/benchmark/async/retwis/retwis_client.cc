@@ -28,16 +28,16 @@ SyncTransaction *RetwisClient::GetNextTransaction() {
     int ttype = GetRand()() % 100;
     if (ttype < 5) {
         lastOp = "add_user";
-        return new AddUser(keySelector, GetRand());
+        return new AddUser(keySelector, GetRand(), GetTimeout());
     } else if (ttype < 20) {
         lastOp = "follow";
-        return new Follow(keySelector, GetRand());
+        return new Follow(keySelector, GetRand(), GetTimeout());
     } else if (ttype < 50) {
         lastOp = "post_tweet";
-        return new PostTweet(keySelector, GetRand());
+        return new PostTweet(keySelector, GetRand(), GetTimeout());
     } else {
         lastOp = "get_timeline";
-        return new GetTimeline(keySelector, GetRand());
+        return new GetTimeline(keySelector, GetRand(), GetTimeout());
     }
 }
 

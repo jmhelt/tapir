@@ -2,8 +2,9 @@
 
 namespace retwis {
 
-PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand)
-    : RetwisTransaction(keySelector, 5, rand) {}
+PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand,
+                     uint32_t timeout)
+    : RetwisTransaction(keySelector, 5, rand, timeout) {}
 
 PostTweet::~PostTweet() {}
 
@@ -20,7 +21,7 @@ transaction_status_t PostTweet::Execute(SyncClient &client) {
     client.Put(GetKey(4), GetKey(4), timeout);
 
     Debug("COMMIT");
-    client.Commit(timeout);
+    return client.Commit(timeout);
 }
 
 }  // namespace retwis

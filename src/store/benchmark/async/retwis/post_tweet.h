@@ -9,7 +9,7 @@ namespace retwis {
 
 class PostTweet : public RetwisTransaction {
    public:
-    PostTweet(KeySelector *keySelector, std::mt19937 &rand);
+    PostTweet(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~PostTweet();
 
     virtual transaction_status_t Execute(SyncClient &client) override;

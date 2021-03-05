@@ -43,10 +43,6 @@ enum protomode_t {
 enum benchmode_t {
     BENCH_UNKNOWN,
     BENCH_RETWIS,
-    BENCH_TPCC,
-    BENCH_SMALLBANK_SYNC,
-    BENCH_RW,
-    BENCH_TPCC_SYNC
 };
 
 enum keysmode_t { KEYS_UNKNOWN, KEYS_UNIFORM, KEYS_ZIPF };
@@ -466,7 +462,7 @@ int main(int argc, char **argv) {
 
     // parse retwis settings
     std::vector<std::string> keys;
-    if (benchMode == BENCH_RETWIS || benchMode == BENCH_RW) {
+    if (benchMode == BENCH_RETWIS) {
         if (FLAGS_keys_path.empty()) {
             if (FLAGS_num_keys > 0) {
                 for (size_t i = 0; i < FLAGS_num_keys; ++i) {
@@ -595,10 +591,9 @@ int main(int argc, char **argv) {
         uint64_t clientId = (FLAGS_client_id << 6) | i;
         switch (mode) {
             case PROTO_TAPIR: {
-                client = new tapirstore::Client(
-                    config, clientId, FLAGS_num_shards, FLAGS_num_groups,
-                    FLAGS_closest_replica, tport, part, FLAGS_ping_replicas,
-                    FLAGS_tapir_sync_commit, TrueTime(FLAGS_clock_error));
+                client = new tapirstore::Client(config, FLAGS_num_shards,
+                                                FLAGS_closest_replica,
+                                                TrueTime(FLAGS_clock_error));
                 break;
             }
             // case MODE_WEAK: {
@@ -610,8 +605,7 @@ int main(int argc, char **argv) {
             case PROTO_STRONG: {
                 client = new strongstore::Client(
                     strongmode, config, clientId, FLAGS_num_shards,
-                    FLAGS_num_groups, FLAGS_closest_replica, tport, part,
-                    FLAGS_strong_unreplicated, TrueTime(FLAGS_clock_error));
+                    FLAGS_closest_replica, tport, part);
                 break;
             }
             default:
@@ -645,10 +639,10 @@ int main(int argc, char **argv) {
                 NOT_REACHABLE();
         }
 
+        SyncTransactionBenchClient *syncBench;
         switch (benchMode) {
             case BENCH_RETWIS:
-                SyncTransactionBenchClient *syncBench =
-                    dynamic_cast<SyncTransactionBenchClient *>(bench);
+                syncBench = dynamic_cast<SyncTransactionBenchClient *>(bench);
                 ASSERT(syncBench != nullptr);
                 threads.push_back(new std::thread([syncBench, bdcb]() {
                     syncBench->Start([]() {});
@@ -661,6 +655,7 @@ int main(int argc, char **argv) {
                     bdcb();
                 }));
                 break;
+            case BENCH_UNKNOWN:
             default:
                 NOT_REACHABLE();
         }

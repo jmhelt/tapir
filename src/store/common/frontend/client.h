@@ -15,6 +15,7 @@
 
 #include "lib/assert.h"
 #include "lib/message.h"
+#include "store/common/stats.h"
 #include "store/common/timestamp.h"
 
 enum transaction_status_t {
@@ -64,7 +65,7 @@ class Client {
     virtual void Abort() = 0;
 
     // Returns statistics (vector of integers) about most recent transaction.
-    virtual std::vector<int> Stats() = 0;
+    inline Stats &GetStats() { return stats; }
 
     // Sharding logic: Given key, generates a number b/w 0 to nshards-1
     uint64_t key_to_shard(const std::string &key, uint64_t nshards) {
@@ -76,6 +77,9 @@ class Client {
 
         return (hash % nshards);
     };
+
+   protected:
+    Stats stats;
 };
 
 #endif /* _CLIENT_API_H_ */

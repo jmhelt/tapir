@@ -9,7 +9,7 @@ namespace retwis {
 
 class Follow : public RetwisTransaction {
    public:
-    Follow(KeySelector *keySelector, std::mt19937 &rand);
+    Follow(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~Follow();
 
     virtual transaction_status_t Execute(SyncClient &client) override;
