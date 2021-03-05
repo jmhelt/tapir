@@ -10,7 +10,7 @@ namespace retwis {
 
 class AddUser : public RetwisTransaction {
    public:
-    AddUser(KeySelector *keySelector, std::mt19937 &rand);
+    AddUser(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~AddUser();
 
     virtual transaction_status_t Execute(SyncClient &client) override;

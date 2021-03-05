@@ -4,9 +4,7 @@
  * latency.cc:
  *   latency profiling functions
  *
- * Copyright 2013-2015 Irene Zhang <iyzhang@cs.washington.edu>
- *                     Naveen Kr. Sharma <naveenks@cs.washington.edu>
- *                     Dan R. K. Ports  <drkp@cs.washington.edu>
+ * Copyright 2013 Dan R. K. Ports  <drkp@cs.washington.edu>
  * Copyright 2009-2012 Massachusetts Institute of Technology
  *
  * Permission is hereby granted, free of charge, to any person
@@ -39,17 +37,17 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <iostream>
-#include <fstream>
 
-#include "lib/message.h"
+#include <fstream>
+#include <iostream>
+
+#include "lib/assert.h"
 #include "lib/latency-format.pb.h"
+#include "lib/message.h"
 
 static struct Latency_t *latencyHead;
 
-static void
-LatencyInit(Latency_t *l, const char *name)
-{
+static void LatencyInit(Latency_t *l, const char *name) {
     memset(l, 0, sizeof *l);
     l->name = name;
 
@@ -59,37 +57,39 @@ LatencyInit(Latency_t *l, const char *name)
     }
 }
 
-void
-_Latency_Init(Latency_t *l, const char *name)
-{
+void _Latency_Init(Latency_t *l, const char *name) {
     LatencyInit(l, name);
     l->next = latencyHead;
     latencyHead = l;
 }
 
+/*
 static void
 LatencyMaybeFlush(void)
 {
 
-    static struct timespec lastFlush;
+    return;
 
-    struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
-        PPanic("Failed to get CLOCK_MONOTONIC");
+    // static struct timespec lastFlush;
 
-    if (now.tv_sec != lastFlush.tv_sec) {
-        lastFlush = now;
-        Latency_Flush();
-    }
+    // struct timespec now;
+    // if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+    //     PPanic("Failed to get CLOCK_MONOTONIC");
+
+    // if (now.tv_sec != lastFlush.tv_sec) {
+    //     lastFlush = now;
+    //     Latency_Flush();
+    // }
 }
+*/
 
-static inline Latency_Dist_t *
-LatencyAddHist(Latency_t *l, char type, uint64_t val, uint32_t count)
-{
+static inline Latency_Dist_t *LatencyAddHist(Latency_t *l, char type,
+                                             uint64_t val, uint32_t count) {
     if (!l->dists[(int)type]) {
         if (l->distPoolNext == LATENCY_DIST_POOL_SIZE) {
-            Panic("Too many distributions; maybe increase "
-                  "LATENCY_DIST_POOL_SIZE");
+            Panic(
+                "Too many distributions; maybe increase "
+                "LATENCY_DIST_POOL_SIZE");
         }
         l->dists[(int)type] = &l->distPool[l->distPoolNext++];
         l->dists[(int)type]->type = type;
@@ -102,37 +102,28 @@ LatencyAddHist(Latency_t *l, char type, uint64_t val, uint32_t count)
         val >>= 1;
         ++bucket;
     }
-    Assert(bucket < LATENCY_NUM_BUCKETS);
+    ASSERT(bucket < LATENCY_NUM_BUCKETS);
     d->buckets[bucket] += count;
 
     return d;
 }
 
-static void
-LatencyAdd(Latency_t *l, char type, uint64_t val)
-{
+static void LatencyAdd(Latency_t *l, char type, uint64_t val) {
     Latency_Dist_t *d = LatencyAddHist(l, type, val, 1);
 
-    if (val < d->min)
-        d->min = val;
-    if (val > d->max)
-        d->max = val;
+    if (val < d->min) d->min = val;
+    if (val > d->max) d->max = val;
     d->total += val;
     ++d->count;
 }
 
-static void
-LatencyMap(void (*f)(Latency_t *))
-{
+static void LatencyMap(void (*f)(Latency_t *)) {
     Latency_t *l = latencyHead;
 
-    for (; l; l = l->next)
-        f(l);
+    for (; l; l = l->next) f(l);
 }
 
-void
-Latency_StartRec(Latency_t *l, Latency_Frame_t *fr)
-{
+void Latency_StartRec(Latency_t *l, Latency_Frame_t *fr) {
     fr->accum = 0;
     fr->parent = l->bottom;
     l->bottom = fr;
@@ -140,22 +131,18 @@ Latency_StartRec(Latency_t *l, Latency_Frame_t *fr)
     Latency_Resume(l);
 }
 
-void
-Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type)
-{
+uint64_t Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type) {
     Latency_Pause(l);
 
-    Assert(l->bottom == fr);
+    ASSERT(l->bottom == fr);
     l->bottom = fr->parent;
 
     LatencyAdd(l, type, fr->accum);
 
-    LatencyMaybeFlush();
+    return fr->accum;
 }
 
-void
-Latency_Pause(Latency_t *l)
-{
+void Latency_Pause(Latency_t *l) {
     struct timespec end;
     if (clock_gettime(CLOCK_MONOTONIC, &end) < 0)
         PPanic("Failed to get CLOCK_MONOTONIC");
@@ -173,43 +160,33 @@ Latency_Pause(Latency_t *l)
     fr->accum += delta;
 }
 
-void
-Latency_Resume(Latency_t *l)
-{
+void Latency_Resume(Latency_t *l) {
     if (clock_gettime(CLOCK_MONOTONIC, &l->bottom->start) < 0)
         PPanic("Failed to get CLOCK_MONOTONIC");
 }
 
-void
-Latency_Sum(Latency_t *dest, Latency_t *summand)
-{
+void Latency_Sum(Latency_t *dest, Latency_t *summand) {
     for (int i = 0; i < summand->distPoolNext; ++i) {
         Latency_Dist_t *d = &summand->distPool[i];
         for (int b = 0; b < LATENCY_NUM_BUCKETS; ++b) {
-            if (d->buckets[b] == 0)
-                continue;
-            LatencyAddHist(dest, d->type, 1ll<<b, d->buckets[b]);
+            if (d->buckets[b] == 0) continue;
+            LatencyAddHist(dest, d->type, 1ll << b, d->buckets[b]);
         }
     }
 
     for (int i = 0; i < LATENCY_MAX_DIST; ++i) {
         Latency_Dist_t *dd = dest->dists[i];
         Latency_Dist_t *ds = summand->dists[i];
-        if (!ds)
-            continue;
+        if (!ds) continue;
 
-        if (ds->min < dd->min)
-            dd->min = ds->min;
-        if (ds->max > dd->max)
-            dd->max = ds->max;
+        if (ds->min < dd->min) dd->min = ds->min;
+        if (ds->max > dd->max) dd->max = ds->max;
         dd->total += ds->total;
         dd->count += ds->count;
     }
 }
 
-static char *
-LatencyFmtNS(uint64_t ns, char *buf)
-{
+char *LatencyFmtNS(uint64_t ns, char *buf) {
     static const char *units[] = {"ns", "us", "ms", "s"};
     unsigned int unit = 0;
     while (ns >= 10000 && unit < (sizeof units / sizeof units[0]) - 1) {
@@ -220,9 +197,7 @@ LatencyFmtNS(uint64_t ns, char *buf)
     return buf;
 }
 
-void
-Latency_Dump(Latency_t *l)
-{
+void Latency_Dump(Latency_t *l) {
     if (l->distPoolNext == 0) {
         // No distributions yet
         return;
@@ -241,8 +216,7 @@ Latency_Dump(Latency_t *l)
 
     for (int type = 0; type < LATENCY_MAX_DIST; ++type) {
         Latency_Dist_t *d = l->dists[type];
-        if (!d)
-            continue;
+        if (!d) continue;
         *ppnext = type;
         ppnext = &nextTypes[type];
 
@@ -252,13 +226,11 @@ Latency_Dump(Latency_t *l)
         for (medianBucket = 0; medianBucket < LATENCY_NUM_BUCKETS;
              ++medianBucket) {
             accum += d->buckets[medianBucket];
-            if (accum >= d->count / 2)
-                break;
+            if (accum >= d->count / 2) break;
         }
 
         char extra[3] = {'/', (char)type, 0};
-        if (type == '=')
-            extra[0] = '\0';
+        if (type == '=') extra[0] = '\0';
         QNotice("LATENCY %s%s: %s %s/%s %s (%" PRIu64 " samples, %s total)",
                 l->name, extra, LatencyFmtNS(d->min, buf[0]),
                 LatencyFmtNS(d->total / d->count, buf[1]),
@@ -277,8 +249,7 @@ Latency_Dump(Latency_t *l)
             Latency_Dist_t *d = &l->distPool[dist];
             total += d->buckets[i];
         }
-        if (total > largestCount)
-            largestCount = total;
+        if (total > largestCount) largestCount = total;
     }
 
     // Display the histogram
@@ -289,47 +260,35 @@ Latency_Dump(Latency_t *l)
         uint64_t total = 0;
         for (int type = firstType; type != -1; type = nextTypes[type]) {
             Latency_Dist_t *d = l->dists[type];
-            if (!d)
-                continue;
+            if (!d) continue;
             total += d->buckets[i];
-            int goal = ((total * LATENCY_HISTOGRAM_WIDTH)
-                        / largestCount);
-            for (; pos < goal; ++pos)
-                bar[pos] = type;
+            int goal = ((total * LATENCY_HISTOGRAM_WIDTH) / largestCount);
+            for (; pos < goal; ++pos) bar[pos] = type;
         }
         if (total > 0) {
             bar[pos] = '\0';
             if (lastPrinted < i - 3) {
                 QNotice("%10s |", "...");
             } else {
-                for (++lastPrinted; lastPrinted < i;
-                     ++lastPrinted)
+                for (++lastPrinted; lastPrinted < i; ++lastPrinted)
                     QNotice("%10s | %10ld |",
-                            LatencyFmtNS((uint64_t)1 << lastPrinted,
-                                         buf[0]), 0L);
+                            LatencyFmtNS((uint64_t)1 << lastPrinted, buf[0]),
+                            0L);
             }
-            QNotice("%10s | %10ld | %s",
-                    LatencyFmtNS((uint64_t)1 << i, buf[0]),
-                    total,
-                    bar);
+            QNotice("%10s | %10ld | %s", LatencyFmtNS((uint64_t)1 << i, buf[0]),
+                    total, bar);
             lastPrinted = i;
         }
     }
 }
 
-void
-Latency_DumpAll(void)
-{
-    LatencyMap(Latency_Dump);
-}
+void Latency_DumpAll(void) { LatencyMap(Latency_Dump); }
 
-void
-Latency_FlushTo(const char *fname)
-{
+void Latency_FlushTo(const char *fname) {
     std::ofstream outfile(fname);
     Latency_t *l = latencyHead;
     ::transport::latency::format::LatencyFile out;
-    
+
     for (; l; l = l->next) {
         ::transport::latency::format::Latency lout;
         Latency_Put(l, lout);
@@ -340,10 +299,7 @@ Latency_FlushTo(const char *fname)
     }
 }
 
-void
-Latency_Flush(void)
-{
-
+void Latency_Flush(void) {
     if (access("/tmp/stats/", R_OK) < 0) {
         mkdir("/tmp/stats", 0777);
         chmod("/tmp/stats", 0777);
@@ -355,12 +311,10 @@ Latency_Flush(void)
     Latency_FlushTo(fname);
 }
 
-void
-Latency_Put(Latency_t *l, ::transport::latency::format::Latency &out)
-{
+void Latency_Put(Latency_t *l, ::transport::latency::format::Latency &out) {
     out.Clear();
     out.set_name(l->name);
-    
+
     for (int i = 0; i < l->distPoolNext; ++i) {
         Latency_Dist_t *d = &l->distPool[i];
         ::transport::latency::format::LatencyDist *outd = out.add_dists();
@@ -369,21 +323,19 @@ Latency_Put(Latency_t *l, ::transport::latency::format::Latency &out)
         outd->set_max(d->max);
         outd->set_total(d->total);
         outd->set_count(d->count);
-        
+
         for (int b = 0; b < LATENCY_NUM_BUCKETS; ++b) {
-            outd->add_buckets(d->buckets[b]);            
+            outd->add_buckets(d->buckets[b]);
         }
     }
 }
 
-bool
-Latency_TryGet(const ::transport::latency::format::Latency &in, Latency_t *l)
-{
-    LatencyInit(l, strdup(in.name().c_str())); // XXX Memory leak
+bool Latency_TryGet(const ::transport::latency::format::Latency &in,
+                    Latency_t *l) {
+    LatencyInit(l, strdup(in.name().c_str()));  // XXX Memory leak
     l->distPoolNext = in.dists_size();
     for (int i = 0; i < l->distPoolNext; ++i) {
-        const ::transport::latency::format::LatencyDist &ind =
-            in.dists(i);
+        const ::transport::latency::format::LatencyDist &ind = in.dists(i);
         Latency_Dist_t *d = &l->distPool[i];
         d->type = ind.type();
         l->dists[(int)d->type] = d;

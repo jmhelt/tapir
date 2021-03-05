@@ -50,8 +50,8 @@ namespace tapirstore {
 
 class Client : public ::Client {
    public:
-    Client(const std::string configPath, int nShards, int closestReplica,
-           TrueTime timeserver = TrueTime(0));
+    Client(transport::Configuration *config, uint64_t nShards,
+           int closestReplica, TrueTime timeserver = TrueTime(0));
     virtual ~Client();
 
     // Overriding functions from ::Client.

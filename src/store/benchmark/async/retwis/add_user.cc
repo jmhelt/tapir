@@ -2,8 +2,8 @@
 
 namespace retwis {
 
-AddUser::AddUser(KeySelector *keySelector, std::mt19937 &rand)
-    : RetwisTransaction(keySelector, 4, rand) {}
+AddUser::AddUser(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout)
+    : RetwisTransaction(keySelector, 4, rand, timeout) {}
 
 AddUser::~AddUser() {}
 
@@ -18,7 +18,7 @@ transaction_status_t AddUser::Execute(SyncClient &client) {
     }
 
     Debug("COMMIT");
-    client.Commit(timeout);
+    return client.Commit(timeout);
 }
 
 }  // namespace retwis

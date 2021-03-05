@@ -9,7 +9,7 @@ namespace retwis {
 
 class GetTimeline : public RetwisTransaction {
    public:
-    GetTimeline(KeySelector *keySelector, std::mt19937 &rand);
+    GetTimeline(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~GetTimeline();
 
     virtual transaction_status_t Execute(SyncClient &client) override;

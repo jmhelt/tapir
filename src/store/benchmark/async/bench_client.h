@@ -34,7 +34,6 @@
 
 #include "lib/latency.h"
 #include "lib/transport.h"
-#include "store/common/frontend/async_client.h"
 #include "store/common/stats.h"
 
 typedef std::function<void()> bench_done_callback;

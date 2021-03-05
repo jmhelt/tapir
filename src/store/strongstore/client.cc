@@ -31,72 +31,46 @@
 
 #include "store/strongstore/client.h"
 
+#include "lib/latency.h"
+
 using namespace std;
 
 namespace strongstore {
 
-Client::Client(Mode mode, string configPath, int nShards, int closestReplica,
+Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
+               uint64_t nshards, int closestReplica, Transport *transport,
                Partitioner *part)
-    : transport(0.0, 0.0, 0), mode(mode), part(part) {
-    // Initialize all state here;
-    client_id = 0;
-    while (client_id == 0) {
-        random_device rd;
-        mt19937_64 gen(rd());
-        uniform_int_distribution<uint64_t> dis;
-        client_id = dis(gen);
-    }
-    t_id = (client_id / 10000) * 10000;
+    : config(config),
+      client_id(id),
+      nshards(nshards),
+      transport(transport),
+      mode(mode),
+      part(part) {
+    t_id = client_id << 26;
 
-    nshards = nShards;
-    bclient.reserve(nshards);
-
-    Debug("Initializing SpanStore client with id [%lu]", client_id);
-
-    /* Start a client for time stamp server. */
-    if (mode == MODE_OCC) {
-        // TODO: Fix this config path
-        string tssConfigPath = configPath + ".tss.config";
-        ifstream tssConfigStream(tssConfigPath);
-        if (tssConfigStream.fail()) {
-            fprintf(stderr, "unable to read configuration file: %s\n",
-                    tssConfigPath.c_str());
-        }
-        transport::Configuration tssConfig(tssConfigStream);
-        tss =
-            new replication::vr::VRClient(tssConfig, &transport, 0, client_id);
-    }
+    Debug("Initializing StrongStore client with id [%lu]", client_id);
 
     /* Start a client for each shard. */
-    ifstream configStream(configPath);
-    if (configStream.fail()) {
-        fprintf(stderr, "unable to read configuration file: %s\n",
-                configPath.c_str());
-    }
-    transport::Configuration config(configStream);
-    for (int i = 0; i < nShards; i++) {
+    for (uint64_t i = 0; i < nshards; i++) {
         ShardClient *shardclient = new ShardClient(
-            mode, &config, &transport, client_id, i, closestReplica);
-        bclient[i] = new BufferClient(shardclient);
+            mode, config, transport, client_id, i, closestReplica);
+        bclient.push_back(new BufferClient(shardclient));
+        sclient.push_back(shardclient);
     }
-
-    /* Run the transport in a new thread. */
-    clientTransport = new thread(&Client::run_client, this);
 
     Debug("SpanStore client [%lu] created!", client_id);
+    _Latency_Init(&opLat, "op_lat");
 }
 
 Client::~Client() {
-    transport.Stop();
-    delete tss;
+    Latency_Dump(&opLat);
     for (auto b : bclient) {
         delete b;
     }
-    clientTransport->join();
+    for (auto s : sclient) {
+        delete s;
+    }
 }
-
-/* Runs the transport event loop. */
-void Client::run_client() { transport.Run(); }
 
 /* Begins a transaction. All subsequent operations before a commit() or
  * abort() are part of this transaction.
@@ -107,8 +81,7 @@ void Client::Begin() {
     Debug("BEGIN Transaction");
     t_id++;
     participants.clear();
-    commit_sleep = -1;
-    for (int i = 0; i < nshards; i++) {
+    for (uint64_t i = 0; i < nshards; i++) {
         bclient[i]->Begin(t_id);
     }
 }
@@ -203,18 +176,6 @@ void Client::Abort() { Panic("Unimplemented: ABORT Transaction"); }
 vector<int> Client::Stats() {
     vector<int> v;
     return v;
-}
-
-/* Callback from a tss replica upon any request. */
-void Client::tssCallback(const string &request, const string &reply) {
-    lock_guard<mutex> lock(cv_m);
-    Debug("Received TSS callback [%s]", reply.c_str());
-
-    // Copy reply to "replica_reply".
-    replica_reply = reply;
-
-    // Wake up thread waiting for the reply.
-    cv.notify_all();
 }
 
 }  // namespace strongstore

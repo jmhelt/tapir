@@ -2,8 +2,8 @@
 
 namespace retwis {
 
-Follow::Follow(KeySelector *keySelector, std::mt19937 &rand)
-    : RetwisTransaction(keySelector, 2, rand) {}
+Follow::Follow(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout)
+    : RetwisTransaction(keySelector, 2, rand, timeout) {}
 
 Follow::~Follow() {}
 
@@ -17,7 +17,7 @@ transaction_status_t Follow::Execute(SyncClient &client) {
     }
 
     Debug("COMMIT");
-    client.Commit(timeout);
+    return client.Commit(timeout);
 }
 
 }  // namespace retwis
