@@ -133,7 +133,6 @@ namespace strongstore
                     else // Failed to commit
                     {
                         Debug("Fast path commit failed");
-                        store->Abort(request.txnid());
                         coordinator.Abort(request.txnid());
                         // Reply to client
                         replicate = false;
@@ -172,7 +171,6 @@ namespace strongstore
                 else
                 {
                     Debug("Prepare failed");
-                    store->Abort(request.txnid());
                     // Send message to coordinator
                     shardClient.PrepareAbort(request.prepare().coordinatorshard(), request.txnid(), groupIdx);
                     // Reply to client
@@ -210,7 +208,6 @@ namespace strongstore
                 {
                     Debug("Fast path commit failed");
                     requestIDs = coordinator.GetRequestIDs(request.txnid());
-                    store->Abort(request.txnid());
                     coordinator.Abort(request.txnid());
                     resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
                     replicate = false;

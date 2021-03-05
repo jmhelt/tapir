@@ -85,6 +85,7 @@ LockStore::Prepare(uint64_t id, const Transaction &txn)
         Debug("[%lu] PREPARED TO COMMIT", id);
         return REPLY_OK;
     } else {
+        dropLocks(id, txn);
         Debug("[%lu] Could not acquire write locks", id);
         return REPLY_FAIL;
     }
@@ -154,6 +155,7 @@ LockStore::getLocks(uint64_t id, const Transaction &txn)
             ret = false;
         }
     }
+
     return ret;
 }
 
