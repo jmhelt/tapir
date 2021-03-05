@@ -9,10 +9,6 @@
 #ifndef _TRUETIME_H_
 #define _TRUETIME_H_
 
-#include <sys/time.h>
-
-#include <cstdlib>
-
 #include "lib/message.h"
 
 class TrueTimeInterval {
