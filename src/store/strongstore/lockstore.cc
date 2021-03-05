@@ -86,7 +86,7 @@ LockStore::Prepare(uint64_t id, const Transaction &txn)
         return REPLY_OK;
     } else {
         Debug("[%lu] Could not acquire write locks", id);
-        return REPLY_RETRY;
+        return REPLY_FAIL;
     }
 }
 
@@ -111,10 +111,12 @@ LockStore::Commit(uint64_t id, uint64_t timestamp)
 }
 
 void
-LockStore::Abort(uint64_t id, const Transaction &txn)
+LockStore::Abort(uint64_t id)
 {
     Debug("[%lu] ABORT", id);
-    dropLocks(id, txn);
+    ASSERT(prepared.find(id) != prepared.end());
+
+    dropLocks(id, prepared[id]);
     prepared.erase(id);
 }
 

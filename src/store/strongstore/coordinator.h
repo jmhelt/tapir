@@ -126,7 +126,8 @@ namespace strongstore
 
     private:
         TrueTime &tt;
-        std::unordered_map<uint64_t, PreparedTransaction> preparedTransactions;
+        std::unordered_map<uint64_t, PreparedTransaction> preparedTransactions_;
+        std::unordered_set<uint64_t> abortedTransactions_;
     };
 
 } // namespace strongstore

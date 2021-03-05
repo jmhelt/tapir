@@ -133,12 +133,22 @@ namespace strongstore
                     else // Failed to commit
                     {
                         Debug("Fast path commit failed");
+                        store->Abort(request.txnid());
                         coordinator.Abort(request.txnid());
                         // Reply to client
                         replicate = false;
-                        reply.set_status(status);
+                        reply.set_status(REPLY_FAIL);
                         reply.SerializeToString(&str2);
                     }
+                }
+                else if (d == Decision::ABORT)
+                {
+                    Debug("Abort: %lu", request.txnid());
+                    coordinator.Abort(request.txnid());
+                    // Reply to client
+                    replicate = false;
+                    reply.set_status(REPLY_FAIL);
+                    reply.SerializeToString(&str2);
                 }
                 else // Wait for other participants
                 {
@@ -162,9 +172,9 @@ namespace strongstore
                 else
                 {
                     Debug("Prepare failed");
-                    store->Abort(request.txnid(), Transaction(request.prepare().txn()));
+                    store->Abort(request.txnid());
                     // Send message to coordinator
-                    shardClient.PrepareAbort(request.prepare().coordinatorshard(), request.txnid());
+                    shardClient.PrepareAbort(request.prepare().coordinatorshard(), request.txnid(), groupIdx);
                     // Reply to client
                     replicate = false;
                     reply.set_status(status);
@@ -199,13 +209,25 @@ namespace strongstore
                 else // Failed to commit
                 {
                     Debug("Fast path commit failed");
-                    coordinator.Abort(request.txnid());
                     requestIDs = coordinator.GetRequestIDs(request.txnid());
+                    store->Abort(request.txnid());
+                    coordinator.Abort(request.txnid());
                     resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
                     replicate = false;
-                    reply.set_status(status);
+                    reply.set_status(REPLY_FAIL);
                     reply.SerializeToString(&str2);
                 }
+            }
+            else if (cd.d == Decision::ABORT)
+            {
+                Debug("Abort: %lu", request.txnid());
+                requestIDs = coordinator.GetRequestIDs(request.txnid());
+                coordinator.Abort(request.txnid());
+                resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
+                // Reply to client and shards
+                replicate = false;
+                reply.set_status(REPLY_FAIL);
+                reply.SerializeToString(&str2);
             }
             else // Wait for other participants
             {
@@ -214,6 +236,15 @@ namespace strongstore
                 // Delay response to client
                 resRequestIDs.erase(resRequestIDs.begin());
             }
+            break;
+        case strongstore::proto::Request::PREPARE_ABORT: // Only coordinator receives prepare ABORT
+            Debug("Received Prepare ABORT");
+            requestIDs = coordinator.GetRequestIDs(request.txnid());
+            coordinator.Abort(request.txnid());
+            resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
+            replicate = false;
+            reply.set_status(REPLY_FAIL);
+            reply.SerializeToString(&str2);
             break;
         case strongstore::proto::Request::COMMIT:
             replicate = true;
@@ -250,8 +281,6 @@ namespace strongstore
 
         switch (request.op())
         {
-        case strongstore::proto::Request::GET:
-            return;
         case strongstore::proto::Request::PREPARE:
             // get a prepare timestamp and return to client
             store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
@@ -267,7 +296,6 @@ namespace strongstore
             Debug("Received COMMIT");
             if (request.has_prepare()) // Fast path commit
             {
-                Debug("Fast path COMMIT");
                 store->Prepare(request.txnid(), Transaction(request.prepare().txn()));
             }
             if (store->Commit(request.txnid(), request.commit().timestamp()))
@@ -285,6 +313,7 @@ namespace strongstore
                     requestIDs = coordinator.GetRequestIDs(request.txnid());
                     resRequestIDs.insert(requestIDs.begin(), requestIDs.end());
                 } else {
+                    // Don't respond to clients or shards
                     // Only leader needs to respond to client
                     resRequestIDs.erase(resRequestIDs.begin());
                 }
@@ -294,7 +323,8 @@ namespace strongstore
             }
             break;
         case strongstore::proto::Request::ABORT:
-            store->Abort(request.txnid(), Transaction(request.abort().txn()));
+            Debug("Received ABORT");
+            store->Abort(request.txnid());
             break;
         default:
             Panic("Unrecognized operation.");

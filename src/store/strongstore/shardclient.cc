@@ -188,7 +188,7 @@ namespace strongstore
     }
 
     void ShardClient::PrepareOK(uint64_t id,
-                                int participantShard, 
+                                int participantShard,
                                 uint64_t prepareTS,
                                 replication::Client::continuation_t continuation)
     {
@@ -204,34 +204,26 @@ namespace strongstore
         request.SerializeToString(&request_str);
 
         transport->Timer(0, [=]() {
-            client->Invoke(request_str,
-                           continuation);
-                        //    bind(&ShardClient::PrepareOKCallback,
-                        //         this,
-                        //         placeholders::_1,
-                        //         placeholders::_2));
+            client->Invoke(request_str, continuation);
         });
     }
 
     void ShardClient::PrepareAbort(uint64_t id,
-                                    Promise *promise)
+                                   int participantShard,
+                                   replication::Client::continuation_t continuation)
     {
-        Debug("[shard %i] Sending PREPARE_OK: %lu", shard, id);
+        Debug("[shard %i] Sending PREPARE_ABORT: %lu", shard, id);
 
         // create prepare_ok request
         string request_str;
         Request request;
         request.set_op(Request::PREPARE_ABORT);
         request.set_txnid(id);
+        request.mutable_prepareabort()->set_participantshard(participantShard);
         request.SerializeToString(&request_str);
 
         transport->Timer(0, [=]() {
-            waiting = promise;
-            client->Invoke(request_str,
-                           bind(&ShardClient::PrepareAbortCallback,
-                                this,
-                                placeholders::_1,
-                                placeholders::_2));
+            client->Invoke(request_str, continuation);
         });
     }
 
@@ -262,7 +254,7 @@ namespace strongstore
 
     /* Aborts the ongoing transaction. */
     void
-    ShardClient::Abort(uint64_t id, const Transaction &txn, Promise *promise)
+    ShardClient::Abort(int coordShard, uint64_t id)
     {
         Debug("[shard %i] Sending ABORT: %lu", shard, id);
 
@@ -271,13 +263,11 @@ namespace strongstore
         Request request;
         request.set_op(Request::ABORT);
         request.set_txnid(id);
-        txn.serialize(request.mutable_abort()->mutable_txn());
+        request.mutable_abort()->set_coordinatorshard(coordShard);
         request.SerializeToString(&request_str);
 
         blockingBegin = new Promise(ABORT_TIMEOUT);
         transport->Timer(0, [=]() {
-            waiting = promise;
-
             client->Invoke(request_str,
                            bind(&ShardClient::AbortCallback,
                                 this,
@@ -334,9 +324,19 @@ namespace strongstore
         {
             Promise *w = waiting;
             waiting = NULL;
-            ASSERT(reply.has_timestamp());
-            Debug("[shard %i] COMMIT timestamp [%lu]", shard, reply.timestamp());
-            w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
+            switch (reply.status())
+            {
+            case REPLY_OK:
+                ASSERT(reply.status() == REPLY_FAIL || reply.has_timestamp());
+                Debug("[shard %i] COMMIT timestamp [%lu]", shard, reply.timestamp());
+                w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
+                break;
+            case REPLY_FAIL:
+                w->Reply(reply.status());
+                break;
+            default:
+                NOT_REACHABLE();
+            }
         }
     }
 
@@ -409,15 +409,6 @@ namespace strongstore
         reply.ParseFromString(reply_str);
         ASSERT(reply.status() == REPLY_OK);
 
-        ASSERT(blockingBegin != NULL);
-        blockingBegin->Reply(0);
-
-        if (waiting != NULL)
-        {
-            Promise *w = waiting;
-            waiting = NULL;
-            w->Reply(reply.status());
-        }
         Debug("[shard %i] Received ABORT callback [%d]", shard, reply.status());
     }
 

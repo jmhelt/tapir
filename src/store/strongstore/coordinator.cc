@@ -4,7 +4,7 @@
 namespace strongstore
 {
 
-    Coordinator::Coordinator(TrueTime &tt) : tt{tt}, preparedTransactions{}
+    Coordinator::Coordinator(TrueTime &tt) : tt{tt}, preparedTransactions_{}, abortedTransactions_{}
     {
     }
 
@@ -14,22 +14,27 @@ namespace strongstore
 
     std::unordered_set<replication::RequestID> Coordinator::GetRequestIDs(uint64_t txnID)
     {
-        auto search = preparedTransactions.find(txnID);
-        ASSERT(search != preparedTransactions.end());
+        if (abortedTransactions_.find(txnID) != abortedTransactions_.end())
+        {
+            return {};
+        }
+
+        auto search = preparedTransactions_.find(txnID);
+        ASSERT(search != preparedTransactions_.end());
         return search->second.GetRequestIDs();
     }
 
     Transaction Coordinator::GetTransaction(uint64_t txnID)
     {
-        auto search = preparedTransactions.find(txnID);
-        ASSERT(search != preparedTransactions.end());
+        auto search = preparedTransactions_.find(txnID);
+        ASSERT(search != preparedTransactions_.end());
         return search->second.GetTransaction();
     }
 
     int Coordinator::GetNParticipants(uint64_t txnID)
     {
-        auto search = preparedTransactions.find(txnID);
-        ASSERT(search != preparedTransactions.end());
+        auto search = preparedTransactions_.find(txnID);
+        ASSERT(search != preparedTransactions_.end());
         return search->second.GetNParticipants();
     }
 
@@ -39,13 +44,17 @@ namespace strongstore
         uint64_t error;
         tt.GetTimeAndError(timeStart, error);
         timeStart += error;
-
         Debug("Coordinator: StartTransaction %lu %lu %lu %lu %d", requestID.clientID, requestID.requestID, txnID, timeStart, nParticipants);
-        auto search = preparedTransactions.find(txnID);
-        if (search == preparedTransactions.end())
+        if (abortedTransactions_.find(txnID) != abortedTransactions_.end())
         {
-            preparedTransactions.insert({txnID, {requestID, timeStart, nParticipants, transaction}});
-            search = preparedTransactions.find(txnID);
+            return Decision::ABORT;
+        }
+
+        auto search = preparedTransactions_.find(txnID);
+        if (search == preparedTransactions_.end())
+        {
+            preparedTransactions_.insert({txnID, {requestID, timeStart, nParticipants, transaction}});
+            search = preparedTransactions_.find(txnID);
         }
         else
         {
@@ -67,11 +76,16 @@ namespace strongstore
 
     CommitDecision Coordinator::ReceivePrepareOK(replication::RequestID requestID, uint64_t txnID, int shardID, uint64_t timePrepare)
     {
-        auto search = preparedTransactions.find(txnID);
-        if (search == preparedTransactions.end())
+        if (abortedTransactions_.find(txnID) != abortedTransactions_.end())
         {
-            preparedTransactions.insert({txnID, {requestID, shardID}});
-            search = preparedTransactions.find(txnID);
+            return {Decision::ABORT, 0};
+        }
+
+        auto search = preparedTransactions_.find(txnID);
+        if (search == preparedTransactions_.end())
+        {
+            preparedTransactions_.insert({txnID, {requestID, shardID}});
+            search = preparedTransactions_.find(txnID);
         }
 
         search->second.PrepareOK(requestID, shardID, timePrepare);
@@ -92,12 +106,13 @@ namespace strongstore
 
     void Coordinator::Commit(uint64_t txnID)
     {
-        preparedTransactions.erase(txnID);
+        preparedTransactions_.erase(txnID);
     }
 
     void Coordinator::Abort(uint64_t txnID)
     {
-        preparedTransactions.erase(txnID);
+        abortedTransactions_.insert(txnID);
+        preparedTransactions_.erase(txnID);
     }
 
 };
