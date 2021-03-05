@@ -9,17 +9,44 @@
 #ifndef _CLIENT_API_H_
 #define _CLIENT_API_H_
 
-#include "lib/assert.h"
-#include "lib/message.h"
-
+#include <functional>
 #include <string>
 #include <vector>
 
-class Client
-{
-public:
-    Client() {};
-    virtual ~Client() {};
+#include "lib/assert.h"
+#include "lib/message.h"
+#include "store/common/timestamp.h"
+
+enum transaction_status_t {
+    COMMITTED = 0,
+    ABORTED_USER,
+    ABORTED_SYSTEM,
+    ABORTED_MAX_RETRIES
+};
+
+typedef std::function<void(uint64_t)> begin_callback;
+typedef std::function<void()> begin_timeout_callback;
+
+typedef std::function<void(int, const std::string &, const std::string &,
+                           Timestamp)>
+    get_callback;
+typedef std::function<void(int, const std::string &)> get_timeout_callback;
+
+typedef std::function<void(int, const std::string &, const std::string &)>
+    put_callback;
+typedef std::function<void(int, const std::string &, const std::string &)>
+    put_timeout_callback;
+
+typedef std::function<void(transaction_status_t)> commit_callback;
+typedef std::function<void()> commit_timeout_callback;
+
+typedef std::function<void()> abort_callback;
+typedef std::function<void()> abort_timeout_callback;
+
+class Client {
+   public:
+    Client(){};
+    virtual ~Client(){};
 
     // Begin a transaction.
     virtual void Begin() = 0;
@@ -32,7 +59,7 @@ public:
 
     // Commit all Get(s) and Put(s) since Begin().
     virtual bool Commit() = 0;
-    
+
     // Abort all Get(s) and Put(s) since Begin().
     virtual void Abort() = 0;
 
@@ -42,7 +69,7 @@ public:
     // Sharding logic: Given key, generates a number b/w 0 to nshards-1
     uint64_t key_to_shard(const std::string &key, uint64_t nshards) {
         uint64_t hash = 5381;
-        const char* str = key.c_str();
+        const char *str = key.c_str();
         for (unsigned int i = 0; i < key.length(); i++) {
             hash = ((hash << 5) + hash) + (uint64_t)str[i];
         }

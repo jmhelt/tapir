@@ -17,7 +17,7 @@
     ]
   ],
   "server_port": 7087,
-  "truetime_error": 10,
+  "truetime_error": 0,
   "client_num_keys": 100,
   "benchmark_name": "retwis",
   "client_key_selector": "uniform",
@@ -213,7 +213,7 @@
   "server_bin_name": "server",
   "src_directory": "/home/jhelt/git/rss/tapir/src",
   "make_collect_bins": [
-    "store/benchmark/retwisClient",
+    "store/benchmark/async/benchmark",
     "store/server"
   ],
   "make_clean": false,

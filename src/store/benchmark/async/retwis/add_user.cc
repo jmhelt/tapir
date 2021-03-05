@@ -1,0 +1,24 @@
+#include "store/benchmark/async/retwis/add_user.h"
+
+namespace retwis {
+
+AddUser::AddUser(KeySelector *keySelector, std::mt19937 &rand)
+    : RetwisTransaction(keySelector, 4, rand) {}
+
+AddUser::~AddUser() {}
+
+transaction_status_t AddUser::Execute(SyncClient &client) {
+    Debug("ADD_USER");
+    client.Begin(timeout);
+
+    client.Get(GetKey(0), timeout);
+
+    for (int i = 0; i < 3; i++) {
+        client.Put(GetKey(i), GetKey(i), timeout);
+    }
+
+    Debug("COMMIT");
+    client.Commit(timeout);
+}
+
+}  // namespace retwis
