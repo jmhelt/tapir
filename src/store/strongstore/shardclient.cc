@@ -182,6 +182,7 @@ namespace strongstore
             client->Invoke(request_str,
                            bind(&ShardClient::PrepareCallback,
                                 this,
+                                promise,
                                 placeholders::_1,
                                 placeholders::_2));
         });
@@ -313,26 +314,24 @@ namespace strongstore
 
     /* Callback from a shard replica on prepare operation completion. */
     void
-    ShardClient::PrepareCallback(const string &request_str, const string &reply_str)
+    ShardClient::PrepareCallback(Promise *promise, const string &request_str, const string &reply_str)
     {
         Reply reply;
 
         reply.ParseFromString(reply_str);
         Debug("[shard %i] Received COMMIT callback [%d]", shard, reply.status());
 
-        if (waiting != NULL)
+        if (promise != NULL)
         {
-            Promise *w = waiting;
-            waiting = NULL;
             switch (reply.status())
             {
             case REPLY_OK:
-                ASSERT(reply.status() == REPLY_FAIL || reply.has_timestamp());
+                ASSERT(reply.has_timestamp());
                 Debug("[shard %i] COMMIT timestamp [%lu]", shard, reply.timestamp());
-                w->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
+                promise->Reply(reply.status(), Timestamp(reply.timestamp(), 0));
                 break;
             case REPLY_FAIL:
-                w->Reply(reply.status());
+                promise->Reply(reply.status());
                 break;
             default:
                 NOT_REACHABLE();

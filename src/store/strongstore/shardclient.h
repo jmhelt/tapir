@@ -82,20 +82,20 @@ namespace strongstore
         void Begin(uint64_t id);
         void Get(uint64_t id,
                  const std::string &key,
-                 Promise *promise = NULL);
+                 Promise *promise = nullptr);
         void Get(uint64_t id,
                  const std::string &key,
                  const Timestamp &timestamp,
-                 Promise *promise = NULL);
+                 Promise *promise = nullptr);
         void Put(uint64_t id,
                  const std::string &key,
                  const std::string &value,
-                 Promise *promise = NULL);
+                 Promise *promise = nullptr);
         void Prepare(uint64_t id,
                      const Transaction &txn,
                      int coordShard,
                      int nParticipants,
-                     Promise *promise = NULL);
+                     Promise *promise = nullptr);
         void PrepareOK(uint64_t id,
                        int participantShard,
                        uint64_t prepareTS,
@@ -121,7 +121,7 @@ namespace strongstore
 
         /* Callbacks for hearing back from a shard for an operation. */
         void GetCallback(const std::string &, const std::string &);
-        void PrepareCallback(const std::string &, const std::string &);
+        void PrepareCallback(Promise *promise, const std::string &, const std::string &);
         void PrepareOKCallback(const string &, const string &);
         void PrepareAbortCallback(const string &, const string &);
         void CommitCallback(const std::string &, const std::string &);
