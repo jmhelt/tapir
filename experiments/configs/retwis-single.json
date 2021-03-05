@@ -202,7 +202,7 @@
   "base_remote_bin_directory_nfs": "/users/matthelb/morty",
   "base_remote_exp_directory": "/mnt/extra/experiments",
   "bin_directory_name": "bin",
-  "client_bin_name": "retwisClient",
+  "client_bin_name": "benchmark",
   "client_name_format_str": "client-%d-%d",
   "emulab_user": "jhelt",
   "max_bandwidth": "1gibps",
