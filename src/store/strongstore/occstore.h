@@ -50,12 +50,12 @@ public:
     ~OCCStore();
 
     // Overriding from TxnStore.
-    int Get(uint64_t id, const std::string &key, std::pair<Timestamp, std::string> &value);
-    int Get(uint64_t id, const std::string &key, const Timestamp &timestamp, std::pair<Timestamp, std::string> &value);
-    int Prepare(uint64_t id, const Transaction &txn);
-    bool Commit(uint64_t id, uint64_t timestamp);
-    void Abort(uint64_t id, const Transaction &txn = Transaction());
-    void Load(const std::string &key, const std::string &value, const Timestamp &timestamp);
+    int Get(uint64_t id, const std::string &key, std::pair<Timestamp, std::string> &value) override;
+    int Get(uint64_t id, const std::string &key, const Timestamp &timestamp, std::pair<Timestamp, std::string> &value) override;
+    int Prepare(uint64_t id, const Transaction &txn) override;
+    bool Commit(uint64_t id, uint64_t timestamp) override;
+    void Abort(uint64_t id) override;
+    void Load(const std::string &key, const std::string &value, const Timestamp &timestamp) override;
 
 private:
     // Data store.

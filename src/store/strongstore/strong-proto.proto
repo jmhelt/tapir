@@ -21,13 +21,17 @@ message PrepareOKMessage {
     required int32 participantShard = 2;
 }
 
+message PrepareAbortMessage {
+    required int32 participantShard = 1;
+}
+
 message CommitMessage {
     required uint64 timestamp = 1;
     required int32 coordinatorShard = 2;
 }
 
 message AbortMessage {
-     required TransactionMessage txn = 1;
+    required int32 coordinatorShard = 1;
 }
 
 message Request {
@@ -44,8 +48,9 @@ message Request {
      optional GetMessage get = 3;
      optional PrepareMessage prepare = 4;
      optional PrepareOKMessage prepareOK = 5;
-     optional CommitMessage commit = 6;
-     optional AbortMessage abort = 7;
+     optional PrepareAbortMessage prepareAbort = 6;
+     optional CommitMessage commit = 7;
+     optional AbortMessage abort = 8;
 }
 
 message Reply {

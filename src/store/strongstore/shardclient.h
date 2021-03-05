@@ -101,11 +101,10 @@ namespace strongstore
                        uint64_t prepareTS,
                        replication::Client::continuation_t continuation);
         void PrepareAbort(uint64_t id,
-                          Promise *promise = NULL);
+                          int participantShard,
+                          replication::Client::continuation_t continuation);
         void Commit(int coordShard, uint64_t id, uint64_t timestamp);
-        void Abort(uint64_t id,
-                   const Transaction &txn,
-                   Promise *promise = NULL);
+        void Abort(int coordShard, uint64_t id);
 
     private:
         Transport *transport; // Transport layer.

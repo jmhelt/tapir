@@ -60,7 +60,7 @@ Server::ExecInconsistentUpcall(const string &str1)
         store->Commit(request.txnid(), request.commit().timestamp());
         break;
     case tapirstore::proto::Request::ABORT:
-        store->Abort(request.txnid(), Transaction(request.abort().txn()));
+        store->Abort(request.txnid());
         break;
     default:
         Panic("Unrecognized inconsisternt operation.");
