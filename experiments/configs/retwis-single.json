@@ -1,16 +1,23 @@
 {
   "replication_protocol": "strong",
   "client_protocol_mode": "span-lock",
-  "server_names": ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
-  "num_shards": 3,
+  "server_names": [
+    "us-east-1-0",
+    "us-east-1-1",
+    "us-east-1-2"
+  ],
+  "num_shards": 1,
   "shard_config": "shard.config",
   "fault_tolerance": 1,
   "shards": [
-    ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
-    ["us-east-1-0", "us-east-1-1", "us-east-1-2"],
-    ["us-east-1-0", "us-east-1-1", "us-east-1-2"]
+    [
+      "us-east-1-0",
+      "us-east-1-1",
+      "us-east-1-2"
+    ]
   ],
   "server_port": 7087,
+  "truetime_error": 10,
   "client_num_keys": 100,
   "benchmark_name": "retwis",
   "client_key_selector": "uniform",
@@ -23,8 +30,13 @@
   "client_max_backoff": 2500,
   "client_message_timeout": 60000,
   "run_locally": true,
-  "replication_protocol_settings": { "message_transport_type": "udp" },
-  "stats_merge_lists": ["txn_groups", "commit_branch"],
+  "replication_protocol_settings": {
+    "message_transport_type": "udp"
+  },
+  "stats_merge_lists": [
+    "txn_groups",
+    "commit_branch"
+  ],
   "experiment_name": "rss",
   "codebase_name": "rss",
   "client_total": 1,
@@ -45,7 +57,11 @@
   "client_host_format_str": "client-%d-%d.%s.%s.utah.cloudlab.us",
   "project_name": "morty-pg0",
   "server_regions": {
-      "us-east-1": ["us-east-1-0", "us-east-1-1", "us-east-1-2"]
+    "us-east-1": [
+      "us-east-1-0",
+      "us-east-1-1",
+      "us-east-1-2"
+    ]
   },
   "region_rtt_latencies": {
     "us-east-1": {
@@ -54,7 +70,7 @@
       "ap-northeast-1": 160,
       "us-west-1": 63,
       "eu-central-1": 87,
-      "ap-southeast-2": 199 
+      "ap-southeast-2": 199
     },
     "eu-west-1": {
       "us-east-1": 73,
@@ -62,7 +78,7 @@
       "ap-northeast-1": 220,
       "us-west-1": 145,
       "eu-central-1": 26,
-      "ap-southeast-2":  255
+      "ap-southeast-2": 255
     },
     "ap-northeast-1": {
       "us-east-1": 160,
@@ -105,13 +121,25 @@
       "height": 600,
       "width": 800,
       "series_indep_vars_idx": 0,
-      "series_titles": ["Spanner", "Spanner-RSS"],
+      "series_titles": [
+        "Spanner",
+        "Spanner-RSS"
+      ],
       "x_var_is_config": false,
-      "x_var": ["run_stats", "combined", "tput", "p50"],
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ],
       "x_label": "Throughput (txn/s)",
       "y_label": "p50 Latency (ms)",
       "x_indep_vars_idx": 1,
-      "y_var": ["aggregate", "combined", "p50"]
+      "y_var": [
+        "aggregate",
+        "combined",
+        "p50"
+      ]
     },
     {
       "name": "tput-clients",
@@ -119,13 +147,23 @@
       "height": 600,
       "width": 800,
       "series_indep_vars_idx": 0,
-      "series_titles": ["Spanner", "Spanner-RSS"],
+      "series_titles": [
+        "Spanner",
+        "Spanner-RSS"
+      ],
       "x_var_is_config": true,
-      "x_var": ["client_total"],
+      "x_var": [
+        "client_total"
+      ],
       "x_label": "Number of Clients",
       "y_label": "Throughput (txn/s)",
       "x_indep_vars_idx": 1,
-      "y_var": ["run_stats", "combined", "tput", "p50"]
+      "y_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
     }
   ],
   "cdf_plots": {
@@ -180,13 +218,11 @@
   ],
   "make_clean": false,
   "network_config_file_name": "shard.config",
-
   "remote_bin_directory_nfs_enabled": false,
   "client_combine_stats_blacklist": [],
   "client_stats_blacklist": [],
   "client_cdf_plot_blacklist": [],
-  "make_env": {
-  },
+  "make_env": {},
   "server_rdma_port": 9087,
   "rxe_cfg_path": "/media/matthelb/DATA/projects/msr-rdma/rdma-replication-meta/rdma-core/build/providers/rxe/rxe_cfg.in",
   "client_read_percentage": 0,

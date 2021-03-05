@@ -27,32 +27,31 @@
  * SOFTWARE.
  *
  **********************************************************************/
- 
+
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
-
-#include "lib/assert.h"
-#include "lib/message.h"
-#include "lib/configuration.h"
-#include "lib/udptransport.h"
-#include "replication/vr/client.h"
-#include "store/strongstore/strongbufferclient.h"
-#include "store/common/frontend/client.h"
-#include "store/common/partitioner.h"
-#include "store/common/truetime.h"
-#include "store/strongstore/strong-proto.pb.h"
-#include "store/strongstore/shardclient.h"
 
 #include <set>
 #include <thread>
 
+#include "lib/assert.h"
+#include "lib/configuration.h"
+#include "lib/message.h"
+#include "lib/udptransport.h"
+#include "replication/vr/client.h"
+#include "store/common/frontend/client.h"
+#include "store/common/partitioner.h"
+#include "store/common/truetime.h"
+#include "store/strongstore/shardclient.h"
+#include "store/strongstore/strong-proto.pb.h"
+#include "store/strongstore/strongbufferclient.h"
+
 namespace strongstore {
 
-class Client : public ::Client
-{
-public:
-    Client(Mode mode, string configPath, int nshards,
-            int closestReplica, Partitioner *part, TrueTime timeServer);
+class Client : public ::Client {
+   public:
+    Client(Mode mode, string configPath, int nshards, int closestReplica,
+           Partitioner *part);
     ~Client();
 
     // Overriding functions from ::Client
@@ -63,9 +62,9 @@ public:
     void Abort();
     std::vector<int> Stats();
 
-private:
+   private:
     /* Private helper functions. */
-    void run_client(); // Runs the transport event loop.
+    void run_client();  // Runs the transport event loop.
 
     // timestamp server call back
     void tssCallback(const string &request, const string &reply);
@@ -90,7 +89,7 @@ private:
 
     // Transport used by paxos client proxies.
     UDPTransport transport;
-    
+
     // Thread running the transport event loop.
     std::thread *clientTransport;
 
@@ -101,13 +100,10 @@ private:
     Mode mode;
 
     // Timestamp server shard.
-    replication::vr::VRClient *tss; 
+    replication::vr::VRClient *tss;
 
     // Partitioner
     Partitioner *part;
-
-    // TrueTime server.
-    TrueTime timeServer;
 
     // Synchronization variables.
     std::condition_variable cv;
@@ -118,6 +114,6 @@ private:
     int commit_sleep;
 };
 
-} // namespace strongstore
+}  // namespace strongstore
 
 #endif /* _STRONG_CLIENT_H_ */

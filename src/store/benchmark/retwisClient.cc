@@ -6,15 +6,15 @@
  *
  **********************************************************************/
 
-#include "store/common/truetime.h"
-#include "store/common/frontend/client.h"
-#include "store/strongstore/client.h"
-#include "store/weakstore/client.h"
-#include "store/tapirstore/client.h"
-
 #include <algorithm>
 #include <chrono>
 #include <thread>
+
+#include "store/common/frontend/client.h"
+#include "store/common/truetime.h"
+#include "store/strongstore/client.h"
+#include "store/tapirstore/client.h"
+#include "store/weakstore/client.h"
 
 using namespace std;
 
@@ -28,16 +28,13 @@ double *zipf;
 vector<string> keys;
 int nKeys = 100;
 
-int
-main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     const char *configPath = NULL;
     // const char *keysPath = NULL;
     int duration = 10;
     int nShards = 1;
-    int closestReplica = -1; // Closest replica id.
-    int skew = 0; // difference between real clock and TrueTime
-    int error = 0; // error bars
+    int closestReplica = -1;  // Closest replica id.
+    int error = 0;            // error bars
 
     Client *client;
     enum {
@@ -46,149 +43,129 @@ main(int argc, char **argv)
         MODE_WEAK,
         MODE_STRONG
     } mode = MODE_UNKNOWN;
-    
+
     // Mode for strongstore.
     strongstore::Mode strongmode;
 
     int opt;
     while ((opt = getopt(argc, argv, "c:d:N:k:f:m:e:s:z:r:")) != -1) {
         switch (opt) {
-        case 'c': // Configuration path
-        { 
-            configPath = optarg;
-            break;
-        }
-
-        // case 'f': // Generated keys path
-        // { 
-        //     keysPath = optarg;
-        //     break;
-        // }
-
-        case 'N': // Number of shards.
-        { 
-            char *strtolPtr;
-            nShards = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') ||
-                (nShards <= 0)) {
-                fprintf(stderr, "option -N requires a numeric arg\n");
-            }
-            break;
-        }
-
-        case 'd': // Duration in seconds to run.
-        { 
-            char *strtolPtr;
-            duration = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') ||
-                (duration <= 0)) {
-                fprintf(stderr, "option -d requires a numeric arg\n");
-            }
-            break;
-        }
-
-        case 'k': // Number of keys to operate on.
-        {
-            char *strtolPtr;
-            nKeys = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') ||
-                (nKeys <= 0)) {
-                fprintf(stderr, "option -k requires a numeric arg\n");
-            }
-            break;
-        }
-
-        case 's': // Simulated clock skew.
-        {
-            char *strtolPtr;
-            skew = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') || (skew < 0))
+            case 'c':  // Configuration path
             {
-                fprintf(stderr,
-                        "option -s requires a numeric arg\n");
+                configPath = optarg;
+                break;
             }
-            break;
-        }
 
-        case 'e': // Simulated clock error.
-        {
-            char *strtolPtr;
-            error = strtoul(optarg, &strtolPtr, 10);
-            if ((*optarg == '\0') || (*strtolPtr != '\0') || (error < 0))
+                // case 'f': // Generated keys path
+                // {
+                //     keysPath = optarg;
+                //     break;
+                // }
+
+            case 'N':  // Number of shards.
             {
-                fprintf(stderr,
-                        "option -e requires a numeric arg\n");
+                char *strtolPtr;
+                nShards = strtoul(optarg, &strtolPtr, 10);
+                if ((*optarg == '\0') || (*strtolPtr != '\0') ||
+                    (nShards <= 0)) {
+                    fprintf(stderr, "option -N requires a numeric arg\n");
+                }
+                break;
             }
-            break;
-        }
 
-        case 'z': // Zipf coefficient for key selection.
-        {
-            char *strtolPtr;
-            alpha = strtod(optarg, &strtolPtr);
-            if ((*optarg == '\0') || (*strtolPtr != '\0'))
+            case 'd':  // Duration in seconds to run.
             {
-                fprintf(stderr,
-                        "option -z requires a numeric arg\n");
+                char *strtolPtr;
+                duration = strtoul(optarg, &strtolPtr, 10);
+                if ((*optarg == '\0') || (*strtolPtr != '\0') ||
+                    (duration <= 0)) {
+                    fprintf(stderr, "option -d requires a numeric arg\n");
+                }
+                break;
             }
-            break;
-        }
 
-        case 'r': // Preferred closest replica.
-        {
-            char *strtolPtr;
-            closestReplica = strtod(optarg, &strtolPtr);
-            if ((*optarg == '\0') || (*strtolPtr != '\0'))
+            case 'k':  // Number of keys to operate on.
             {
-                fprintf(stderr,
-                        "option -r requires a numeric arg\n");
+                char *strtolPtr;
+                nKeys = strtoul(optarg, &strtolPtr, 10);
+                if ((*optarg == '\0') || (*strtolPtr != '\0') || (nKeys <= 0)) {
+                    fprintf(stderr, "option -k requires a numeric arg\n");
+                }
+                break;
             }
-            break;
-        }
 
-        case 'm': // Mode to run in [occ/lock/...]
-        {
-            if (strcasecmp(optarg, "txn-l") == 0) {
-                mode = MODE_TAPIR;
-            } else if (strcasecmp(optarg, "txn-s") == 0) {
-                mode = MODE_TAPIR;
-            } else if (strcasecmp(optarg, "qw") == 0) {
-                mode = MODE_WEAK;
-            } else if (strcasecmp(optarg, "occ") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_OCC;
-            } else if (strcasecmp(optarg, "lock") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_LOCK;
-            } else if (strcasecmp(optarg, "span-occ") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_SPAN_OCC;
-            } else if (strcasecmp(optarg, "span-lock") == 0) {
-                mode = MODE_STRONG;
-                strongmode = strongstore::MODE_SPAN_LOCK;
-            } else {
-                fprintf(stderr, "unknown mode '%s'\n", optarg);
-                exit(0);
+            case 'e':  // Simulated clock error.
+            {
+                char *strtolPtr;
+                error = strtoul(optarg, &strtolPtr, 10);
+                if ((*optarg == '\0') || (*strtolPtr != '\0') || (error < 0)) {
+                    fprintf(stderr, "option -e requires a numeric arg\n");
+                }
+                break;
             }
-            break;
-        }
 
-        default:
-            fprintf(stderr, "Unknown argument %s\n", argv[optind]);
-            break;
+            case 'z':  // Zipf coefficient for key selection.
+            {
+                char *strtolPtr;
+                alpha = strtod(optarg, &strtolPtr);
+                if ((*optarg == '\0') || (*strtolPtr != '\0')) {
+                    fprintf(stderr, "option -z requires a numeric arg\n");
+                }
+                break;
+            }
+
+            case 'r':  // Preferred closest replica.
+            {
+                char *strtolPtr;
+                closestReplica = strtod(optarg, &strtolPtr);
+                if ((*optarg == '\0') || (*strtolPtr != '\0')) {
+                    fprintf(stderr, "option -r requires a numeric arg\n");
+                }
+                break;
+            }
+
+            case 'm':  // Mode to run in [occ/lock/...]
+            {
+                if (strcasecmp(optarg, "txn-l") == 0) {
+                    mode = MODE_TAPIR;
+                } else if (strcasecmp(optarg, "txn-s") == 0) {
+                    mode = MODE_TAPIR;
+                } else if (strcasecmp(optarg, "qw") == 0) {
+                    mode = MODE_WEAK;
+                } else if (strcasecmp(optarg, "occ") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_OCC;
+                } else if (strcasecmp(optarg, "lock") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_LOCK;
+                } else if (strcasecmp(optarg, "span-occ") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_SPAN_OCC;
+                } else if (strcasecmp(optarg, "span-lock") == 0) {
+                    mode = MODE_STRONG;
+                    strongmode = strongstore::MODE_SPAN_LOCK;
+                } else {
+                    fprintf(stderr, "unknown mode '%s'\n", optarg);
+                    exit(0);
+                }
+                break;
+            }
+
+            default:
+                fprintf(stderr, "Unknown argument %s\n", argv[optind]);
+                break;
         }
     }
 
     Partitioner *part = new DefaultPartitioner();
     if (mode == MODE_TAPIR) {
-        client = new tapirstore::Client(configPath, nShards,
-                    closestReplica, TrueTime(skew, error));
+        client = new tapirstore::Client(configPath, nShards, closestReplica,
+                                        TrueTime(error));
     } else if (mode == MODE_WEAK) {
-        client = new weakstore::Client(configPath, nShards,
-                    closestReplica);
+        client = new weakstore::Client(configPath, nShards, closestReplica);
     } else if (mode == MODE_STRONG) {
-        client = new strongstore::Client(strongmode, configPath,
-                    nShards, closestReplica, part, TrueTime(skew, error));
+        client = new strongstore::Client(strongmode, configPath, nShards,
+                                         closestReplica, part);
     } else {
         fprintf(stderr, "option -m is required\n");
         exit(0);
@@ -216,8 +193,8 @@ main(int argc, char **argv)
     // in.close();
 
     struct timeval t0, t1, t2;
-    int nTransactions = 0; // Number of transactions attempted.
-    int ttype; // Transaction type.
+    int nTransactions = 0;  // Number of transactions attempted.
+    int ttype;              // Transaction type.
     int ret;
     bool status;
     vector<int> keyIdx;
@@ -226,9 +203,9 @@ main(int argc, char **argv)
     srand(t0.tv_sec + t0.tv_usec);
 
     while (1) {
-        // std::this_thread::sleep_for(std::chrono::seconds{1});
+        std::this_thread::sleep_for(std::chrono::seconds{1});
         keyIdx.clear();
-            
+
         // Begin a transaction.
         client->Begin();
         gettimeofday(&t1, NULL);
@@ -244,12 +221,12 @@ main(int argc, char **argv)
             keyIdx.push_back(rand_key());
             keyIdx.push_back(rand_key());
             sort(keyIdx.begin(), keyIdx.end());
-            
+
             if ((ret = client->Get(keys[keyIdx[0]], value))) {
                 Warning("Aborting due to %s %d", keys[keyIdx[0]].c_str(), ret);
                 status = false;
             }
-            
+
             for (int i = 0; i < 3 && status; i++) {
                 client->Put(keys[keyIdx[i]], keys[keyIdx[i]]);
             }
@@ -263,7 +240,8 @@ main(int argc, char **argv)
 
             for (int i = 0; i < 2 && status; i++) {
                 if ((ret = client->Get(keys[keyIdx[i]], value))) {
-                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(), ret);
+                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(),
+                            ret);
                     status = false;
                 }
                 client->Put(keys[keyIdx[i]], keys[keyIdx[i]]);
@@ -281,13 +259,14 @@ main(int argc, char **argv)
 
             for (int i = 0; i < 3 && status; i++) {
                 if ((ret = client->Get(keys[keyIdx[i]], value))) {
-                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(), ret);
+                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(),
+                            ret);
                     status = false;
                 }
                 client->Put(keys[keyIdx[i]], keys[keyIdx[i]]);
             }
             for (int i = 0; i < 2; i++) {
-                client->Put(keys[keyIdx[i+3]], keys[keyIdx[i+3]]);
+                client->Put(keys[keyIdx[i + 3]], keys[keyIdx[i + 3]]);
             }
             ttype = 3;
         } else {
@@ -301,7 +280,8 @@ main(int argc, char **argv)
             sort(keyIdx.begin(), keyIdx.end());
             for (int i = 0; i < nGets && status; i++) {
                 if ((ret = client->Get(keys[keyIdx[i]], value))) {
-                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(), ret);
+                    Warning("Aborting due to %s %d", keys[keyIdx[i]].c_str(),
+                            ret);
                     status = false;
                 }
             }
@@ -314,29 +294,31 @@ main(int argc, char **argv)
             Debug("Aborting transaction due to failed Read");
         }
         gettimeofday(&t2, NULL);
-        
-        long latency = (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_usec - t1.tv_usec);
+
+        long latency =
+            (t2.tv_sec - t1.tv_sec) * 1000000 + (t2.tv_usec - t1.tv_usec);
 
         int retries = 0;
         if (!client->Stats().empty()) {
             retries = client->Stats()[0];
         }
 
-        fprintf(stderr, "%d %ld.%06ld %ld.%06ld %ld %d %d %d", ++nTransactions, t1.tv_sec,
-                t1.tv_usec, t2.tv_sec, t2.tv_usec, latency, status?1:0, ttype, retries);
+        fprintf(stderr, "%d %ld.%06ld %ld.%06ld %ld %d %d %d", ++nTransactions,
+                t1.tv_sec, t1.tv_usec, t2.tv_sec, t2.tv_usec, latency,
+                status ? 1 : 0, ttype, retries);
         fprintf(stderr, "\n");
 
-        if (((t2.tv_sec-t0.tv_sec)*1000000 + (t2.tv_usec-t0.tv_usec)) > duration*1000000) 
+        if (((t2.tv_sec - t0.tv_sec) * 1000000 + (t2.tv_usec - t0.tv_usec)) >
+            duration * 1000000)
             break;
     }
-    
+
     std::this_thread::sleep_for(std::chrono::seconds{3});
     fprintf(stderr, "# Client exiting..\n");
     return 0;
 }
 
-int rand_key()
-{
+int rand_key() {
     if (alpha < 0) {
         // Uniform selection of keys.
         return (rand() % nKeys);
@@ -347,21 +329,21 @@ int rand_key()
 
             double c = 0.0;
             for (int i = 1; i <= nKeys; i++) {
-                c = c + (1.0 / pow((double) i, alpha));
+                c = c + (1.0 / pow((double)i, alpha));
             }
             c = 1.0 / c;
 
             double sum = 0.0;
             for (int i = 1; i <= nKeys; i++) {
-                sum += (c / pow((double) i, alpha));
-                zipf[i-1] = sum;
+                sum += (c / pow((double)i, alpha));
+                zipf[i - 1] = sum;
             }
             ready = true;
         }
 
         double random = 0.0;
         while (random == 0.0 || random == 1.0) {
-            random = (1.0 + rand())/RAND_MAX;
+            random = (1.0 + rand()) / RAND_MAX;
         }
 
         // binary search to find key;
@@ -377,5 +359,5 @@ int rand_key()
             }
         }
         return mid;
-    } 
+    }
 }
