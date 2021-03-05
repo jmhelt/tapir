@@ -41,19 +41,17 @@ class RssCodebase(ExperimentCodebase):
         truetime_error = config["truetime_error"] if "truetime_error" in config else 0
         client_command = ' '.join([str(x) for x in [
             path_to_client_bin,
-            '-c', config_path,
-            '-N', config['num_shards'],
-            '-d', config['client_experiment_length'],
-            '-m', config['client_protocol_mode'],
-            '-e', truetime_error]])
-        # '--client_id', client_id,
-        # '--benchmark', config['benchmark_name'],
-
-        # '--warmup_secs', config['client_ramp_up'],
-        # '--cooldown_secs', config['client_ramp_down'],
-
-        # '--stats_file', stats_file,
-        # '--num_clients', client_threads]])
+            '--client_id', client_id,
+            '--config_path', config_path,
+            '--num_shards', config['num_shards'],
+            '--benchmark', config['benchmark_name'],
+            '--exp_duration', config['client_experiment_length'],
+            '--warmup_secs', config['client_ramp_up'],
+            '--cooldown_secs', config['client_ramp_down'],
+            '--protocol_mode', config['client_protocol_mode'],
+            '--clock_skew', truetime_error,
+            '--stats_file', stats_file,
+            '--num_clients', client_threads]])
 
         if config['server_emulate_wan']:
             client_command += ' --ping_replicas=true'
@@ -68,63 +66,35 @@ class RssCodebase(ExperimentCodebase):
                 client_command += ' --strong_unreplicated=%s' % str(
                     config['replication_protocol_settings']['unreplicated']).lower()
 
-        # if 'message_transport_type' in config['replication_protocol_settings']:
-        #     client_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']
+        if 'message_transport_type' in config['replication_protocol_settings']:
+            client_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']
 
         if 'client_debug_stats' in config and config['client_debug_stats']:
             client_command += ' --debug_stats'
 
-        # if 'client_message_timeout' in config:
-        #     client_command += ' --message_timeout %d' % config['client_message_timeout']
-        # if 'client_abort_backoff' in config:
-        #     client_command += ' --abort_backoff %d' % config['client_abort_backoff']
-        # if 'client_retry_aborted' in config:
-        #     client_command += ' --retry_aborted=%s' % (str(config['client_retry_aborted']).lower())
-        # if 'client_max_attempts' in config:
-        #     client_command += ' --max_attempts %d' % config['client_max_attempts']
-        # if 'client_max_backoff' in config:
-        #     client_command += ' --max_backoff %d' % config['client_max_backoff']
-        # if 'client_rand_sleep' in config:
-        #     client_command += ' --delay %d' % config['client_rand_sleep']
+        if 'client_message_timeout' in config:
+            client_command += ' --message_timeout %d' % config['client_message_timeout']
+        if 'client_abort_backoff' in config:
+            client_command += ' --abort_backoff %d' % config['client_abort_backoff']
+        if 'client_retry_aborted' in config:
+            client_command += ' --retry_aborted=%s' % (
+                str(config['client_retry_aborted']).lower())
+        if 'client_max_attempts' in config:
+            client_command += ' --max_attempts %d' % config['client_max_attempts']
+        if 'client_max_backoff' in config:
+            client_command += ' --max_backoff %d' % config['client_max_backoff']
+        if 'client_rand_sleep' in config:
+            client_command += ' --delay %d' % config['client_rand_sleep']
 
         if 'partitioner' in config:
             client_command += ' --partitioner %s' % config['partitioner']
 
         if config['benchmark_name'] == 'retwis':
-            client_command += ' -k %d' % config['client_num_keys']
-            client_command += ' -z -1'
-            # if 'client_key_selector' in config:
-            # client_command += ' --key_selector %s' % config['client_key_selector']
-            # if config['client_key_selector'] == 'zipf':
-            #     client_command += ' --zipf_coefficient %f' % config['client_zipf_coefficient']
-        elif config['benchmark_name'] == 'rw':
             client_command += ' --num_keys %d' % config['client_num_keys']
-            client_command += ' --num_ops_txn %d' % config['rw_num_ops_txn']
             if 'client_key_selector' in config:
                 client_command += ' --key_selector %s' % config['client_key_selector']
-                if config['client_key_selector'] == 'zipf':
-                    client_command += ' --zipf_coefficient %f' % config['client_zipf_coefficient']
-        elif config['benchmark_name'] == 'tpcc' or config['benchmark_name'] == 'tpcc-sync':
-            client_command += ' --tpcc_num_warehouses %d' % config['tpcc_num_warehouses']
-            client_command += ' --tpcc_w_id %d' % (
-                client_id % config['tpcc_num_warehouses'] + 1)
-            client_command += ' --tpcc_C_c_id %d' % config['tpcc_c_c_id']
-            client_command += ' --tpcc_C_c_last %d' % config['tpcc_c_c_last']
-            client_command += ' --tpcc_stock_level_ratio %d' % config['tpcc_stock_level_ratio']
-            client_command += ' --tpcc_delivery_ratio %d' % config['tpcc_delivery_ratio']
-            client_command += ' --tpcc_order_status_ratio %d' % config['tpcc_order_status_ratio']
-            client_command += ' --tpcc_payment_ratio %d' % config['tpcc_payment_ratio']
-            client_command += ' --tpcc_new_order_ratio %d' % config['tpcc_new_order_ratio']
-        elif config['benchmark_name'] == 'smallbank':
-            client_command += ' --balance_ratio %d' % config['smallbank_balance_ratio']
-            client_command += ' --deposit_checking_ratio %d' % config['smallbank_deposit_checking_ratio']
-            client_command += ' --transact_saving_ratio %d' % config['smallbank_transact_saving_ratio']
-            client_command += ' --amalgamate_ratio %d' % config['smallbank_amalgamate_ratio']
-            client_command += ' --write_check_ratio %d' % config['smallbank_write_check_ratio']
-            client_command += ' --num_hotspots %d' % config['smallbank_num_hotspots']
-            client_command += ' --num_customers %d' % config['smallbank_num_customers']
-            client_command += ' --hotspot_probability %f' % config['smallbank_hotspot_probability']
-            client_command += ' --customer_name_file_path %s' % config['smallbank_customer_name_file_path']
+            if config['client_key_selector'] == 'zipf':
+                client_command += ' --zipf_coefficient %f' % config['client_zipf_coefficient']
 
         if 'client_wrap_command' in config and len(config['client_wrap_command']) > 0:
             client_command = config['client_wrap_command'] % client_command
@@ -154,11 +124,6 @@ class RssCodebase(ExperimentCodebase):
             else:
                 client_command = tcsh_redirect_output_to_files(client_command,
                                                                stdout_file, stderr_file)
-
-        if 'pin_client_processes' in config and isinstance(config['pin_client_processes'], list) and len(config['pin_client_processes']) > 0:
-            core = config['pin_client_processes'][k %
-                                                  len(config['pin_client_processes'])]
-            client_command = 'taskset 0x%x %s' % (1 << core, client_command)
 
         if isinstance(config['client_debug_output'], str) or config['client_debug_output']:
             if 'run_locally' in config and config['run_locally'] or 'default_remote_shell' in config and config['default_remote_shell'] == 'bash':
