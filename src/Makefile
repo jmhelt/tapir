@@ -136,6 +136,9 @@ include store/tapirstore/Rules.mk
 include store/strongstore/Rules.mk
 include store/weakstore/Rules.mk
 include store/benchmark/Rules.mk
+include store/benchmark/async/common/Rules.mk
+include store/benchmark/async/retwis/Rules.mk
+include store/benchmark/async/Rules.mk
 include store/Rules.mk
 include lockserver/Rules.mk
 include timeserver/Rules.mk
