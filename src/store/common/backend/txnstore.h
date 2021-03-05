@@ -68,7 +68,7 @@ public:
     virtual bool Commit(uint64_t id, uint64_t timestamp = 0);
 
     // abort a running transaction
-    virtual void Abort(uint64_t id, const Transaction &txn = Transaction());
+    virtual void Abort(uint64_t id);
 
     // load keys
     virtual void Load(const std::string &key, const std::string &value,

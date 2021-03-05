@@ -244,7 +244,7 @@ Store::Commit(const Timestamp &timestamp, const Transaction &txn)
 }
 
 void
-Store::Abort(uint64_t id, const Transaction &txn)
+Store::Abort(uint64_t id)
 {
     Debug("[%lu] ABORT", id);
     

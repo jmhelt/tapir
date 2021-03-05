@@ -82,7 +82,7 @@ TxnStore::Commit(uint64_t id, uint64_t timestamp)
 }
 
 void
-TxnStore::Abort(uint64_t id, const Transaction &txn)
+TxnStore::Abort(uint64_t id)
 {
     Panic("Unimplemented ABORT");
 }

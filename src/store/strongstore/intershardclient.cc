@@ -56,15 +56,37 @@ namespace strongstore
         reply.ParseFromString(reply_str);
         Debug("[shard %i] Received PREPARE_OK callback [%d]", participantShard, reply.status());
 
-        ASSERT(reply.has_timestamp());
-
-        sclient[participantShard]->Commit(coordShard, txnID, reply.timestamp());
+        switch (reply.status()) {
+        case REPLY_OK:
+            ASSERT(reply.has_timestamp());
+            sclient[participantShard]->Commit(coordShard, txnID, reply.timestamp());
+            break;
+        case REPLY_FAIL:
+            sclient[participantShard]->Abort(coordShard, txnID);
+            break;
+        default:
+            NOT_REACHABLE();
+        }
     }
 
-    void InterShardClient::PrepareAbort(int coordShard, uint64_t txnID)
+    void InterShardClient::PrepareAbort(int coordShard, uint64_t txnID, int participantShard)
     {
-        Debug("PrepareAbort: %d %lu", coordShard, txnID);
+        Debug("PrepareAbort: %d %lu %d", coordShard, txnID, participantShard);
 
-        sclient[coordShard]->PrepareAbort(txnID);
+        sclient[coordShard]->PrepareAbort(txnID, participantShard,
+                    std::bind(&InterShardClient::PrepareAbortCallback,
+                                this,
+                                coordShard,
+                                txnID,
+                                participantShard,
+                                placeholders::_1,
+                                placeholders::_2));
+    }
+
+    void InterShardClient::PrepareAbortCallback(int coordShard, uint64_t txnID, int participantShard, const string &request_str, const string &reply_str)
+    {
+        proto::Reply reply;
+        reply.ParseFromString(reply_str);
+        Debug("[shard %i] Received PREPARE_ABORT callback [%d]", participantShard, reply.status());
     }
 };

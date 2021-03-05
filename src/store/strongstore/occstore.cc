@@ -145,7 +145,7 @@ OCCStore::Commit(uint64_t id, uint64_t timestamp)
 }
 
 void
-OCCStore::Abort(uint64_t id, const Transaction &txn)
+OCCStore::Abort(uint64_t id)
 {
     Debug("[%lu] ABORT", id);
     prepared.erase(id);
