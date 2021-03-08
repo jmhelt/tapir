@@ -32,57 +32,52 @@
 #ifndef _IR_CLIENT_H_
 #define _IR_CLIENT_H_
 
-#include "replication/common/client.h"
-#include "replication/common/quorumset.h"
-#include "lib/configuration.h"
-#include "replication/ir/ir-proto.pb.h"
-
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <unordered_map>
 
+#include "lib/configuration.h"
+#include "replication/common/client.h"
+#include "replication/common/quorumset.h"
+#include "replication/ir/ir-proto.pb.h"
+
 namespace replication {
 namespace ir {
 
-class IRClient : public Client
-{
-public:
+class IRClient : public Client {
+   public:
     using result_set_t = std::map<string, std::size_t>;
     using decide_t = std::function<string(const result_set_t &)>;
 
-    IRClient(const transport::Configuration &config,
-             Transport *transport,
-             uint64_t clientid = 0);
+    IRClient(const transport::Configuration &config, Transport *transport,
+             int group, uint64_t clientid = 0);
     virtual ~IRClient();
 
     virtual void Invoke(
-        const string &request,
-        continuation_t continuation,
+        const string &request, continuation_t continuation,
         error_continuation_t error_continuation = nullptr) override;
     virtual void InvokeUnlogged(
-        int replicaIdx,
-        const string &request,
-        continuation_t continuation,
+        int replicaIdx, const string &request, continuation_t continuation,
         error_continuation_t error_continuation = nullptr,
         uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT) override;
-    virtual void ReceiveMessage(
-        const TransportAddress &remote,
-        const string &type,
-        const string &data, void *meta_data) override;
+    virtual void InvokeUnloggedAll(
+        const string &request, continuation_t continuation,
+        error_continuation_t error_continuation = nullptr,
+        uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT) override;
+    virtual void ReceiveMessage(const TransportAddress &remote,
+                                const string &type, const string &data,
+                                void *meta_data) override;
 
     virtual void InvokeInconsistent(
-        const string &request,
-        continuation_t continuation,
+        const string &request, continuation_t continuation,
         error_continuation_t error_continuation = nullptr);
     virtual void InvokeConsensus(
-        const string &request,
-        decide_t decide,
-        continuation_t continuation,
+        const string &request, decide_t decide, continuation_t continuation,
         error_continuation_t error_continuation = nullptr);
 
-protected:
+   protected:
     struct PendingRequest {
         string request;
         uint64_t clientReqId;
@@ -105,10 +100,10 @@ protected:
     struct PendingUnloggedRequest : public PendingRequest {
         error_continuation_t error_continuation;
 
-        inline PendingUnloggedRequest(
-            string request, uint64_t clientReqId, continuation_t continuation,
-            error_continuation_t error_continuation,
-            std::unique_ptr<Timeout> timer)
+        inline PendingUnloggedRequest(string request, uint64_t clientReqId,
+                                      continuation_t continuation,
+                                      error_continuation_t error_continuation,
+                                      std::unique_ptr<Timeout> timer)
             : PendingRequest(request, clientReqId, continuation,
                              std::move(timer), 1),
               error_continuation(error_continuation){};
@@ -195,8 +190,7 @@ protected:
     void HandleSlowPathConsensus(
         const uint64_t reqid,
         const std::map<int, proto::ReplyConsensusMessage> &msgs,
-        const bool finalized_result_found,
-        PendingConsensusRequest *req);
+        const bool finalized_result_found, PendingConsensusRequest *req);
 
     // HandleFastPathConsensus is called when we're on the fast path and
     // receive a super quorum of responses from the same view.
@@ -223,7 +217,7 @@ protected:
     void UnloggedRequestTimeoutCallback(const uint64_t reqId);
 };
 
-} // namespace replication::ir
-} // namespace replication
+}  // namespace ir
+}  // namespace replication
 
-#endif  /* _IR_CLIENT_H_ */
+#endif /* _IR_CLIENT_H_ */

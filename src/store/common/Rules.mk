@@ -1,6 +1,7 @@
 d := $(dir $(lastword $(MAKEFILE_LIST)))
 
-SRCS += $(addprefix $(d), partitioner.cc \
+SRCS += $(addprefix $(d), common.cc \
+						  partitioner.cc \
 						  pinginitiator.cc \
 						  promise.cc \
 						  stats.cc \
@@ -11,7 +12,8 @@ SRCS += $(addprefix $(d), partitioner.cc \
 
 PROTOS += $(addprefix $(d), common-proto.proto)
 
-LIB-store-common := $(o)common-proto.o \
+LIB-store-common := $(o)common.o \
+                    $(o)common-proto.o \
 					$(o)partitioner.o \
 					$(o)pinginitiator.o \
 					$(o)promise.o \

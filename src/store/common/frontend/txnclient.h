@@ -32,11 +32,12 @@
 #ifndef _TXN_CLIENT_H_
 #define _TXN_CLIENT_H_
 
+#include <string>
+
+#include "store/common/frontend/client.h"
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
-
-#include <string>
 
 #define DEFAULT_TIMEOUT_MS 250
 #define DEFAULT_MULTICAST_TIMEOUT_MS 500
@@ -55,47 +56,85 @@
 #define ABORT_TIMEOUT 1000
 #define RETRY_TIMEOUT 500000
 
-class TxnClient
-{
-public:
-    TxnClient() {};
-    virtual ~TxnClient() {};
+typedef std::function<void(int, Timestamp)> prepare_callback;
+typedef std::function<void(int, Timestamp)> prepare_timeout_callback;
+
+class TxnClient {
+   public:
+    TxnClient() : lastReqId(0UL) {}
+    virtual ~TxnClient() {}
 
     // Begin a transaction.
     virtual void Begin(uint64_t id) = 0;
-    
-    // Get the value corresponding to key (valid at given timestamp).
-    virtual void Get(uint64_t id,
-                     const std::string &key,
-                     Promise *promise = NULL) = 0;
 
-    virtual void Get(uint64_t id,
-                     const std::string &key,
-                     const Timestamp &timestamp,
-                     Promise *promise = NULL) = 0;
+    // Get the value corresponding to key.
+    virtual void Get(uint64_t id, const std::string &key, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) = 0;
+    virtual void Get(uint64_t id, const std::string &key,
+                     const Timestamp &timestamp, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) = 0;
 
     // Set the value for the given key.
-    virtual void Put(uint64_t id,
-                     const std::string &key,
-                     const std::string &value,
-                     Promise *promise = NULL) = 0;
+    virtual void Put(uint64_t id, const std::string &key,
+                     const std::string &value, put_callback pcb,
+                     put_timeout_callback ptcb, uint32_t timeout) = 0;
 
-    // Prepare the transaction.
-    virtual void Prepare(uint64_t id,
-                         const Transaction &txn,
-                         const Timestamp &timestamp = Timestamp(),
-                         Promise *promise = NULL) = 0;
+    virtual void Put(uint64_t id, const std::string &key,
+                     const std::string &value, const Timestamp &ts,
+                     put_callback pcb, put_timeout_callback ptcb,
+                     uint32_t timeout) {
+        Panic("Not implemented.");
+    }
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(uint64_t id,
-                        const Transaction &txn = Transaction(), 
-                        uint64_t timestamp = 0,
-                        Promise *promise = NULL) = 0;
-    
+    virtual void Commit(uint64_t id, const Transaction &txn,
+                        const Timestamp &ts, commit_callback ccb,
+                        commit_timeout_callback ctcb, uint32_t timeout) = 0;
+
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(uint64_t id, 
-                       const Transaction &txn = Transaction(), 
-                       Promise *promise = NULL) = 0;
+    virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
+                       abort_timeout_callback atcb, uint32_t timeout) = 0;
+
+    // Prepare the transaction.
+    virtual void Prepare(uint64_t id, const Transaction &txn,
+                         const Timestamp &timestamp, prepare_callback pcb,
+                         prepare_timeout_callback ptcb, uint32_t timeout) = 0;
+
+   protected:
+    struct PendingRequest {
+        PendingRequest(uint64_t reqId) : reqId(reqId) {}
+        uint64_t reqId;
+    };
+    struct PendingGet : public PendingRequest {
+        PendingGet(uint64_t reqId) : PendingRequest(reqId) {}
+        std::string key;
+        get_callback gcb;
+        get_timeout_callback gtcb;
+    };
+    struct PendingPut : public PendingRequest {
+        PendingPut(uint64_t reqId) : PendingRequest(reqId) {}
+        std::string key;
+        std::string value;
+        put_callback pcb;
+        put_timeout_callback ptcb;
+    };
+    struct PendingPrepare : public PendingRequest {
+        PendingPrepare(uint64_t reqId) : PendingRequest(reqId) {}
+        prepare_callback pcb;
+        prepare_timeout_callback ptcb;
+    };
+    struct PendingCommit : public PendingRequest {
+        PendingCommit(uint64_t reqId) : PendingRequest(reqId) {}
+        commit_callback ccb;
+        commit_timeout_callback ctcb;
+    };
+    struct PendingAbort : public PendingRequest {
+        PendingAbort(uint64_t reqId) : PendingRequest(reqId) {}
+        abort_callback acb;
+        abort_timeout_callback atcb;
+    };
+
+    uint64_t lastReqId;
 };
 
 #endif /* _TXN_CLIENT_H_ */

@@ -31,25 +31,24 @@
 #ifndef _IR_LOCK_CLIENT_H_
 #define _IR_LOCK_CLIENT_H_
 
-#include "lib/assert.h"
-#include "lib/message.h"
-#include "lib/transport.h"
-#include "replication/ir/client.h"
-#include "store/common/promise.h"
-#include "lockserver/locks-proto.pb.h"
-
 #include <map>
+#include <random>
 #include <set>
 #include <string>
 #include <thread>
-#include <random>
+
+#include "lib/assert.h"
+#include "lib/message.h"
+#include "lib/transport.h"
+#include "lockserver/locks-proto.pb.h"
+#include "replication/ir/client.h"
+#include "store/common/promise.h"
 
 namespace lockserver {
 
-class LockClient
-{
-public:
-    LockClient(Transport* transport, const transport::Configuration &config);
+class LockClient {
+   public:
+    LockClient(Transport *transport, const transport::Configuration &config);
     ~LockClient();
 
     // Synchronously lock and unlock. Calling lock (or unlock) will block until
@@ -69,7 +68,7 @@ public:
     void unlock_async(const std::string &key);
     void unlock_wait();
 
-private:
+   private:
     /* Unique ID for this client. */
     uint64_t client_id;
 
@@ -89,11 +88,11 @@ private:
     Promise *waiting = nullptr;
 
     /* Callbacks for hearing back for an operation. */
-    void LockCallback(const std::string &, const std::string &);
-    void UnlockCallback(const std::string &, const std::string &);
-    void ErrorCallback(const std::string &, replication::ErrorCode);
+    bool LockCallback(const std::string &, const std::string &);
+    bool UnlockCallback(const std::string &, const std::string &);
+    bool ErrorCallback(const std::string &, replication::ErrorCode);
 };
 
-} // namespace lockserver
+}  // namespace lockserver
 
 #endif /* _IR_LOCK_CLIENT_H_ */

@@ -36,16 +36,16 @@ using namespace std;
 
 namespace strongstore {
 
-LockStore::LockStore() : TxnStore(), store() { }
-LockStore::~LockStore() { }
+LockStore::LockStore() : TxnStore(), store() {}
+LockStore::~LockStore() {}
 
-int
-LockStore::Get(uint64_t id, const string &key, pair<Timestamp, string> &value)
-{
+int LockStore::Get(uint64_t id, const string &key,
+                   pair<Timestamp, string> &value) {
     Debug("[%lu] GET %s", id, key.c_str());
     string val;
 
     if (!store.get(key, val)) {
+        Debug("[%lu] Couldn't find key %s", id, key.c_str());
         // couldn't find the key
         return REPLY_FAIL;
     }
@@ -60,15 +60,14 @@ LockStore::Get(uint64_t id, const string &key, pair<Timestamp, string> &value)
     }
 }
 
-int
-LockStore::Get(uint64_t id, const string &key, const Timestamp &timestamp, pair<Timestamp, string> &value)
-{
+int LockStore::Get(uint64_t id, const string &key, const Timestamp &timestamp,
+                   pair<Timestamp, string> &value,
+                   std::unordered_map<uint64_t, int> &statuses) {
     return Get(id, key, value);
 }
 
-int
-LockStore::Prepare(uint64_t id, const Transaction &txn)
-{    
+int LockStore::Prepare(uint64_t id, const Transaction &txn,
+                       std::unordered_map<uint64_t, int> &statuses) {
     Debug("[%lu] START PREPARE", id);
 
     if (prepared.size() > 100) {
@@ -85,15 +84,13 @@ LockStore::Prepare(uint64_t id, const Transaction &txn)
         Debug("[%lu] PREPARED TO COMMIT", id);
         return REPLY_OK;
     } else {
-        dropLocks(id, txn);
         Debug("[%lu] Could not acquire write locks", id);
-        return REPLY_FAIL;
+        return REPLY_RETRY;
     }
 }
 
-bool
-LockStore::Commit(uint64_t id, uint64_t timestamp)
-{
+bool LockStore::Commit(uint64_t id, const Timestamp &timestamp,
+                       std::unordered_map<uint64_t, int> &statuses) {
     Debug("[%lu] COMMIT", id);
     ASSERT(prepared.find(id) != prepared.end());
 
@@ -111,26 +108,20 @@ LockStore::Commit(uint64_t id, uint64_t timestamp)
     return !txn.getWriteSet().empty();
 }
 
-void
-LockStore::Abort(uint64_t id)
-{
+void LockStore::Abort(uint64_t id,
+                      std::unordered_map<uint64_t, int> &statuses) {
     Debug("[%lu] ABORT", id);
-    ASSERT(prepared.find(id) != prepared.end());
-
     dropLocks(id, prepared[id]);
     prepared.erase(id);
 }
 
-void
-LockStore::Load(const string &key, const string &value, const Timestamp &timestamp)
-{
+void LockStore::Load(const string &key, const string &value,
+                     const Timestamp &timestamp) {
     store.put(key, value);
 }
 
 /* Used on commit and abort for second phase of 2PL. */
-void
-LockStore::dropLocks(uint64_t id, const Transaction &txn)
-{
+void LockStore::dropLocks(uint64_t id, const Transaction &txn) {
     for (auto &write : txn.getWriteSet()) {
         locks.releaseForWrite(write.first, id);
     }
@@ -140,9 +131,7 @@ LockStore::dropLocks(uint64_t id, const Transaction &txn)
     }
 }
 
-bool
-LockStore::getLocks(uint64_t id, const Transaction &txn)
-{
+bool LockStore::getLocks(uint64_t id, const Transaction &txn) {
     bool ret = true;
     // if we don't have read locks, get read locks
     for (auto &read : txn.getReadSet()) {
@@ -155,8 +144,7 @@ LockStore::getLocks(uint64_t id, const Transaction &txn)
             ret = false;
         }
     }
-
     return ret;
 }
 
-} // namespace strongstore
+}  // namespace strongstore

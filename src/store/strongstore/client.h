@@ -52,21 +52,64 @@ namespace strongstore {
 class Client : public ::Client {
    public:
     Client(Mode mode, transport::Configuration *config, uint64_t id,
-           uint64_t nshards, int closestReplica, Transport *transport,
-           Partitioner *part);
-    ~Client();
+           int nshards, int closestReplic, Transport *transport,
+           Partitioner *part, TrueTime timeServer);
+    virtual ~Client();
 
     // Overriding functions from ::Client
-    void Begin();
-    int Get(const string &key, string &value);
-    int Put(const string &key, const string &value);
-    bool Commit();
-    void Abort();
-    std::vector<int> Stats();
+    // Begin a transaction.
+    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb,
+                       uint32_t timeout) override;
+
+    // Get the value corresponding to key.
+    virtual void Get(const std::string &key, get_callback gcb,
+                     get_timeout_callback gtcb,
+                     uint32_t timeout = GET_TIMEOUT) override;
+
+    // Set the value for the given key.
+    virtual void Put(const std::string &key, const std::string &value,
+                     put_callback pcb, put_timeout_callback ptcb,
+                     uint32_t timeout = PUT_TIMEOUT) override;
+
+    // Commit all Get(s) and Put(s) since Begin().
+    virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
+                        uint32_t timeout) override;
+
+    // Abort all Get(s) and Put(s) since Begin().
+    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
+                       uint32_t timeout) override;
 
    private:
+    struct PendingRequest {
+        PendingRequest(uint64_t id, uint64_t txnId)
+            : id(id),
+              txnId(txnId),
+              outstandingPrepares(0),
+              commitTries(0),
+              maxRepliedTs(0UL),
+              prepareStatus(REPLY_OK),
+              callbackInvoked(false),
+              timeout(0UL),
+              spannerSleep(false) {}
+
+        ~PendingRequest() {}
+
+        commit_callback ccb;
+        commit_timeout_callback ctcb;
+        uint64_t id;
+        uint64_t txnId;
+        int outstandingPrepares;
+        int commitTries;
+        uint64_t maxRepliedTs;
+        int prepareStatus;
+        bool callbackInvoked;
+        uint32_t timeout;
+        bool spannerSleep;
+    };
+
     // local Prepare function
-    int Prepare(uint64_t &ts);
+    void Prepare(PendingRequest *req, uint32_t timeout);
+    void PrepareCallback(uint64_t reqId, int status, Timestamp respTs);
 
     // choose coordinator from participants
     int ChooseCoordinator(const std::set<int> &participants);
@@ -97,7 +140,11 @@ class Client : public ::Client {
     // Partitioner
     Partitioner *part;
 
+    // TrueTime server.
+    TrueTime timeServer;
+
     uint64_t lastReqId;
+    std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
     std::unordered_map<std::string, uint32_t> statInts;
 
     Latency_t opLat;

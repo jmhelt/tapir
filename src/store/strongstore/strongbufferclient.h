@@ -33,39 +33,25 @@
 
 #include "lib/assert.h"
 #include "lib/message.h"
+#include "store/common/frontend/bufferclient.h"
 #include "store/common/promise.h"
 #include "store/common/transaction.h"
 #include "store/strongstore/shardclient.h"
 
-namespace strongstore
-{
-    class BufferClient
-    {
-    public:
-        BufferClient(ShardClient *txnclient);
-        ~BufferClient();
+namespace strongstore {
+class BufferClient : public ::BufferClient {
+   public:
+    BufferClient(ShardClient *shard_client);
+    ~BufferClient();
 
-        // Begin a transaction with given tid.
-        void Begin(uint64_t tid);
+    // Prepare (Spanner requires a prepare timestamp)
+    void Prepare(uint64_t id, int coordShard, int nParticipants,
+                 prepare_callback pcb, prepare_timeout_callback ptcb,
+                 uint32_t timeout);
 
-        // Get value corresponding to key.
-        void Get(const string &key, Promise *promise = NULL);
-
-        // Put value for given key.
-        void Put(const string &key, const string &value, Promise *promise = NULL);
-
-        // Prepare (Spanner requires a prepare timestamp)
-        void Prepare(int coordShard, int nParticipants, Promise *promise = NULL);
-
-    private:
-        // Underlying single shard transaction client implementation.
-        ShardClient *txnclient;
-
-        // Transaction to keep track of read and write set.
-        Transaction txn;
-
-        // Unique transaction id to keep track of ongoing transaction.
-        uint64_t tid;
-    };
+   private:
+    // Underlying single shard transaction client implementation.
+    ShardClient *shard_client_;
 };
+};     // namespace strongstore
 #endif /* _BUFFER_CLIENT_H_ */

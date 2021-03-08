@@ -41,55 +41,122 @@
 #include "lib/transport.h"
 #include "replication/ir/client.h"
 #include "store/common/frontend/txnclient.h"
+#include "store/common/pinginitiator.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
 #include "store/tapirstore/tapir-proto.pb.h"
 
 namespace tapirstore {
 
-class ShardClient : public TxnClient {
+class ShardClient : public TxnClient,
+                    public PingInitiator,
+                    public PingTransport {
    public:
     /* Constructor needs path to shard config. */
     ShardClient(transport::Configuration *config, Transport *transport,
-                uint64_t client_id, int shard, int closestReplica);
-    ~ShardClient();
+                uint64_t client_id, int shard, int closestReplica,
+                bool pingReplicas);
+    virtual ~ShardClient();
 
-    // Overriding from TxnClient
-    void Begin(uint64_t id);
-    void Get(uint64_t id, const std::string &key, Promise *promise = NULL);
-    void Get(uint64_t id, const std::string &key, const Timestamp &timestamp,
-             Promise *promise = NULL);
-    void Put(uint64_t id, const std::string &key, const std::string &value,
-             Promise *promise = NULL);
-    void Prepare(uint64_t id, const Transaction &txn,
-                 const Timestamp &timestamp = Timestamp(),
-                 Promise *promise = NULL);
-    void Commit(uint64_t id, const Transaction &txn, uint64_t timestamp,
-                Promise *promise = NULL);
-    void Abort(uint64_t id, const Transaction &txn, Promise *promise = NULL);
+    // Begin a transaction.
+    virtual void Begin(uint64_t id) override;
+
+    // Get the value corresponding to key.
+    virtual void Get(uint64_t id, const std::string &key, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) override;
+    virtual void Get(uint64_t id, const std::string &key,
+                     const Timestamp &timestamp, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) override;
+
+    // Set the value for the given key.
+    virtual void Put(uint64_t id, const std::string &key,
+                     const std::string &value, put_callback pcb,
+                     put_timeout_callback ptcb, uint32_t timeout) override;
+
+    // Commit all Get(s) and Put(s) since Begin().
+    virtual void Commit(uint64_t id, const Transaction &txn,
+                        const Timestamp &timestamp, commit_callback ccb,
+                        commit_timeout_callback ctcb,
+                        uint32_t timeout) override;
+
+    // Abort all Get(s) and Put(s) since Begin().
+    virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
+                       abort_timeout_callback atcb, uint32_t timeout) override;
+
+    // Prepare the transaction.
+    virtual void Prepare(uint64_t id, const Transaction &txn,
+                         const Timestamp &timestamp, prepare_callback pcb,
+                         prepare_timeout_callback ptcb,
+                         uint32_t timeout) override;
+
+    virtual bool SendPing(size_t replica, const PingMessage &ping);
 
    private:
+    struct PendingPrepare : public TxnClient::PendingPrepare {
+        PendingPrepare(uint64_t reqId)
+            : TxnClient::PendingPrepare(reqId), requestTimeout(nullptr) {}
+        ~PendingPrepare() {
+            if (requestTimeout != nullptr) {
+                delete requestTimeout;
+            }
+        }
+        Timestamp ts;
+        Transaction txn;
+        Timeout *requestTimeout;
+    };
+    struct PendingCommit : public TxnClient::PendingCommit {
+        PendingCommit(uint64_t reqId)
+            : TxnClient::PendingCommit(reqId), requestTimeout(nullptr) {}
+        ~PendingCommit() {
+            if (requestTimeout != nullptr) {
+                delete requestTimeout;
+            }
+        }
+        Timestamp ts;
+        Transaction txn;
+        Timeout *requestTimeout;
+    };
+    struct PendingAbort : public TxnClient::PendingAbort {
+        PendingAbort(uint64_t reqId)
+            : TxnClient::PendingAbort(reqId), requestTimeout(nullptr) {}
+        ~PendingAbort() {
+            if (requestTimeout != nullptr) {
+                delete requestTimeout;
+            }
+        }
+        Transaction txn;
+        Timeout *requestTimeout;
+    };
+
     uint64_t client_id;    // Unique ID for this client.
     Transport *transport;  // Transport layer.
     transport::Configuration *config;
     int shard;    // which shard this client accesses
     int replica;  // which replica to use for reads
+    bool pingReplicas;
 
     replication::ir::IRClient *client;  // Client proxy.
-    Promise *waiting;                   // waiting thread
-    Promise *blockingBegin;             // block until finished
+
+    std::unordered_map<uint64_t, PendingGet *> pendingGets;
+    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
+    std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
+    std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
 
     /* Tapir's Decide Function. */
     std::string TapirDecide(const std::map<std::string, std::size_t> &results);
 
     /* Timeout for Get requests, which only go to one replica. */
-    void GetTimeout();
+    void GetTimeout(uint64_t id, uint64_t reqId);
 
     /* Callbacks for hearing back from a shard for an operation. */
-    void GetCallback(const std::string &, const std::string &);
-    void PrepareCallback(const std::string &, const std::string &);
-    void CommitCallback(const std::string &, const std::string &);
-    void AbortCallback(const std::string &, const std::string &);
+    bool GetCallback(uint64_t reqId, const std::string &, const std::string &);
+    bool PrepareCallback(uint64_t reqId, const std::string &,
+                         const std::string &);
+    bool CommitCallback(uint64_t reqId, const std::string &,
+                        const std::string &);
+    bool AbortCallback(uint64_t reqId, const std::string &,
+                       const std::string &);
+    bool PingCallback(const std::string &, const std::string &);
 
     /* Helper Functions for starting and finishing requests */
     void StartRequest();

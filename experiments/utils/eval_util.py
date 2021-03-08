@@ -136,7 +136,6 @@ def calculate_statistics_for_run(config, local_out_directory, run):
     stats = {}
 
     regions = get_regions(config)
-    print("regions: {}".format(regions))
     for region in regions:
         r_op_latencies = {}
         r_op_latency_counts = {}

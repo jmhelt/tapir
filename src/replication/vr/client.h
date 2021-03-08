@@ -32,64 +32,62 @@
 #ifndef _VR_CLIENT_H_
 #define _VR_CLIENT_H_
 
-#include "replication/common/client.h"
-#include "lib/configuration.h"
-#include "replication/vr/vr-proto.pb.h"
-
 #include <unordered_map>
+
+#include "lib/configuration.h"
+#include "replication/common/client.h"
+#include "replication/vr/vr-proto.pb.h"
 
 namespace replication {
 namespace vr {
 
-class VRClient : public Client
-{
-public:
-    VRClient(const transport::Configuration &config,
-             Transport *transport, int group,
-             uint64_t clientid = 0);
+class VRClient : public Client {
+   public:
+    VRClient(const transport::Configuration &config, Transport *transport,
+             int group, uint64_t clientid);
     virtual ~VRClient();
-    virtual void Invoke(const string &request,
-                        continuation_t continuation,
+    virtual void Invoke(const string &request, continuation_t continuation,
                         error_continuation_t error_continuation = nullptr);
-    virtual void InvokeUnlogged(int replicaIdx,
-                                const string &request,
-                                continuation_t continuation,
-                                error_continuation_t error_continuation = nullptr,
-                                uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT);
+    virtual void InvokeUnlogged(
+        int replicaIdx, const string &request, continuation_t continuation,
+        error_continuation_t error_continuation = nullptr,
+        uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT);
+    virtual void InvokeUnloggedAll(
+        const string &request, continuation_t continuation,
+        error_continuation_t error_continuation = nullptr,
+        uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT) override;
+
     virtual void ReceiveMessage(const TransportAddress &remote,
                                 const string &type, const string &data,
                                 void *meta_data);
 
-protected:
+   protected:
     int view;
     int opnumber;
     uint64_t lastReqId;
 
-    struct PendingRequest
-    {
+    struct PendingRequest {
         string request;
         uint64_t clientReqId;
         continuation_t continuation;
-	Timeout *timer;
-        inline PendingRequest(string request,
-			      uint64_t clientReqId,
-                              continuation_t continuation,
-			      Timeout *timer)
-            : request(request), clientReqId(clientReqId),
-              continuation(continuation), timer(timer) { };
-	inline ~PendingRequest() { delete timer; }
+        Timeout *timer;
+        inline PendingRequest(string request, uint64_t clientReqId,
+                              continuation_t continuation, Timeout *timer)
+            : request(request),
+              clientReqId(clientReqId),
+              continuation(continuation),
+              timer(timer){};
+        inline ~PendingRequest() { delete timer; }
     };
 
-    struct PendingUnloggedRequest : public PendingRequest
-    {
-	error_continuation_t error_continuation;
-        inline PendingUnloggedRequest(string request,
-				      uint64_t clientReqId,
-				      continuation_t continuation,
-				      Timeout *timer,
-				      error_continuation_t error_continuation)
+    struct PendingUnloggedRequest : public PendingRequest {
+        error_continuation_t error_continuation;
+        inline PendingUnloggedRequest(string request, uint64_t clientReqId,
+                                      continuation_t continuation,
+                                      Timeout *timer,
+                                      error_continuation_t error_continuation)
             : PendingRequest(request, clientReqId, continuation, timer),
-              error_continuation(error_continuation) { };
+              error_continuation(error_continuation){};
     };
 
     std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
@@ -103,7 +101,7 @@ protected:
     void UnloggedRequestTimeoutCallback(const uint64_t reqId);
 };
 
-} // namespace replication::vr
-} // namespace replication
+}  // namespace vr
+}  // namespace replication
 
-#endif  /* _VR_CLIENT_H_ */
+#endif /* _VR_CLIENT_H_ */
