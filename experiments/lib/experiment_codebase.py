@@ -36,9 +36,9 @@ __BUILDERS__ = {
     "rss": RssCodebase()
 }
 
-def get_client_cmd(config, i, j, k, run, local_exp_directory,
+def get_client_cmd(config, i, k, run, local_exp_directory,
         remote_exp_directory):
-    return __BUILDERS__[config['codebase_name']].get_client_cmd(config, i, j,
+    return __BUILDERS__[config['codebase_name']].get_client_cmd(config, i,
             k, run, local_exp_directory, remote_exp_directory)
 
 def get_replica_cmd(config, shard_idx, replica_idx, run, local_exp_directory,

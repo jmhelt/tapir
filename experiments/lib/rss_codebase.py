@@ -7,8 +7,10 @@ from utils.experiment_util import *
 
 class RssCodebase(ExperimentCodebase):
 
-    def get_client_cmd(self, config, i, j, k, run, local_exp_directory,
+    def get_client_cmd(self, config, i, k, run, local_exp_directory,
                        remote_exp_directory):
+
+        client = config["clients"][i]
         name, _ = os.path.splitext(config['network_config_file_name'])
         if 'run_locally' in config and config['run_locally']:
             path_to_client_bin = os.path.join(config['src_directory'],
@@ -17,9 +19,8 @@ class RssCodebase(ExperimentCodebase):
             config_path = os.path.join(
                 local_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
-                                      config['out_directory_name'], 'client-%d-%d' % (
-                                          i, j),
-                                      'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
+                                      config['out_directory_name'], client,
+                                      '%s-%d-stats-%d.json' % (client, k, run))
         else:
             path_to_client_bin = os.path.join(
                 config['base_remote_bin_directory_nfs'],
@@ -29,14 +30,12 @@ class RssCodebase(ExperimentCodebase):
                 remote_exp_directory, config["shard_config"])
             stats_file = os.path.join(exp_directory,
                                       config['out_directory_name'],
-                                      'client-%d-%d-%d-stats-%d.json' % (i, j, k, run))
+                                      '%s-%d-stats-%d.json' % (client, k, run))
 
-        client_threads = 1 if not 'client_threads_per_process' in config else config[
-            'client_threads_per_process']
+        client_threads = config["client_threads_per_process"] if "client_threads_per_process" in config else 1
 
-        client_id = i * config['client_nodes_per_server'] * \
-            config['client_processes_per_client_node'] + j * \
-            config['client_processes_per_client_node'] + k
+        client_id = i * len(config["clients"]) * \
+            config["client_processes_per_client_node"] + k
 
         truetime_error = config["truetime_error"] if "truetime_error" in config else 0
         client_command = ' '.join([str(x) for x in [
@@ -102,22 +101,22 @@ class RssCodebase(ExperimentCodebase):
         if 'run_locally' in config and config['run_locally']:
             stdout_file = os.path.join(exp_directory,
                                        config['out_directory_name'],
-                                       'client-%d-%d' % (i, j),
-                                       'client-%d-%d-%d-stdout-%d.log' % (i, j, k, run))
+                                       client,
+                                       '%s-%d-stdout-%d.log' % (client, k, run))
             stderr_file = os.path.join(exp_directory,
                                        config['out_directory_name'],
-                                       'client-%d-%d' % (i, j),
-                                       'client-%d-%d-%d-stderr-%d.log' % (i, j, k, run))
+                                       client,
+                                       '%s-%d-stderr-%d.log' % (client, k, run))
 
             client_command = '%s 1> %s 2> %s' % (client_command, stdout_file,
                                                  stderr_file)
         else:
             stdout_file = os.path.join(exp_directory,
                                        config['out_directory_name'],
-                                       'client-%d-%d-%d-stdout-%d.log' % (i, j, k, run))
+                                       '%s-%d-stdout-%d.log' % (client, k, run))
             stderr_file = os.path.join(exp_directory,
                                        config['out_directory_name'],
-                                       'client-%d-%d-%d-stderr-%d.log' % (i, j, k, run))
+                                       '%s-%d-stderr-%d.log' % (client, k, run))
             if 'default_remote_shell' in config and config['default_remote_shell'] == 'bash':
                 client_command = '%s 1> %s 2> %s' % (client_command, stdout_file,
                                                      stderr_file)
