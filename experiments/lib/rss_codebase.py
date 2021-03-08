@@ -48,7 +48,6 @@ class RssCodebase(ExperimentCodebase):
             '--warmup_secs', config['client_ramp_up'],
             '--cooldown_secs', config['client_ramp_down'],
             '--protocol_mode', config['client_protocol_mode'],
-            '--clock_skew', truetime_error,
             '--stats_file', stats_file,
             '--num_clients', client_threads]])
 

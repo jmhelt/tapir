@@ -161,7 +161,7 @@ void BenchmarkClient::OnReply(int result) {
         SendNext();
     } else {
         uint64_t rdelay = randDelayDist(rand);
-        transport.TimerMicro(rdelay,
+        transport.TimerMicro(delay * 1000,
                              std::bind(&BenchmarkClient::SendNext, this));
     }
 }

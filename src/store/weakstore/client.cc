@@ -35,9 +35,9 @@ namespace weakstore {
 using namespace std;
 using namespace proto;
 
-Client::Client(string configPath, int nShards, int closestReplica)
-    : transport(0.0, 0.0, 0)
-{
+Client::Client(string configPath, int nShards, int closestReplica,
+               partitioner part)
+    : transport(0.0, 0.0, 0), part(part) {
     // Initialize all state here;
     client_id = 0;
     while (client_id == 0) {
@@ -46,7 +46,7 @@ Client::Client(string configPath, int nShards, int closestReplica)
         uniform_int_distribution<uint64_t> dis;
         client_id = dis(gen);
     }
-    
+
     nshards = nShards;
     bclient.reserve(nShards);
 
@@ -55,8 +55,8 @@ Client::Client(string configPath, int nShards, int closestReplica)
     /* Start a client for each shard. */
     for (int i = 0; i < nShards; i++) {
         string shardConfigPath = configPath + to_string(i) + ".config";
-        bclient[i] = new ShardClient(shardConfigPath, &transport,
-            client_id, i, closestReplica);
+        bclient[i] = new ShardClient(shardConfigPath, &transport, client_id, i,
+                                     closestReplica);
     }
 
     /* Run the transport in a new thread. */
@@ -65,8 +65,7 @@ Client::Client(string configPath, int nShards, int closestReplica)
     Debug("WeakStore client [%lu] created!", client_id);
 }
 
-Client::~Client()
-{
+Client::~Client() {
     transport.Stop();
     for (auto b : bclient) {
         delete b;
@@ -75,51 +74,48 @@ Client::~Client()
 }
 
 /* Runs the transport event loop. */
-void
-Client::run_client()
-{
-    transport.Run();
-}
+void Client::run_client() { transport.Run(); }
 
-/* Returns the value corresponding to the supplied key. */
-int
-Client::Get(const string &key, string &value)
-{
+void Client::Get(const std::string &key, get_callback gcb,
+                 get_timeout_callback gtcb, uint32_t timeout) {
     Debug("GET Operation [%s]", key.c_str());
 
     // Contact the appropriate shard to get the value.
-    int i = key_to_shard(key, nshards);
+    std::vector<int> txnGroups;
+    int i = part(key, nshards, -1, txnGroups);
 
     // Send the GET operation to appropriate shard.
     Promise promise;
 
     bclient[i]->Get(client_id, key, &promise);
-    value = promise.GetValue();
-    return promise.GetReply();
+    // TODO: broken
 }
 
-/* Sets the value corresponding to the supplied key. */
-int
-Client::Put(const string &key,
-            const string &value)
-{
+void Client::Put(const std::string &key, const std::string &value,
+                 put_callback pcb, put_timeout_callback ptcb,
+                 uint32_t timeout) {
     Debug("PUT Operation [%s]", key.c_str());
 
     // Contact the appropriate shard to set the value.
-    int i = key_to_shard(key, nshards);
+    std::vector<int> txnGroups;
+    int i = part(key, nshards, -1, txnGroups);
 
-       // Send the GET operation to appropriate shard.
+    // Send the GET operation to appropriate shard.
     Promise promise;
 
     bclient[i]->Put(client_id, key, value, &promise);
-    return promise.GetReply();
+    // TODO: broken
 }
 
-vector<int>
-Client::Stats()
-{
+void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
+                    uint32_t timeout) {}
+
+void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
+                   uint32_t timeout) {}
+
+vector<int> Client::Stats() {
     vector<int> v;
     return v;
 }
 
-} // namespace weakstore
+}  // namespace weakstore

@@ -155,7 +155,6 @@ DEFINE_string(closest_replicas, "",
               "space-separated list of replica indices in"
               " order of proximity to client(s)");
 DEFINE_uint64(delay, 0, "maximum time to wait between client operations");
-DEFINE_int32(clock_skew, 0, "difference between real clock and TrueTime");
 DEFINE_int32(clock_error, 0, "maximum error for clock");
 DEFINE_string(stats_file, "", "path to output stats file.");
 DEFINE_uint64(abort_backoff, 100,
@@ -398,8 +397,7 @@ int main(int argc, char **argv) {
         if (FLAGS_keys_path.empty()) {
             if (FLAGS_num_keys > 0) {
                 for (size_t i = 0; i < FLAGS_num_keys; ++i) {
-                    keys.push_back(std::string(
-                        reinterpret_cast<const char *>(&i), sizeof(uint64_t)));
+                    keys.push_back(std::string(std::to_string(i)));
                 }
             } else {
                 std::cerr << "Specified neither keys file nor number of keys."
@@ -523,9 +521,10 @@ int main(int argc, char **argv) {
         uint64_t clientId = (FLAGS_client_id << 6) | i;
         switch (mode) {
             case PROTO_TAPIR: {
-                client = new tapirstore::Client(config, FLAGS_num_shards,
-                                                FLAGS_closest_replica,
-                                                TrueTime(FLAGS_clock_error));
+                client = new tapirstore::Client(
+                    config, clientId, FLAGS_num_shards, FLAGS_closest_replica,
+                    tport, part, FLAGS_ping_replicas, FLAGS_tapir_sync_commit,
+                    TrueTime(FLAGS_clock_error));
                 break;
             }
             // case MODE_WEAK: {
@@ -537,7 +536,8 @@ int main(int argc, char **argv) {
             case PROTO_STRONG: {
                 client = new strongstore::Client(
                     strongmode, config, clientId, FLAGS_num_shards,
-                    FLAGS_closest_replica, tport, part);
+                    FLAGS_closest_replica, tport, part,
+                    TrueTime(FLAGS_clock_error));
                 break;
             }
             default:

@@ -38,57 +38,53 @@ using namespace std;
 TxnStore::TxnStore() {}
 TxnStore::~TxnStore() {}
 
-int
-TxnStore::Get(uint64_t id, const string &key, pair<Timestamp, string> &value)
-{
+int TxnStore::Get(uint64_t id, const string &key,
+                  pair<Timestamp, string> &value) {
     Panic("Unimplemented GET");
     return 0;
 }
 
-int
-TxnStore::Get(uint64_t id, const string &key, const Timestamp &timestamp,
-    pair<Timestamp, string> &value)
-{
+int TxnStore::Get(uint64_t id, const string &key, const Timestamp &timestamp,
+                  pair<Timestamp, string> &value,
+                  std::unordered_map<uint64_t, int> &statuses) {
     Panic("Unimplemented GET");
     return 0;
 }
 
-int
-TxnStore::Put(uint64_t id, const string &key, const string &value)
-{
+int TxnStore::Put(uint64_t id, const string &key, const string &value) {
     Panic("Unimplemented PUT");
     return 0;
 }
 
-int
-TxnStore::Prepare(uint64_t id, const Transaction &txn)
-{
+int TxnStore::Put(uint64_t id, const string &key, const string &value,
+                  const Timestamp &timestamp,
+                  std::unordered_map<uint64_t, int> &statuses) {
+    Panic("Unimplemented PUT");
+    return 0;
+}
+
+int TxnStore::Prepare(uint64_t id, const Transaction &txn,
+                      std::unordered_map<uint64_t, int> &statuses) {
     Panic("Unimplemented PREPARE");
     return 0;
 }
 
-int
-TxnStore::Prepare(uint64_t id, const Transaction &txn,
-    const Timestamp &timestamp, Timestamp &proposed)
-{
+int TxnStore::Prepare(uint64_t id, const Transaction &txn,
+                      const Timestamp &timestamp, Timestamp &proposed) {
     Panic("Unimplemented PREPARE");
     return 0;
 }
 
-bool
-TxnStore::Commit(uint64_t id, uint64_t timestamp)
-{
+bool TxnStore::Commit(uint64_t id, const Timestamp &ts,
+                      std::unordered_map<uint64_t, int> &statuses) {
     Panic("Unimplemented COMMIT");
 }
 
-void
-TxnStore::Abort(uint64_t id)
-{
+void TxnStore::Abort(uint64_t id, std::unordered_map<uint64_t, int> &statuses) {
     Panic("Unimplemented ABORT");
 }
 
-void
-TxnStore::Load(const string &key, const string &value, const Timestamp &timestamp)
-{
+void TxnStore::Load(const string &key, const string &value,
+                    const Timestamp &timestamp) {
     Panic("Unimplemented LOAD");
 }

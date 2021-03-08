@@ -32,44 +32,33 @@
 
 #include "store/strongstore/occstore.h"
 
+#include "store/common/common.h"
+
 namespace strongstore {
 
-using namespace std;
+OCCStore::OCCStore() {}
 
-OCCStore::OCCStore() : store() { }
-OCCStore::~OCCStore() { }
+OCCStore::~OCCStore() {}
 
-int
-OCCStore::Get(uint64_t id, const string &key, pair<Timestamp, string> &value)
-{
-    Debug("[%lu] GET %s", id, key.c_str());
-
-    // Get latest from store
-    if (store.get(key, value)) {
-        Debug("[%lu] GET %s %lu", id, key.c_str(), value.first.getTimestamp());
-        return REPLY_OK;
+int OCCStore::Get(uint64_t id, const std::string &key,
+                  std::pair<Timestamp, std::string> &value) {
+    int status;
+    if (store.Get(key, value)) {
+        status = REPLY_OK;
     } else {
-        return REPLY_FAIL;
+        status = REPLY_FAIL;
     }
+
+    Debug("[%lu] GET for key %s; return ts %lu.%lu.", id,
+          BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
+          value.first.getID());
+
+    return status;
 }
 
-int
-OCCStore::Get(uint64_t id, const string &key, const Timestamp &timestamp, pair<Timestamp, string> &value)
-{
-    Debug("[%lu] GET %s", id, key.c_str());
-    
-    // Get version at timestamp from store
-    if (store.get(key, timestamp, value)) {
-        return REPLY_OK;
-    } else {
-        return REPLY_FAIL;
-    }
-}
-
-int
-OCCStore::Prepare(uint64_t id, const Transaction &txn)
-{    
-    Debug("[%lu] START PREPARE", id);
+int OCCStore::Prepare(uint64_t id, const Transaction &txn,
+                      std::unordered_map<uint64_t, int> &statuses) {
+    Debug("[%lu] PREPARE.", id);
 
     if (prepared.find(id) != prepared.end()) {
         Debug("[%lu] Already prepared!", id);
@@ -77,33 +66,44 @@ OCCStore::Prepare(uint64_t id, const Transaction &txn)
     }
 
     // Do OCC checks.
-    set<string> pWrites = getPreparedWrites();
-    set<string> pRW = getPreparedReadWrites();
 
     // Check for conflicts with the read set.
     for (auto &read : txn.getReadSet()) {
-        pair<Timestamp, string> cur;
-        bool ret = store.get(read.first, cur);
+        std::pair<Timestamp, std::string> cur;
+        bool ret = store.Get(read.first, cur);
+        Debug("[%lu] Read set contains key %s with version %lu.", id,
+              BytesToHex(read.first, 16).c_str(), read.second.getID());
 
-	    // ASSERT(ret);
-        if (!ret)
-            continue;
+        // TODO: this assert doesn't seem necessary. either the client should
+        // not
+        //   add a read to the read set when it fails to read a value or the
+        //   client/server needs to agree on a way to distinguish between a
+        //   successful read of an initial value and a failed read.
+        // UW_ASSERT(ret);
 
-        // If this key has been written since we read it, abort.
-        if (cur.first > read.second) {
-            Debug("[%lu] ABORT rw conflict key:%s %lu %lu",
-                  id, read.first.c_str(), cur.first.getTimestamp(),
-                  read.second.getTimestamp());
-            
-            Abort(id);
-            return REPLY_FAIL;
+        if (ret) {
+            Debug("[%lu] Last committed write for key %s from txn %lu.", id,
+                  BytesToHex(read.first, 16).c_str(), cur.first.getID());
+
+            // If this key has been written since we read it, abort.
+            if (cur.first != read.second) {
+                Debug(
+                    "[%lu] ABORT wr conflict w/ committed key %s from txn %lu.",
+                    id, BytesToHex(read.first, 16).c_str(), cur.first.getID());
+
+                stats.Increment("abort_committed_wr_conflict");
+                Abort(id, statuses);
+                return REPLY_FAIL;
+            }
         }
 
         // If there is a pending write for this key, abort.
         if (pWrites.find(read.first) != pWrites.end()) {
-            Debug("[%lu] ABORT rw conflict w/ prepared key:%s",
-                  id, read.first.c_str());
-            Abort(id);
+            Debug("[%lu] ABORT wr conflict w/ prepared key %s from txn %lu.",
+                  id, BytesToHex(read.first, 16).c_str(),
+                  *pWrites.find(read.first)->second.begin());
+            stats.Increment("abort_prepared_wr_conflict");
+            Abort(id, statuses);
             return REPLY_FAIL;
         }
     }
@@ -111,79 +111,95 @@ OCCStore::Prepare(uint64_t id, const Transaction &txn)
     // Check for conflicts with the write set.
     for (auto &write : txn.getWriteSet()) {
         // If there is a pending read or write for this key, abort.
+        Debug("[%lu] Write set contains key %s.", id,
+              BytesToHex(write.first, 16).c_str());
+
         if (pRW.find(write.first) != pRW.end()) {
-            Debug("[%lu] ABORT ww conflict w/ prepared key:%s", id,
-                    write.first.c_str());
-            Abort(id);
+            Debug("[%lu] ABORT rw/ww conflict w/ prepared key %s from txn %lu.",
+                  id, BytesToHex(write.first, 16).c_str(),
+                  *pRW.find(write.first)->second.begin());
+            stats.Increment("abort_prepared_*w_conflict");
+            Abort(id, statuses);
             return REPLY_FAIL;
         }
     }
 
     // Otherwise, prepare this transaction for commit
-    prepared[id] = txn;
-    Debug("[%lu] PREPARED TO COMMIT", id);
+    PrepareTransaction(id, txn);
+
+    Debug("[%lu] PREPARED TO COMMIT.", id);
     return REPLY_OK;
 }
 
-bool
-OCCStore::Commit(uint64_t id, uint64_t timestamp)
-{
-    Debug("[%lu] COMMIT", id);
+bool OCCStore::Commit(uint64_t id, const Timestamp &ts,
+                      std::unordered_map<uint64_t, int> &statuses) {
+    Debug("[%lu] COMMIT w/ ts %lu.%lu.", id, ts.getTimestamp(), ts.getID());
+
     ASSERT(prepared.find(id) != prepared.end());
 
     Transaction txn = prepared[id];
 
     for (auto &write : txn.getWriteSet()) {
-        store.put(write.first, // key
-                    write.second, // value
-                    Timestamp(timestamp)); // timestamp
+        store.Put(write.first, std::make_pair(ts, write.second));
     }
 
-    prepared.erase(id);
+    Clean(id);
 
     return !txn.getWriteSet().empty();
 }
 
-void
-OCCStore::Abort(uint64_t id)
-{
-    Debug("[%lu] ABORT", id);
-    prepared.erase(id);
+void OCCStore::Abort(uint64_t id, std::unordered_map<uint64_t, int> &statuses) {
+    Debug("[%lu] ABORT.", id);
+
+    Clean(id);
 }
 
-void
-OCCStore::Load(const string &key, const string &value, const Timestamp &timestamp)
-{
-    store.put(key, value, timestamp);
+void OCCStore::Load(const std::string &key, const std::string &value,
+                    const Timestamp &timestamp) {
+    store.Put(key, std::make_pair(timestamp, value));
 }
 
-set<string>
-OCCStore::getPreparedWrites()
-{
-    // gather up the set of all writes that we are currently prepared for
-    set<string> writes;
-    for (auto &t : prepared) {
-        for (auto &write : t.second.getWriteSet()) {
-            writes.insert(write.first);
-        }
+void OCCStore::PrepareTransaction(uint64_t id, const Transaction &txn) {
+    prepared.insert(std::make_pair(id, txn));
+    for (auto &write : txn.getWriteSet()) {
+        pWrites[write.first].insert(id);
+        pRW[write.first].insert(id);
     }
-    return writes;
-}
-
-set<string>
-OCCStore::getPreparedReadWrites()
-{
-    // gather up the set of all writes that we are currently prepared for
-    set<string> readwrites;
-    for (auto &t : prepared) {
-        for (auto &write : t.second.getWriteSet()) {
-            readwrites.insert(write.first);
-        }
-        for (auto &read : t.second.getReadSet()) {
-            readwrites.insert(read.first);
-        }
+    for (auto &read : txn.getReadSet()) {
+        pRW[read.first].insert(id);
     }
-    return readwrites;
 }
 
-} // namespace strongstore
+void OCCStore::Clean(uint64_t id) {
+    auto preparedItr = prepared.find(id);
+    if (preparedItr != prepared.end()) {
+        for (const auto &write : preparedItr->second.getWriteSet()) {
+            auto preparedWriteItr = pWrites.find(write.first);
+            if (preparedWriteItr != pWrites.end()) {
+                preparedWriteItr->second.erase(id);
+                if (preparedWriteItr->second.size() == 0) {
+                    pWrites.erase(preparedWriteItr);
+                }
+            }
+            auto preparedReadWriteItr = pRW.find(write.first);
+            if (preparedReadWriteItr != pRW.end()) {
+                preparedReadWriteItr->second.erase(id);
+                if (preparedReadWriteItr->second.size() == 0) {
+                    pRW.erase(preparedReadWriteItr);
+                }
+            }
+        }
+        for (const auto &read : preparedItr->second.getReadSet()) {
+            auto preparedReadItr = pRW.find(read.first);
+            if (preparedReadItr != pRW.end()) {
+                preparedReadItr->second.erase(id);
+                if (preparedReadItr->second.size() == 0) {
+                    pRW.erase(preparedReadItr);
+                }
+            }
+        }
+        prepared.erase(preparedItr);
+    }
+}
+
+}  // namespace strongstore

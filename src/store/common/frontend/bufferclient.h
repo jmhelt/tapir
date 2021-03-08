@@ -33,38 +33,55 @@
 
 #include "lib/assert.h"
 #include "lib/message.h"
+#include "store/common/frontend/client.h"
+#include "store/common/frontend/txnclient.h"
 #include "store/common/promise.h"
 #include "store/common/transaction.h"
-#include "store/common/frontend/txnclient.h"
 
-class BufferClient
-{
-public:
-    BufferClient(TxnClient *txnclient);
-    ~BufferClient();
+class BufferClient {
+   public:
+    BufferClient(TxnClient *txnclient, bool bufferPuts = true);
+    virtual ~BufferClient();
 
     // Begin a transaction with given tid.
-    void Begin(uint64_t tid);
+    virtual void Begin(uint64_t tid);
 
-    // Get value corresponding to key.
-    void Get(const string &key, Promise *promise = NULL);
+    // Get the value corresponding to key.
+    virtual void Get(const std::string &key, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout);
 
-    // Put value for given key.
-    void Put(const string &key, const string &value, Promise *promise = NULL);
+    virtual void Get(const std::string &key, const Timestamp &ts,
+                     get_callback gcb, get_timeout_callback gtcb,
+                     uint32_t timeout);
 
-    // Prepare (Spanner requires a prepare timestamp)
-    void Prepare(const Timestamp &timestamp = Timestamp(), Promise *promise = NULL); 
+    // Set the value for the given key.
+    virtual void Put(const std::string &key, const std::string &value,
+                     put_callback pcb, put_timeout_callback ptcb,
+                     uint32_t timeout);
 
-    // Commit the ongoing transaction.
-    void Commit(uint64_t timestamp = 0, Promise *promise = NULL);
+    virtual void Put(const std::string &key, const std::string &value,
+                     const Timestamp &ts, put_callback pcb,
+                     put_timeout_callback ptcb, uint32_t timeout);
 
-    // Abort the running transaction.
-    void Abort(Promise *promise = NULL);
+    virtual void Prepare(const Timestamp &timestamp, prepare_callback pcb,
+                         prepare_timeout_callback ptcb, uint32_t timeout);
 
-private:
+    // Commit all Get(s) and Put(s) since Begin().
+    virtual void Commit(const Timestamp &ts, commit_callback ccb,
+                        commit_timeout_callback ctcb, uint32_t timeout);
+
+    // Abort all Get(s) and Put(s) since Begin().
+    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
+                       uint32_t timeout);
+
+   private:
     // Underlying single shard transaction client implementation.
-    TxnClient* txnclient;
+    TxnClient *txnclient;
+    const bool bufferPuts;
 
+    std::unordered_map<std::string, std::tuple<std::string, Timestamp>> readSet;
+
+   protected:
     // Transaction to keep track of read and write set.
     Transaction txn;
 

@@ -41,7 +41,6 @@
 #include <fstream>
 #include <iostream>
 
-#include "lib/assert.h"
 #include "lib/latency-format.pb.h"
 #include "lib/message.h"
 
@@ -102,7 +101,7 @@ static inline Latency_Dist_t *LatencyAddHist(Latency_t *l, char type,
         val >>= 1;
         ++bucket;
     }
-    ASSERT(bucket < LATENCY_NUM_BUCKETS);
+    Assert(bucket < LATENCY_NUM_BUCKETS);
     d->buckets[bucket] += count;
 
     return d;
@@ -134,7 +133,7 @@ void Latency_StartRec(Latency_t *l, Latency_Frame_t *fr) {
 uint64_t Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type) {
     Latency_Pause(l);
 
-    ASSERT(l->bottom == fr);
+    Assert(l->bottom == fr);
     l->bottom = fr->parent;
 
     LatencyAdd(l, type, fr->accum);

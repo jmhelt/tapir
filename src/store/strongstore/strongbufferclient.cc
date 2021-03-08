@@ -32,72 +32,18 @@
 
 using namespace std;
 
-namespace strongstore
-{
+namespace strongstore {
 
-    BufferClient::BufferClient(ShardClient *txnclient) : txn()
-    {
-        this->txnclient = txnclient;
-    }
+BufferClient::BufferClient(ShardClient *shard_client)
+    : ::BufferClient(shard_client, true), shard_client_{shard_client} {}
 
-    BufferClient::~BufferClient() {}
+BufferClient::~BufferClient() {}
 
-    /* Begins a transaction. */
-    void
-    BufferClient::Begin(uint64_t tid)
-    {
-        // Initialize data structures.
-        txn = Transaction();
-        this->tid = tid;
-        txnclient->Begin(tid);
-    }
-
-    /* Get value for a key.
- * Returns 0 on success, else -1. */
-    void
-    BufferClient::Get(const string &key, Promise *promise)
-    {
-        // Read your own writes, check the write set first.
-        if (txn.getWriteSet().find(key) != txn.getWriteSet().end())
-        {
-            promise->Reply(REPLY_OK, (txn.getWriteSet().find(key))->second);
-            return;
-        }
-
-        // Consistent reads, check the read set.
-        if (txn.getReadSet().find(key) != txn.getReadSet().end())
-        {
-            // read from the server at same timestamp.
-            txnclient->Get(tid, key, (txn.getReadSet().find(key))->second, promise);
-            return;
-        }
-
-        // Otherwise, get latest value from server.
-        Promise p(GET_TIMEOUT);
-        Promise *pp = (promise != NULL) ? promise : &p;
-
-        txnclient->Get(tid, key, pp);
-        if (pp->GetReply() == REPLY_OK)
-        {
-            Debug("Adding [%s] with ts %lu", key.c_str(), pp->GetTimestamp().getTimestamp());
-            txn.addReadSet(key, pp->GetTimestamp());
-        }
-    }
-
-    /* Set value for a key. (Always succeeds).
- * Returns 0 on success, else -1. */
-    void
-    BufferClient::Put(const string &key, const string &value, Promise *promise)
-    {
-        // Update the write set.
-        txn.addWriteSet(key, value);
-        promise->Reply(REPLY_OK);
-    }
-
-    /* Prepare the transaction. */
-    void
-    BufferClient::Prepare(int coordShard, int nParticipants, Promise *promise)
-    {
-        txnclient->Prepare(tid, txn, coordShard, nParticipants, promise);
-    }
-};
+/* Prepare the transaction. */
+void BufferClient::Prepare(uint64_t id, int coordShard, int nParticipants,
+                           prepare_callback pcb, prepare_timeout_callback ptcb,
+                           uint32_t timeout) {
+    shard_client_->Prepare(tid, txn, coordShard, nParticipants, pcb, ptcb,
+                           timeout);
+}
+};  // namespace strongstore

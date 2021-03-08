@@ -33,28 +33,17 @@
 #define _STRONG_SHARDCLIENT_H_
 
 #include "lib/assert.h"
+#include "lib/latency.h"
 #include "lib/message.h"
 #include "lib/transport.h"
 #include "replication/vr/client.h"
+#include "store/common/frontend/txnclient.h"
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore {
-// Timeouts for various operations
-const int GET_TIMEOUT = 250;
-const int GET_RETRIES = 3;
-// Only used for QWStore
-const int PUT_TIMEOUT = 250;
-const int PREPARE_TIMEOUT = 1000;
-const int PREPARE_RETRIES = 5;
-
-const int COMMIT_TIMEOUT = 1000;
-const int COMMIT_RETRIES = 5;
-
-const int ABORT_TIMEOUT = 1000;
-const int RETRY_TIMEOUT = 500000;
 
 enum Mode {
     MODE_UNKNOWN,
@@ -65,56 +54,75 @@ enum Mode {
     MODE_MVTSO
 };
 
-class ShardClient {
+class ShardClient : public TxnClient {
    public:
     /* Constructor needs path to shard config. */
     ShardClient(Mode mode, transport::Configuration *config,
                 Transport *transport, uint64_t client_id, int shard,
                 int closestReplica);
-    ~ShardClient();
+    virtual ~ShardClient();
 
-    // Overriding from TxnClient
-    void Begin(uint64_t id);
-    void Get(uint64_t id, const std::string &key, Promise *promise = nullptr);
-    void Get(uint64_t id, const std::string &key, const Timestamp &timestamp,
-             Promise *promise = nullptr);
-    void Put(uint64_t id, const std::string &key, const std::string &value,
-             Promise *promise = nullptr);
+    void Begin(uint64_t id) override;
+    virtual void Get(uint64_t id, const std::string &key, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) override;
+    virtual void Get(uint64_t id, const std::string &key,
+                     const Timestamp &timestamp, get_callback gcb,
+                     get_timeout_callback gtcb, uint32_t timeout) override;
+
     void Prepare(uint64_t id, const Transaction &txn, int coordShard,
-                 int nParticipants, Promise *promise = nullptr);
+                 int nParticipants, prepare_callback pcb,
+                 prepare_timeout_callback ptcb, uint32_t timeout);
     void PrepareOK(uint64_t id, int participantShard, uint64_t prepareTS,
                    replication::Client::continuation_t continuation);
     void PrepareAbort(uint64_t id, int participantShard,
                       replication::Client::continuation_t continuation);
-    void Commit(int coordShard, uint64_t id, uint64_t timestamp);
-    void Abort(int coordShard, uint64_t id);
+    void Commit(int coordShard, uint64_t id, uint64_t timestamp,
+                commit_callback ccb, commit_timeout_callback ctcb,
+                uint32_t timeout);
+    void Abort(int coordShard, uint64_t id, abort_callback acb,
+               abort_timeout_callback atcb, uint32_t timeout);
+
+    // Unimplemented
+    virtual void Put(uint64_t id, const std::string &key,
+                     const std::string &value, put_callback pcb,
+                     put_timeout_callback ptcb, uint32_t timeout) override;
+    virtual void Commit(uint64_t id, const Transaction &txn,
+                        const Timestamp &timestamp, commit_callback ccb,
+                        commit_timeout_callback ctcb,
+                        uint32_t timeout) override;
+    virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
+                       abort_timeout_callback atcb, uint32_t timeout) override;
+    virtual void Prepare(uint64_t id, const Transaction &txn,
+                         const Timestamp &timestamp, prepare_callback pcb,
+                         prepare_timeout_callback ptcb,
+                         uint32_t timeout) override;
 
    private:
+    transport::Configuration *config;
     Transport *transport;  // Transport layer.
     uint64_t client_id;    // Unique ID for this client.
     int shard;             // which shard this client accesses
     int replica;           // which replica to use for reads
 
     replication::vr::VRClient *client;  // Client proxy.
-    Promise *blockingBegin;             // block until finished
+
+    std::unordered_map<uint64_t, PendingGet *> pendingGets;
+    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
+    std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
+    std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
+    Latency_t opLat;
 
     /* Timeout for Get requests, which only go to one replica. */
-    void GetTimeout(Promise *promise);
+    void GetTimeout(uint64_t reqId);
 
     /* Callbacks for hearing back from a shard for an operation. */
-    void GetCallback(Promise *promise, const std::string &,
-                     const std::string &);
-    void PrepareCallback(Promise *promise, const std::string &,
+    bool GetCallback(uint64_t reqId, const std::string &, const std::string &);
+    bool PrepareCallback(uint64_t reqId, const std::string &,
                          const std::string &);
-    void CommitCallback(const std::string &, const std::string &);
-    void AbortCallback(const std::string &, const std::string &);
-
-    /* Helper Functions for starting and finishing requests */
-    void StartRequest();
-    void WaitForResponse();
-    void FinishRequest(const std::string &reply_str);
-    void FinishRequest();
-    int SendGet(const std::string &request_str);
+    bool CommitCallback(uint64_t reqId, const std::string &,
+                        const std::string &);
+    bool AbortCallback(uint64_t reqId, const std::string &,
+                       const std::string &);
 };
 
 }  // namespace strongstore
