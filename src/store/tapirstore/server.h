@@ -44,9 +44,8 @@ namespace tapirstore {
 using opid_t = replication::ir::opid_t;
 using RecordEntry = replication::ir::RecordEntry;
 
-class Server : public replication::ir::IRAppReplica, public ::Server
-{
-public:
+class Server : public replication::ir::IRAppReplica, public ::Server {
+   public:
     Server(bool linearizable);
     virtual ~Server();
 
@@ -60,7 +59,7 @@ public:
     void UnloggedUpcall(const string &str1, string &str2) override;
 
     // Sync
-    void Sync(const std::map<opid_t, RecordEntry>& record) override;
+    void Sync(const std::map<opid_t, RecordEntry> &record) override;
 
     // Merge
     std::map<opid_t, std::string> Merge(
@@ -68,14 +67,15 @@ public:
         const std::map<opid_t, std::vector<RecordEntry>> &u,
         const std::map<opid_t, std::string> &majority_results_in_d) override;
 
-    void Load(const string &key, const string &value, const Timestamp timestamp) override;
+    virtual void Load(const string &key, const string &value,
+                      const Timestamp timestamp) override;
 
     virtual inline Stats &GetStats() override { return store->GetStats(); }
 
-private:
+   private:
     TxnStore *store;
 };
 
-} // namespace tapirstore
+}  // namespace tapirstore
 
 #endif /* _TAPIR_SERVER_H_ */

@@ -31,46 +31,41 @@
 
 #include "store/tapirstore/server.h"
 
+#include "lib/tcptransport.h"
+
 namespace tapirstore {
 
 using namespace std;
 using namespace proto;
 
-Server::Server(bool linearizable)
-{
-    store = new Store(linearizable);
-}
+Server::Server(bool linearizable) { store = new Store(linearizable); }
 
-Server::~Server()
-{
-    delete store;
-}
+Server::~Server() { delete store; }
 
-void
-Server::ExecInconsistentUpcall(const string &str1)
-{
-    Debug("Received Inconsistent Request: %s",  str1.c_str());
+void Server::ExecInconsistentUpcall(const string &str1) {
+    Debug("Received Inconsistent Request: %s", str1.substr(0, 10).c_str());
 
     Request request;
 
     request.ParseFromString(str1);
 
+    std::unordered_map<uint64_t, int> statuses;
     switch (request.op()) {
-    case tapirstore::proto::Request::COMMIT:
-        store->Commit(request.txnid(), request.commit().timestamp());
-        break;
-    case tapirstore::proto::Request::ABORT:
-        store->Abort(request.txnid());
-        break;
-    default:
-        Panic("Unrecognized inconsisternt operation.");
+        case tapirstore::proto::Request::COMMIT: {
+            Timestamp ts(request.commit().timestamp());
+            store->Commit(request.txnid(), ts, statuses);
+            break;
+        }
+        case tapirstore::proto::Request::ABORT:
+            store->Abort(request.txnid(), statuses);
+            break;
+        default:
+            Panic("Unrecognized inconsisternt operation %d.", request.op());
     }
 }
 
-void
-Server::ExecConsensusUpcall(const string &str1, string &str2)
-{
-    Debug("Received Consensus Request: %s", str1.c_str());
+void Server::ExecConsensusUpcall(const string &str1, string &str2) {
+    Debug("Received Consensus Request: %s", str1.substr(0, 10).c_str());
 
     Request request;
     Reply reply;
@@ -80,27 +75,23 @@ Server::ExecConsensusUpcall(const string &str1, string &str2)
     request.ParseFromString(str1);
 
     switch (request.op()) {
-    case tapirstore::proto::Request::PREPARE:
-        status = store->Prepare(request.txnid(),
-                                Transaction(request.prepare().txn()),
-                                Timestamp(request.prepare().timestamp()),
-                                proposed);
-        reply.set_status(status);
-        if (proposed.isValid()) {
-            proposed.serialize(reply.mutable_timestamp());
-        }
-        reply.SerializeToString(&str2);
-        break;
-    default:
-        Panic("Unrecognized consensus operation.");
+        case tapirstore::proto::Request::PREPARE:
+            status = store->Prepare(
+                request.txnid(), Transaction(request.prepare().txn()),
+                Timestamp(request.prepare().timestamp()), proposed);
+            reply.set_status(status);
+            if (proposed.isValid()) {
+                proposed.serialize(reply.mutable_timestamp());
+            }
+            reply.SerializeToString(&str2);
+            break;
+        default:
+            Panic("Unrecognized consensus operation.");
     }
-
 }
 
-void
-Server::UnloggedUpcall(const string &str1, string &str2)
-{
-    Debug("Received Consensus Request: %s", str1.c_str());
+void Server::UnloggedUpcall(const string &str1, string &str2) {
+    Debug("Received Unlogged Request: %s", str1.substr(0, 10).c_str());
 
     Request request;
     Reply reply;
@@ -108,49 +99,51 @@ Server::UnloggedUpcall(const string &str1, string &str2)
 
     request.ParseFromString(str1);
 
+    std::unordered_map<uint64_t, int> statuses;
     switch (request.op()) {
-    case tapirstore::proto::Request::GET:
-        if (request.get().has_timestamp()) {
-            pair<Timestamp, string> val;
-            status = store->Get(request.txnid(), request.get().key(),
-                               request.get().timestamp(), val);
-            if (status == 0) {
-                reply.set_value(val.second);
+        case tapirstore::proto::Request::PING:
+            *reply.mutable_ping() = request.ping();
+            reply.set_status(REPLY_OK);
+            reply.SerializeToString(&str2);
+            break;
+        case tapirstore::proto::Request::GET:
+            if (request.get().has_timestamp()) {
+                pair<Timestamp, string> val;
+                status = store->Get(request.txnid(), request.get().key(),
+                                    request.get().timestamp(), val, statuses);
+                if (status == 0) {
+                    reply.set_value(val.second);
+                }
+            } else {
+                pair<Timestamp, string> val;
+                status = store->Get(request.txnid(), request.get().key(), val);
+                if (status == 0) {
+                    reply.set_value(val.second);
+                    val.first.serialize(reply.mutable_timestamp());
+                }
             }
-        } else {
-            pair<Timestamp, string> val;
-            status = store->Get(request.txnid(), request.get().key(), val);
-            if (status == 0) {
-                reply.set_value(val.second);
-                val.first.serialize(reply.mutable_timestamp());
-            }
-        }
-        reply.set_status(status);
-        reply.SerializeToString(&str2);
-        break;
-    default:
-        Panic("Unrecognized Unlogged request.");
+            reply.set_status(status);
+            reply.SerializeToString(&str2);
+            break;
+        default:
+            Panic("Unrecognized Unlogged request.");
     }
 }
 
-void
-Server::Sync(const std::map<opid_t, RecordEntry>& record)
-{
+void Server::Sync(const std::map<opid_t, RecordEntry> &record) {
     Panic("Unimplemented!");
 }
 
-std::map<opid_t, std::string>
-Server::Merge(const std::map<opid_t, std::vector<RecordEntry>> &d,
-              const std::map<opid_t, std::vector<RecordEntry>> &u,
-              const std::map<opid_t, std::string> &majority_results_in_d)
-{
+std::map<opid_t, std::string> Server::Merge(
+    const std::map<opid_t, std::vector<RecordEntry>> &d,
+    const std::map<opid_t, std::vector<RecordEntry>> &u,
+    const std::map<opid_t, std::string> &majority_results_in_d) {
     Panic("Unimplemented!");
 }
 
-void
-Server::Load(const string &key, const string &value, const Timestamp timestamp)
-{
+void Server::Load(const string &key, const string &value,
+                  const Timestamp timestamp) {
     store->Load(key, value, timestamp);
 }
 
-} // namespace tapirstore
+}  // namespace tapirstore

@@ -33,12 +33,11 @@
 #ifndef _COMMON_CLIENT_H_
 #define _COMMON_CLIENT_H_
 
-#include "lib/configuration.h"
-#include "replication/common/request.pb.h"
-#include "lib/transport.h"
-
-
 #include <functional>
+
+#include "lib/configuration.h"
+#include "lib/transport.h"
+#include "replication/common/request.pb.h"
 
 namespace replication {
 
@@ -57,42 +56,41 @@ enum class ErrorCode {
 
 std::string ErrorCodeToString(ErrorCode err);
 
-class Client : public TransportReceiver
-{
-public:
+class Client : public TransportReceiver {
+   public:
     using continuation_t =
-        std::function<void(const string &request, const string &reply)>;
+        std::function<bool(const string &request, const string &reply)>;
     using error_continuation_t =
         std::function<void(const string &request, ErrorCode err)>;
 
-    static const uint32_t DEFAULT_UNLOGGED_OP_TIMEOUT = 1000; // milliseconds
+    static const uint32_t DEFAULT_UNLOGGED_OP_TIMEOUT = 1000;  // milliseconds
 
     Client(const transport::Configuration &config, Transport *transport,
            int group, uint64_t clientid = 0);
     virtual ~Client();
 
-    virtual void Invoke(
-        const string &request,
-        continuation_t continuation,
-        error_continuation_t error_continuation = nullptr) = 0;
+    virtual void Invoke(const string &request, continuation_t continuation,
+                        error_continuation_t error_continuation = nullptr) = 0;
     virtual void InvokeUnlogged(
-        int replicaIdx,
-        const string &request,
-        continuation_t continuation,
+        int replicaIdx, const string &request, continuation_t continuation,
+        error_continuation_t error_continuation = nullptr,
+        uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT) = 0;
+    virtual void InvokeUnloggedAll(
+        const string &request, continuation_t continuation,
         error_continuation_t error_continuation = nullptr,
         uint32_t timeout = DEFAULT_UNLOGGED_OP_TIMEOUT) = 0;
 
     virtual void ReceiveMessage(const TransportAddress &remote,
-                                const string &type,
-                                const string &data, void *meta_data) override;
+                                const string &type, const string &data,
+                                void *meta_data) override;
 
-protected:
+   protected:
     transport::Configuration config;
     Transport *transport;
     const int group;
     uint64_t clientid;
 };
 
-} // namespace replication
+}  // namespace replication
 
-#endif  /* _COMMON_CLIENT_H_ */
+#endif /* _COMMON_CLIENT_H_ */

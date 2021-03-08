@@ -49,10 +49,9 @@ LockClient::LockClient(Transport *transport,
     client = new replication::ir::IRClient(config, transport, client_id);
 }
 
-LockClient::~LockClient() { }
+LockClient::~LockClient() {}
 
-void
-LockClient::lock_async(const std::string &key) {
+void LockClient::lock_async(const std::string &key) {
     ASSERT(waiting == nullptr);
     Debug("Sending LOCK");
 
@@ -65,23 +64,16 @@ LockClient::lock_async(const std::string &key) {
 
     waiting = new Promise(1000);
     transport->Timer(0, [=]() {
-            client->InvokeConsensus(request_str,
-                bind(&LockClient::Decide,
-                    this,
-                    placeholders::_1),
-                bind(&LockClient::LockCallback,
-                    this,
-                    placeholders::_1,
-                    placeholders::_2),
-                bind(&LockClient::ErrorCallback,
-                    this,
-                    placeholders::_1,
-                    placeholders::_2));
-            });
+        client->InvokeConsensus(
+            request_str, bind(&LockClient::Decide, this, placeholders::_1),
+            bind(&LockClient::LockCallback, this, placeholders::_1,
+                 placeholders::_2),
+            bind(&LockClient::ErrorCallback, this, placeholders::_1,
+                 placeholders::_2));
+    });
 }
 
-bool
-LockClient::lock_wait() {
+bool LockClient::lock_wait() {
     ASSERT(waiting != nullptr);
 
     int status = waiting->GetReply();
@@ -96,8 +88,7 @@ LockClient::lock_wait() {
     return false;
 }
 
-void
-LockClient::unlock_async(const std::string &key) {
+void LockClient::unlock_async(const std::string &key) {
     ASSERT(waiting == nullptr);
     Debug("Sending UNLOCK");
 
@@ -110,43 +101,34 @@ LockClient::unlock_async(const std::string &key) {
 
     waiting = new Promise(1000);
     transport->Timer(0, [=]() {
-            client->InvokeInconsistent(request_str,
-                bind(&LockClient::UnlockCallback,
-                    this,
-                    placeholders::_1,
-                    placeholders::_2));
-            });
+        client->InvokeInconsistent(request_str,
+                                   bind(&LockClient::UnlockCallback, this,
+                                        placeholders::_1, placeholders::_2));
+    });
 }
 
-void
-LockClient::unlock_wait() {
+void LockClient::unlock_wait() {
     waiting->GetReply();
     delete waiting;
     waiting = nullptr;
 }
 
-bool
-LockClient::lock(const string &key)
-{
+bool LockClient::lock(const string &key) {
     lock_async(key);
     return lock_wait();
 }
 
-void
-LockClient::unlock(const string &key)
-{
+void LockClient::unlock(const string &key) {
     unlock_async(key);
     return unlock_wait();
 }
 
-string
-LockClient::Decide(const map<string, std::size_t> &results)
-{
+string LockClient::Decide(const map<string, std::size_t> &results) {
     // If a majority say lock, we say lock.
     int success_count = 0;
     string key;
-    for (const auto& string_and_count : results) {
-        const string& s = string_and_count.first;
+    for (const auto &string_and_count : results) {
+        const string &s = string_and_count.first;
         const std::size_t count = string_and_count.second;
 
         Reply reply;
@@ -170,9 +152,8 @@ LockClient::Decide(const map<string, std::size_t> &results)
     return final_reply_str;
 }
 
-void
-LockClient::LockCallback(const std::string &request_str, const std::string &reply_str)
-{
+bool LockClient::LockCallback(const std::string &request_str,
+                              const std::string &reply_str) {
     Debug("Lock Callback: %s %s", request_str.c_str(), reply_str.c_str());
     Reply reply;
     reply.ParseFromString(reply_str);
@@ -180,27 +161,27 @@ LockClient::LockCallback(const std::string &request_str, const std::string &repl
     Promise *w = waiting;
     waiting = NULL;
     w->Reply(reply.status());
+    return true;
 }
 
-void
-LockClient::UnlockCallback(const std::string &request_str, const std::string &reply_str)
-{
+bool LockClient::UnlockCallback(const std::string &request_str,
+                                const std::string &reply_str) {
     Debug("Lock Callback: %s %s", request_str.c_str(), reply_str.c_str());
 
     Promise *w = waiting;
     waiting = NULL;
     w->Reply(0);
+    return true;
 }
 
-void
-LockClient::ErrorCallback(const std::string &request_str,
-                          replication::ErrorCode err)
-{
+bool LockClient::ErrorCallback(const std::string &request_str,
+                               replication::ErrorCode err) {
     Debug("Error Callback: %s %s", request_str.c_str(),
           replication::ErrorCodeToString(err).c_str());
     Promise *w = waiting;
     waiting = NULL;
     w->Reply(-3);  // Invalid command.
+    return true;
 }
 
-} // namespace lockserver
+}  // namespace lockserver

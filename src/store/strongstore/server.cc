@@ -77,6 +77,7 @@ void Server::LeaderUpcall(
     CommitDecision cd;
     replication::RequestID requestID = *response_request_ids.begin();
     std::unordered_set<replication::RequestID> requestIDs;
+    std::unordered_map<uint64_t, int> statuses;
 
     request.ParseFromString(op);
 
@@ -85,7 +86,7 @@ void Server::LeaderUpcall(
             if (request.get().has_timestamp()) {
                 pair<Timestamp, string> val;
                 status = store->Get(request.txnid(), request.get().key(),
-                                    request.get().timestamp(), val);
+                                    request.get().timestamp(), val, statuses);
                 if (status == 0) {
                     reply.set_value(val.second);
                 }
@@ -114,7 +115,8 @@ void Server::LeaderUpcall(
                 if (d == Decision::TRY_COORD) {
                     Debug("Trying fast path commit");
                     status = store->Prepare(
-                        request.txnid(), Transaction(request.prepare().txn()));
+                        request.txnid(), Transaction(request.prepare().txn()),
+                        statuses);
                     if (!status) {
                         cd = coordinator.ReceivePrepareOK(
                             requestID, request.txnid(), groupIdx,
@@ -155,7 +157,8 @@ void Server::LeaderUpcall(
             {
                 Debug("Participant for transaction: %lu", request.txnid());
                 status = store->Prepare(request.txnid(),
-                                        Transaction(request.prepare().txn()));
+                                        Transaction(request.prepare().txn()),
+                                        statuses);
                 if (!status) {
                     request.mutable_prepare()->set_timestamp(timeMaxWrite + 1);
 
@@ -183,9 +186,9 @@ void Server::LeaderUpcall(
                 request.prepareok().timestamp());
             if (cd.d == Decision::TRY_COORD) {
                 Debug("Received Prepare OK from all participants");
-                status =
-                    store->Prepare(request.txnid(),
-                                   coordinator.GetTransaction(request.txnid()));
+                status = store->Prepare(
+                    request.txnid(),
+                    coordinator.GetTransaction(request.txnid()), statuses);
                 if (!status) {
                     cd = coordinator.ReceivePrepareOK(
                         requestID, request.txnid(), groupIdx, timeMaxWrite + 1);
@@ -274,11 +277,12 @@ void Server::ReplicaUpcall(
 
     request.ParseFromString(op);
 
+    std::unordered_map<uint64_t, int> statuses;
     switch (request.op()) {
         case strongstore::proto::Request::PREPARE:
             // get a prepare timestamp and return to client
             store->Prepare(request.txnid(),
-                           Transaction(request.prepare().txn()));
+                           Transaction(request.prepare().txn()), statuses);
 
             if (AmLeader) {
                 shardClient.PrepareOK(request.prepare().coordinatorshard(),
@@ -293,9 +297,10 @@ void Server::ReplicaUpcall(
             if (request.has_prepare())  // Fast path commit
             {
                 store->Prepare(request.txnid(),
-                               Transaction(request.prepare().txn()));
+                               Transaction(request.prepare().txn()), statuses);
             }
-            if (store->Commit(request.txnid(), request.commit().timestamp())) {
+            if (store->Commit(request.txnid(), request.commit().timestamp(),
+                              statuses)) {
                 timeMaxWrite =
                     std::max(timeMaxWrite, request.commit().timestamp());
             }
@@ -325,7 +330,7 @@ void Server::ReplicaUpcall(
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");
-            store->Abort(request.txnid());
+            store->Abort(request.txnid(), statuses);
             break;
         default:
             Panic("Unrecognized operation.");
@@ -344,9 +349,11 @@ void Server::UnloggedUpcall(const string &op, string &response) {
     ASSERT(request.op() == strongstore::proto::Request::GET);
 
     if (request.get().has_timestamp()) {
+        std::unordered_map<uint64_t, int> statuses;
+
         pair<Timestamp, string> val;
         status = store->Get(request.txnid(), request.get().key(),
-                            request.get().timestamp(), val);
+                            request.get().timestamp(), val, statuses);
         if (status == 0) {
             reply.set_value(val.second);
         }

@@ -32,20 +32,22 @@
 #include "store/strongstore/client.h"
 
 #include "lib/latency.h"
+#include "store/common/common.h"
 
 using namespace std;
 
 namespace strongstore {
 
 Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
-               uint64_t nshards, int closestReplica, Transport *transport,
-               Partitioner *part)
+               int nShards, int closestReplica, Transport *transport,
+               Partitioner *part, TrueTime timeServer)
     : config(config),
       client_id(id),
-      nshards(nshards),
+      nshards(nShards),
       transport(transport),
       mode(mode),
-      part(part) {
+      part(part),
+      timeServer(timeServer) {
     t_id = client_id << 26;
 
     Debug("Initializing StrongStore client with id [%lu]", client_id);
@@ -77,51 +79,74 @@ Client::~Client() {
  *
  * Return a TID for the transaction.
  */
-void Client::Begin() {
-    Debug("BEGIN Transaction");
-    t_id++;
-    participants.clear();
-    for (uint64_t i = 0; i < nshards; i++) {
-        bclient[i]->Begin(t_id);
-    }
+void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
+                   uint32_t timeout) {
+    transport->Timer(0, [this, bcb, btcb, timeout]() {
+        Debug("BEGIN [%lu]", t_id + 1);
+        t_id++;
+        participants.clear();
+        for (uint64_t i = 0; i < nshards; i++) {
+            bclient[i]->Begin(t_id);
+        }
+        bcb(t_id);
+    });
 }
 
 /* Returns the value corresponding to the supplied key. */
-int Client::Get(const string &key, string &value) {
-    // Contact the appropriate shard to get the value.
-    std::vector<int> txnGroups(participants.begin(), participants.end());
-    int i = (*part)(key, nshards, -1, txnGroups);
+void Client::Get(const std::string &key, get_callback gcb,
+                 get_timeout_callback gtcb, uint32_t timeout) {
+    transport->Timer(0, [this, key, gcb, gtcb, timeout]() {
+        Latency_Start(&opLat);
+        Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
+        // Contact the appropriate shard to get the value.
+        std::vector<int> txnGroups(participants.begin(), participants.end());
+        int i = (*part)(key, nshards, -1, txnGroups);
 
-    // If needed, add this shard to set of participants and send BEGIN.
-    if (participants.find(i) == participants.end()) {
-        participants.insert(i);
-    }
+        // If needed, add this shard to set of participants and send BEGIN.
+        if (participants.find(i) == participants.end()) {
+            participants.insert(i);
+            bclient[i]->Begin(t_id);
+        }
 
-    // Send the GET operation to appropriate shard.
-    Promise promise(GET_TIMEOUT);
-
-    bclient[i]->Get(key, &promise);
-    value = promise.GetValue();
-
-    return promise.GetReply();
+        // Send the GET operation to appropriate shard.
+        auto gcbLat = [this, gcb](int status, const std::string &key,
+                                  const std::string &val, Timestamp ts) {
+            Latency_End(&opLat);
+            gcb(status, key, val, ts);
+        };
+        bclient[i]->Get(key, gcbLat, gtcb, timeout);
+    });
 }
 
 /* Sets the value corresponding to the supplied key. */
-int Client::Put(const string &key, const string &value) {
-    // Contact the appropriate shard to set the value.
-    std::vector<int> txnGroups(participants.begin(), participants.end());
-    int i = (*part)(key, nshards, -1, txnGroups);
+void Client::Put(const std::string &key, const std::string &value,
+                 put_callback pcb, put_timeout_callback ptcb,
+                 uint32_t timeout) {
+    transport->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
+        Latency_Start(&opLat);
+        Debug("PUT [%lu : %s]", t_id, key.c_str());
+        // Contact the appropriate shard to set the value.
+        std::vector<int> txnGroups(participants.begin(), participants.end());
+        int i = (*part)(key, nshards, -1, txnGroups);
 
-    // If needed, add this shard to set of participants and send BEGIN.
-    if (participants.find(i) == participants.end()) {
-        participants.insert(i);
-    }
+        // If needed, add this shard to set of participants and send BEGIN.
+        if (participants.find(i) == participants.end()) {
+            participants.insert(i);
+            bclient[i]->Begin(t_id);
+        }
 
-    Promise promise(PUT_TIMEOUT);
+        // Buffering, so no need to wait.
+        // bclient[i]->Get(key, [this, key, value, pcb, ptcb, timeout, i](
+        //      int status, const std::string &key, const std::string &val,
+        //      Timestamp ts){
 
-    // Buffering, so no need to wait.
-    bclient[i]->Put(key, value, &promise);
-    return promise.GetReply();
+        auto pcbLat = [this, pcb](int status1, const std::string &key1,
+                                  const std::string &val1) {
+            Latency_End(&opLat);
+            pcb(status1, key1, val1);
+        };
+        bclient[i]->Put(key, value, pcbLat, ptcb, timeout);
+    });
 }
 
 int Client::ChooseCoordinator(const std::set<int> &participants) {
@@ -130,52 +155,107 @@ int Client::ChooseCoordinator(const std::set<int> &participants) {
     return *participants.begin();
 }
 
-int Client::Prepare(uint64_t &ts) {
-    int status;
+void Client::Prepare(PendingRequest *req, uint32_t timeout) {
+    Debug("PREPARE [%lu]", t_id);
+    ASSERT(participants.size() > 0);
 
-    // 1. Send commit-prepare to all shards.
-    Debug("PREPARE Transaction");
-    Promise promise(PREPARE_TIMEOUT);
+    req->outstandingPrepares = 0;
+    req->prepareStatus = REPLY_OK;
+    req->maxRepliedTs = 0UL;
 
     int coordShard = ChooseCoordinator(participants);
     int nParticipants = participants.size();
 
     for (auto p : participants) {
-        Debug("Sending prepare to shard [%d]", p);
         if (p == coordShard) {
-            bclient[p]->Prepare(coordShard, nParticipants, &promise);
+            bclient[p]->Prepare(
+                req->id, coordShard, nParticipants,
+                std::bind(&Client::PrepareCallback, this, req->id,
+                          std::placeholders::_1, std::placeholders::_2),
+                std::bind(&Client::PrepareCallback, this, req->id,
+                          std::placeholders::_1, std::placeholders::_2),
+                timeout);
         } else {
-            bclient[p]->Prepare(coordShard, nParticipants);
+            bclient[p]->Prepare(
+                req->id, coordShard, nParticipants,
+                [this, tId = t_id, reqId = req->id](int status, Timestamp) {
+                    Debug("PREPARE [%lu] callback status %d", tId, status);
+
+                    auto itr = pendingReqs.find(reqId);
+                    if (itr == pendingReqs.end()) {
+                        Debug(
+                            "PrepareCallback for terminated request id %ld "
+                            "(txn already "
+                            "committed or aborted.",
+                            reqId);
+                        return;
+                    }
+                    PendingRequest *req = itr->second;
+
+                    --req->outstandingPrepares;
+                },
+                [](int, Timestamp) {}, timeout);
         }
+        req->outstandingPrepares++;
+    }
+}
+
+void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
+    Debug("PREPARE [%lu] callback status %d", t_id, status);
+
+    auto itr = this->pendingReqs.find(reqId);
+    if (itr == this->pendingReqs.end()) {
+        Debug(
+            "PrepareCallback for terminated request id %lu (txn already "
+            "committed or aborted.",
+            reqId);
+        return;
+    }
+    PendingRequest *req = itr->second;
+
+    --req->outstandingPrepares;
+    transaction_status_t tstatus = ABORTED_SYSTEM;
+    switch (status) {
+        case REPLY_OK:
+            Debug("COMMIT [%lu] OK", t_id);
+            tstatus = COMMITTED;
+            break;
+        default:
+            // abort!
+            Debug("COMMIT [%lu] ABORT", t_id);
+            tstatus = ABORTED_SYSTEM;
+            break;
     }
 
-    // 2. Wait for reply from all shards. (abort on timeout)
-    Debug("Waiting for PREPARE replies");
-
-    status = promise.GetReply();
-    return status;
+    commit_callback ccb = req->ccb;
+    pendingReqs.erase(reqId);
+    delete req;
+    ccb(tstatus);
 }
 
 /* Attempts to commit the ongoing transaction. */
-bool Client::Commit() {
-    // Implementing 2 Phase Commit
-    uint64_t ts = 0;
-    int status = Prepare(ts);
+void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
+                    uint32_t timeout) {
+    transport->Timer(0, [this, ccb, ctcb, timeout]() {
+        uint64_t reqId = lastReqId++;
+        PendingRequest *req = new PendingRequest(reqId, t_id);
+        pendingReqs[reqId] = req;
+        req->ccb = ccb;
+        req->ctcb = ctcb;
+        req->maxRepliedTs = 0;
+        req->callbackInvoked = false;
+        req->timeout = timeout;
 
-    if (status == REPLY_OK) {
-        return true;
-    } else {
-        return false;
-    }
+        stats.IncrementList("txn_groups", participants.size());
+
+        Prepare(req, timeout);
+    });
 }
 
 /* Aborts the ongoing transaction. */
-void Client::Abort() { Panic("Unimplemented: ABORT Transaction"); }
-
-/* Return statistics of most recent transaction. */
-vector<int> Client::Stats() {
-    vector<int> v;
-    return v;
+void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
+                   uint32_t timeout) {
+    Panic("Unimplemented ABORT");
 }
 
 }  // namespace strongstore

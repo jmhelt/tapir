@@ -35,6 +35,9 @@ class SyncClient {
     // Get value without waiting.
     void Get(const std::string &key, uint32_t timeout);
 
+    // Wait for outstanding Gets to finish in FIFO order.
+    void Wait(std::vector<std::string> &values);
+
     // Set the value for the given key.
     virtual void Put(const std::string &key, const std::string &value,
                      uint32_t timeout);
@@ -46,6 +49,21 @@ class SyncClient {
     virtual void Abort(uint32_t timeout);
 
    private:
+    void GetCallback(Promise *promise, int status, const std::string &key,
+                     const std::string &value, Timestamp ts);
+    void GetTimeoutCallback(Promise *promise, int status,
+                            const std::string &key);
+    void PutCallback(Promise *promise, int status, const std::string &key,
+                     const std::string &value);
+    void PutTimeoutCallback(Promise *promise, int status,
+                            const std::string &key, const std::string &value);
+    void CommitCallback(Promise *promise, transaction_status_t status);
+    void CommitTimeoutCallback(Promise *promise);
+    void AbortCallback(Promise *promise);
+    void AbortTimeoutCallback(Promise *promise);
+
+    std::vector<Promise *> getPromises;
+
     Client *client;
 };
 

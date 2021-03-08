@@ -32,78 +32,118 @@
 
 using namespace std;
 
-BufferClient::BufferClient(TxnClient* txnclient) : txn()
-{
-    this->txnclient = txnclient;
-}
+BufferClient::BufferClient(TxnClient *txnclient, bool bufferPuts)
+    : txnclient(txnclient), bufferPuts(bufferPuts) {}
 
-BufferClient::~BufferClient() { }
+BufferClient::~BufferClient() {}
 
 /* Begins a transaction. */
-void
-BufferClient::Begin(uint64_t tid)
-{
+void BufferClient::Begin(uint64_t tid) {
     // Initialize data structures.
     txn = Transaction();
+    readSet.clear();
     this->tid = tid;
     txnclient->Begin(tid);
 }
 
-/* Get value for a key.
- * Returns 0 on success, else -1. */
-void
-BufferClient::Get(const string &key, Promise *promise)
-{
+void BufferClient::Get(const std::string &key, get_callback gcb,
+                       get_timeout_callback gtcb, uint32_t timeout) {
     // Read your own writes, check the write set first.
     if (txn.getWriteSet().find(key) != txn.getWriteSet().end()) {
-        promise->Reply(REPLY_OK, (txn.getWriteSet().find(key))->second);
+        gcb(REPLY_OK, key, (txn.getWriteSet().find(key))->second, Timestamp());
         return;
     }
 
     // Consistent reads, check the read set.
     if (txn.getReadSet().find(key) != txn.getReadSet().end()) {
-        // read from the server at same timestamp.
-        txnclient->Get(tid, key, (txn.getReadSet().find(key))->second, promise);
+        auto readSetItr = readSet.find(key);
+        ASSERT(readSetItr != readSet.end());
+        gcb(REPLY_OK, key, std::get<0>(readSetItr->second),
+            std::get<1>(readSetItr->second));
         return;
     }
-    
-    // Otherwise, get latest value from server.
-    Promise p(GET_TIMEOUT);
-    Promise *pp = (promise != NULL) ? promise : &p;
 
-    txnclient->Get(tid, key, pp);
-    if (pp->GetReply() == REPLY_OK) {
-        Debug("Adding [%s] with ts %lu", key.c_str(), pp->GetTimestamp().getTimestamp());
-        txn.addReadSet(key, pp->GetTimestamp());
+    get_callback bufferCb = [this, gcb](int status, const std::string &key,
+                                        const std::string &value,
+                                        Timestamp ts) {
+        // TODO: we still need to add a "failed" read to the read set
+        //   (where failed ==> successful rpc, but no value exists for key)
+        // if (status == REPLY_OK) {
+        Debug("Added to %lu to read set.", ts.getTimestamp());
+        this->txn.addReadSet(key, ts);
+        this->readSet.insert(std::make_pair(key, std::make_tuple(value, ts)));
+        //}
+        gcb(status, key, value, ts);
+    };
+    txnclient->Get(tid, key, bufferCb, gtcb, timeout);
+}
+
+void BufferClient::Get(const std::string &key, const Timestamp &ts,
+                       get_callback gcb, get_timeout_callback gtcb,
+                       uint32_t timeout) {
+    // Read your own writes, check the write set first.
+    if (txn.getWriteSet().find(key) != txn.getWriteSet().end()) {
+        gcb(REPLY_OK, key, (txn.getWriteSet().find(key))->second, Timestamp());
+        return;
+    }
+
+    // Consistent reads, check the read set.
+    if (txn.getReadSet().find(key) != txn.getReadSet().end()) {
+        auto readSetItr = readSet.find(key);
+        ASSERT(readSetItr != readSet.end());
+        gcb(REPLY_OK, key, std::get<0>(readSetItr->second),
+            std::get<1>(readSetItr->second));
+        return;
+    }
+
+    get_callback bufferCb = [this, gcb](int status, const std::string &key,
+                                        const std::string &value,
+                                        Timestamp ts) {
+        // TODO: we still need to add a "failed" read to the read set
+        //   (where failed ==> successful rpc, but no value exists for key)
+        // if (status == REPLY_OK) {
+        Debug("Added %lu.%lu to read set.", ts.getTimestamp(), ts.getID());
+        this->txn.addReadSet(key, ts);
+        this->readSet.insert(std::make_pair(key, std::make_tuple(value, ts)));
+        //}
+        gcb(status, key, value, ts);
+    };
+    txnclient->Get(tid, key, ts, bufferCb, gtcb, timeout);
+}
+
+void BufferClient::Put(const std::string &key, const std::string &value,
+                       put_callback pcb, put_timeout_callback ptcb,
+                       uint32_t timeout) {
+    txn.addWriteSet(key, value);
+    if (bufferPuts) {
+        pcb(REPLY_OK, key, value);
+    } else {
+        txnclient->Put(tid, key, value, pcb, ptcb, timeout);
     }
 }
 
-/* Set value for a key. (Always succeeds).
- * Returns 0 on success, else -1. */
-void
-BufferClient::Put(const string &key, const string &value, Promise *promise)
-{
-    // Update the write set.
+void BufferClient::Put(const std::string &key, const std::string &value,
+                       const Timestamp &ts, put_callback pcb,
+                       put_timeout_callback ptcb, uint32_t timeout) {
     txn.addWriteSet(key, value);
-    promise->Reply(REPLY_OK);
+    if (bufferPuts) {
+        pcb(REPLY_OK, key, value);
+    } else {
+        txnclient->Put(tid, key, value, ts, pcb, ptcb, timeout);
+    }
 }
 
-/* Prepare the transaction. */
-void
-BufferClient::Prepare(const Timestamp &timestamp, Promise *promise)
-{
-    txnclient->Prepare(tid, txn, timestamp, promise);
+void BufferClient::Prepare(const Timestamp &timestamp, prepare_callback pcb,
+                           prepare_timeout_callback ptcb, uint32_t timeout) {
+    txnclient->Prepare(tid, txn, timestamp, pcb, ptcb, timeout);
 }
 
-void
-BufferClient::Commit(uint64_t timestamp, Promise *promise)
-{
-    txnclient->Commit(tid, txn, timestamp, promise);
+void BufferClient::Commit(const Timestamp &ts, commit_callback ccb,
+                          commit_timeout_callback ctcb, uint32_t timeout) {
+    txnclient->Commit(tid, txn, ts, ccb, ctcb, timeout);
 }
 
-/* Aborts the ongoing transaction. */
-void
-BufferClient::Abort(Promise *promise)
-{
-    txnclient->Abort(tid, Transaction(), promise);
+void BufferClient::Abort(abort_callback acb, abort_timeout_callback atcb,
+                         uint32_t timeout) {
+    txnclient->Abort(tid, Transaction(), acb, atcb, timeout);
 }

@@ -40,43 +40,51 @@
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
 
-class TxnStore
-{
-public:
-
+class TxnStore {
+   public:
     TxnStore();
     virtual ~TxnStore();
 
     // add key to read set
     virtual int Get(uint64_t id, const std::string &key,
-        std::pair<Timestamp, std::string> &value);
+                    std::pair<Timestamp, std::string> &value);
 
     virtual int Get(uint64_t id, const std::string &key,
-        const Timestamp &timestamp, std::pair<Timestamp, std::string> &value);
+                    const Timestamp &timestamp,
+                    std::pair<Timestamp, std::string> &value,
+                    std::unordered_map<uint64_t, int> &statuses);
 
     // add key to write set
     virtual int Put(uint64_t id, const std::string &key,
-        const std::string &value);
+                    const std::string &value);
 
-    // check whether we can commit this transaction (and lock the read/write set)
-    virtual int Prepare(uint64_t id, const Transaction &txn);
+    virtual int Put(uint64_t id, const std::string &key,
+                    const std::string &value, const Timestamp &timestamp,
+                    std::unordered_map<uint64_t, int> &statuses);
+
+    // check whether we can commit this transaction (and lock the read/write
+    // set)
+    virtual int Prepare(uint64_t id, const Transaction &txn,
+                        std::unordered_map<uint64_t, int> &statuses);
 
     virtual int Prepare(uint64_t id, const Transaction &txn,
-        const Timestamp &timestamp, Timestamp &proposed);
+                        const Timestamp &timestamp, Timestamp &proposed);
 
     // commit the transaction
-    virtual bool Commit(uint64_t id, uint64_t timestamp = 0);
+    virtual bool Commit(uint64_t id, const Timestamp &ts,
+                        std::unordered_map<uint64_t, int> &statuses);
 
     // abort a running transaction
-    virtual void Abort(uint64_t id);
+    virtual void Abort(uint64_t id,
+                       std::unordered_map<uint64_t, int> &statuses);
 
     // load keys
     virtual void Load(const std::string &key, const std::string &value,
-        const Timestamp &timestamp);
+                      const Timestamp &timestamp);
 
     inline Stats &GetStats() { return stats; }
 
-protected:
+   protected:
     Stats stats;
 };
 

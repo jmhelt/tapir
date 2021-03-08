@@ -6,10 +6,15 @@
     "us-east-1-1",
     "us-east-1-2"
   ],
-  "num_shards": 1,
+  "num_shards": 2,
   "shard_config": "shard.config",
   "fault_tolerance": 1,
   "shards": [
+    [
+      "us-east-1-0",
+      "us-east-1-1",
+      "us-east-1-2"
+    ],
     [
       "us-east-1-0",
       "us-east-1-1",
@@ -60,6 +65,7 @@
   "server_debug_stats": false,
   "client_debug_stats": false,
   "client_experiment_length": 10,
+  "client_rand_sleep": 1000,
   "client_ramp_down": 0,
   "client_ramp_up": 0,
   "default_remote_shell": "bash",
@@ -242,7 +248,6 @@
   "master_server_name": "california",
   "client_disable_gc": true,
   "server_disable_gc": true,
-  "client_rand_sleep": 0,
   "server_cpuprofile": false,
   "server_durable": false,
   "server_rpc_port": 8087,
