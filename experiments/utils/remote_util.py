@@ -11,8 +11,8 @@ def get_server_host(config, i):
     return config['server_host_format_str'] % (config['server_names'][i],
         config['experiment_name'], config['project_name'])
 
-def get_client_host(config, i, j):
-    return config['client_host_format_str'] % (i, j, config['experiment_name'],
+def get_client_host(config, client):
+    return config['client_host_format_str'] % (client, config['experiment_name'],
         config['project_name'])
 
 def get_ip_for_interface(interface, remote_user, remote_host):
