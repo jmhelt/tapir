@@ -30,6 +30,8 @@
 
 #include "replication/common/client.h"
 
+#include <chrono>
+
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "lib/transport.h"

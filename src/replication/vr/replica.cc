@@ -52,13 +52,14 @@ using namespace proto;
 
 VRReplica::VRReplica(transport::Configuration config, int groupIdx, int myIdx,
                      Transport *transport, unsigned int batchSize,
-                     AppReplica *app)
+                     AppReplica *app, bool debug_stats)
     : Replica(config, groupIdx, myIdx, transport, app),
       batchSize(batchSize),
       log(false),
       prepareOKQuorum(config.QuorumSize() - 1),
       startViewChangeQuorum(config.QuorumSize() - 1),
-      doViewChangeQuorum(config.QuorumSize() - 1) {
+      doViewChangeQuorum(config.QuorumSize() - 1),
+      debug_stats_{debug_stats} {
     this->status = STATUS_NORMAL;
     this->view = 0;
     this->lastOp = 0;
@@ -91,6 +92,12 @@ VRReplica::VRReplica(transport::Configuration config, int groupIdx, int myIdx,
     } else {
         viewChangeTimeout->Start();
     }
+
+    if (debug_stats_) {
+        _Latency_Init(&rec_to_upcall_lat_, "rec_to_upcall");
+        _Latency_Init(&upcall_to_exec_lat_, "upcall_to_exec");
+        _Latency_Init(&exec_to_sent_lat_, "exec_to_sent");
+    }
 }
 
 VRReplica::~VRReplica() {
@@ -99,6 +106,12 @@ VRReplica::~VRReplica() {
     delete stateTransferTimeout;
     delete resendPrepareTimeout;
     delete closeBatchTimeout;
+
+    if (debug_stats_) {
+        Latency_Dump(&rec_to_upcall_lat_);
+        Latency_Dump(&upcall_to_exec_lat_);
+        Latency_Dump(&exec_to_sent_lat_);
+    }
 
     for (auto &kv : pendingPrepares) {
         delete kv.first;
@@ -128,8 +141,14 @@ void VRReplica::CommitUpTo(opnum_t upto) {
         std::unordered_set<RequestID> response_client_ids{};
         response_client_ids.emplace(request.clientid(), request.clientreqid());
         uint64_t response_delay_ms = 0;
+        if (AmLeader()) {
+            Latency_End(&upcall_to_exec_lat_);
+        }
         Execute(lastCommitted, entry->request, reply, response_client_ids,
                 response_delay_ms);
+        if (AmLeader()) {
+            Latency_Start(&exec_to_sent_lat_);
+        }
 
         /* Mark it as committed */
         log.SetStatus(lastCommitted, LOG_STATE_COMMITTED);
@@ -162,11 +181,13 @@ void VRReplica::CommitUpTo(opnum_t upto) {
                 if (response_delay_ms == 0) {
                     Debug("Sent");
                     transport->SendMessage(this, *iter->second, reply);
+                    Latency_End(&exec_to_sent_lat_);
                 } else {
                     Debug("Delaying message by %lu ms", response_delay_ms);
                     transport->Timer(response_delay_ms, [=]() {
                         Debug("Sent");
                         transport->SendMessage(this, *iter->second, reply);
+                        Latency_End(&exec_to_sent_lat_);
                     });
                 }
             }
@@ -396,6 +417,7 @@ void VRReplica::ReceiveMessage(const TransportAddress &remote,
 
 void VRReplica::HandleRequest(const TransportAddress &remote,
                               const RequestMessage &msg) {
+    Latency_Start(&rec_to_upcall_lat_);
     viewstamp_t v;
 
     if (status != STATUS_NORMAL) {
@@ -452,7 +474,9 @@ void VRReplica::HandleRequest(const TransportAddress &remote,
     RequestID rid{msg.req().clientid(), msg.req().clientreqid()};
     Debug("Received request: %lu %lu", rid.client_id, rid.request_id);
     std::unordered_set<RequestID> resClientIDs{rid};
+    Latency_End(&rec_to_upcall_lat_);
     LeaderUpcall(lastCommitted, msg.req().op(), replicate, res, resClientIDs);
+    Latency_Start(&upcall_to_exec_lat_);
 
     // Check whether this request should be committed to replicas
     if (!replicate) {

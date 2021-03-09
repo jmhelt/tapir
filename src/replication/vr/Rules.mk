@@ -8,10 +8,12 @@ PROTOS += $(addprefix $(d), \
 
 OBJS-vr-client := $(o)client.o $(o)vr-proto.o \
                    $(OBJS-client) $(LIB-message) \
+                   $(LIB-latency) \
                    $(LIB-configuration)
 
 OBJS-vr-replica := $(o)replica.o $(o)vr-proto.o \
                    $(OBJS-replica) $(LIB-message) \
+                   $(LIB-latency) \
                    $(LIB-configuration)
 
 include $(d)tests/Rules.mk

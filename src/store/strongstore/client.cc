@@ -40,14 +40,15 @@ namespace strongstore {
 
 Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
                int nShards, int closestReplica, Transport *transport,
-               Partitioner *part, TrueTime timeServer)
+               Partitioner *part, TrueTime timeServer, bool debug_stats)
     : config(config),
       client_id(id),
       nshards(nShards),
       transport(transport),
       mode(mode),
       part(part),
-      timeServer(timeServer) {
+      timeServer(timeServer),
+      debug_stats_{debug_stats} {
     t_id = client_id << 26;
 
     Debug("Initializing StrongStore client with id [%lu]", client_id);
@@ -62,13 +63,23 @@ Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
 
     Debug("SpanStore client [%lu] created!", client_id);
     _Latency_Init(&opLat, "op_lat");
+
+    if (debug_stats_) {
+        _Latency_Init(&commit_lat_, "commit_lat");
+    }
 }
 
 Client::~Client() {
     Latency_Dump(&opLat);
+
+    if (debug_stats_) {
+        Latency_Dump(&commit_lat_);
+    }
+
     for (auto b : bclient) {
         delete b;
     }
+
     for (auto s : sclient) {
         delete s;
     }
@@ -230,6 +241,9 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     commit_callback ccb = req->ccb;
     pendingReqs.erase(reqId);
     delete req;
+    if (debug_stats_) {
+        Latency_End(&commit_lat_);
+    }
     ccb(tstatus);
 }
 
@@ -237,6 +251,9 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
 void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
     transport->Timer(0, [this, ccb, ctcb, timeout]() {
+        if (debug_stats_) {
+            Latency_Start(&commit_lat_);
+        }
         uint64_t reqId = lastReqId++;
         PendingRequest *req = new PendingRequest(reqId, t_id);
         pendingReqs[reqId] = req;

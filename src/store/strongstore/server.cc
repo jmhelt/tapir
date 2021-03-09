@@ -41,7 +41,7 @@ using namespace proto;
 using namespace replication;
 
 Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
-               Mode mode, uint64_t error)
+               Mode mode, uint64_t error, bool debug_stats)
     : timeServer{error},
       coordinator{timeServer},
       shardClient(shardClient),
@@ -49,7 +49,8 @@ Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
       groupIdx(groupIdx),
       myIdx(myIdx),
       mode(mode),
-      AmLeader{false} {
+      AmLeader{false},
+      debug_stats_{debug_stats} {
     switch (mode) {
         case MODE_LOCK:
         case MODE_SPAN_LOCK:
@@ -62,9 +63,21 @@ Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
         default:
             NOT_REACHABLE();
     }
+
+    if (debug_stats_) {
+        _Latency_Init(&prepare_lat_, "prepare_lat");
+        _Latency_Init(&commit_lat_, "commit_lat");
+    }
 }
 
-Server::~Server() { delete store; }
+Server::~Server() {
+    if (debug_stats_) {
+        Latency_Dump(&prepare_lat_);
+        Latency_Dump(&commit_lat_);
+    }
+
+    delete store;
+}
 
 void Server::LeaderUpcall(
     opnum_t opnum, const string &op, bool &replicate, string &response,
@@ -103,10 +116,12 @@ void Server::LeaderUpcall(
             reply.SerializeToString(&response);
             break;
         case strongstore::proto::Request::PREPARE:
-
+            if (debug_stats_) {
+                Latency_Start(&prepare_lat_);
+            }
             if (groupIdx ==
-                request.prepare().coordinatorshard())  // I am coordinator
-            {
+                request.prepare().coordinatorshard()) {  // I am coordinator
+
                 Debug("Coordinator for transaction: %lu", request.txnid());
                 Decision d = coordinator.StartTransaction(
                     requestID, request.txnid(),
@@ -130,8 +145,7 @@ void Server::LeaderUpcall(
 
                         replicate = true;
                         request.SerializeToString(&response);
-                    } else  // Failed to commit
-                    {
+                    } else {  // Failed to commit
                         Debug("Fast path commit failed");
                         coordinator.Abort(request.txnid());
                         // Reply to client
@@ -146,15 +160,13 @@ void Server::LeaderUpcall(
                     replicate = false;
                     reply.set_status(REPLY_FAIL);
                     reply.SerializeToString(&response);
-                } else  // Wait for other participants
-                {
+                } else {  // Wait for other participants
                     Debug("Waiting for other participants");
                     replicate = false;
                     // Delay response to client
                     response_request_ids.erase(response_request_ids.begin());
                 }
-            } else  // I am participant
-            {
+            } else {  // I am participant
                 Debug("Participant for transaction: %lu", request.txnid());
                 status = store->Prepare(request.txnid(),
                                         Transaction(request.prepare().txn()),
@@ -175,6 +187,9 @@ void Server::LeaderUpcall(
                     reply.set_status(status);
                     reply.SerializeToString(&response);
                 }
+            }
+            if (debug_stats_) {
+                Latency_End(&prepare_lat_);
             }
             break;
         case strongstore::proto::Request::PREPARE_OK:  // Only coordinator
@@ -207,8 +222,7 @@ void Server::LeaderUpcall(
 
                     replicate = true;
                     request.SerializeToString(&response);
-                } else  // Failed to commit
-                {
+                } else {  // Failed to commit
                     Debug("Fast path commit failed");
                     requestIDs = coordinator.GetRequestIDs(request.txnid());
                     coordinator.Abort(request.txnid());
@@ -217,6 +231,9 @@ void Server::LeaderUpcall(
                     replicate = false;
                     reply.set_status(REPLY_FAIL);
                     reply.SerializeToString(&response);
+                    // if (debug_stats_) {
+                    //     Latency_End(&prepare_lat_);
+                    // }
                 }
             } else if (cd.d == Decision::ABORT) {
                 Debug("Abort: %lu", request.txnid());
@@ -228,8 +245,10 @@ void Server::LeaderUpcall(
                 replicate = false;
                 reply.set_status(REPLY_FAIL);
                 reply.SerializeToString(&response);
-            } else  // Wait for other participants
-            {
+                // if (debug_stats_) {
+                //     Latency_End(&prepare_lat_);
+                // }
+            } else {  // Wait for other participants
                 Debug("Waiting for other participants");
                 replicate = false;
                 // Delay response to client
@@ -293,6 +312,9 @@ void Server::ReplicaUpcall(
             // Reply to client
             break;
         case strongstore::proto::Request::COMMIT:
+            if (debug_stats_) {
+                Latency_Start(&commit_lat_);
+            }
             Debug("Received COMMIT");
             if (request.has_prepare())  // Fast path commit
             {
@@ -326,6 +348,9 @@ void Server::ReplicaUpcall(
                 coordinator.Commit(request.txnid());
                 response_delay_ms =
                     coordinator.CommitWaitMs(request.commit().timestamp());
+            }
+            if (debug_stats_) {
+                Latency_End(&commit_lat_);
             }
             break;
         case strongstore::proto::Request::ABORT:
