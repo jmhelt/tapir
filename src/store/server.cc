@@ -307,12 +307,13 @@ int main(int argc, char **argv) {
             strongstore::InterShardClient *shardClient =
                 new strongstore::InterShardClient(config, tport,
                                                   FLAGS_num_shards);
-            server = new strongstore::Server(*shardClient, FLAGS_group_idx,
-                                             FLAGS_replica_idx, strongMode,
-                                             FLAGS_clock_error);
+            server = new strongstore::Server(
+                *shardClient, FLAGS_group_idx, FLAGS_replica_idx, strongMode,
+                FLAGS_clock_error, FLAGS_debug_stats);
             replica = new replication::vr::VRReplica(
                 config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
-                dynamic_cast<replication::AppReplica *>(server));
+                dynamic_cast<replication::AppReplica *>(server),
+                FLAGS_debug_stats);
             break;
         }
         default: {
@@ -419,6 +420,7 @@ void Cleanup(int signal) {
         Notice("Exporting stats to %s.", FLAGS_stats_file.c_str());
         server->GetStats().ExportJSON(FLAGS_stats_file);
     }
+    delete replica;
     delete server;
     exit(0);
 }

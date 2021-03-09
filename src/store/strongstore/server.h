@@ -32,6 +32,7 @@
 #ifndef _STRONG_SERVER_H_
 #define _STRONG_SERVER_H_
 
+#include "lib/latency.h"
 #include "lib/transport.h"
 #include "replication/vr/replica.h"
 #include "store/common/truetime.h"
@@ -47,7 +48,7 @@ namespace strongstore {
 class Server : public replication::AppReplica, public ::Server {
    public:
     Server(InterShardClient &shardClient, int groupIdx, int myIdx, Mode mode,
-           uint64_t error);
+           uint64_t error, bool debug_stats);
     virtual ~Server();
 
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
@@ -71,6 +72,10 @@ class Server : public replication::AppReplica, public ::Server {
    private:
     TrueTime timeServer;
     Coordinator coordinator;
+
+    Latency_t prepare_lat_;
+    Latency_t commit_lat_;
+
     InterShardClient &shardClient;
     uint64_t timeMaxWrite;
     int groupIdx;
@@ -78,6 +83,7 @@ class Server : public replication::AppReplica, public ::Server {
     Mode mode;
     TxnStore *store;
     bool AmLeader;
+    bool debug_stats_;
 };
 
 }  // namespace strongstore

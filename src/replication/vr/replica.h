@@ -31,53 +31,51 @@
 #ifndef _VR_REPLICA_H_
 #define _VR_REPLICA_H_
 
-#include "lib/configuration.h"
-#include "replication/common/log.h"
-#include "replication/common/replica.h"
-#include "replication/common/quorumset.h"
-#include "replication/vr/vr-proto.pb.h"
-
+#include <list>
 #include <map>
 #include <memory>
-#include <list>
+
+#include "lib/configuration.h"
+#include "lib/latency.h"
+#include "replication/common/log.h"
+#include "replication/common/quorumset.h"
+#include "replication/common/replica.h"
+#include "replication/vr/vr-proto.pb.h"
 
 namespace replication {
 namespace vr {
 
-class VRReplica : public Replica
-{
-public:
+class VRReplica : public Replica {
+   public:
     VRReplica(transport::Configuration config, int groupIdx, int myIdx,
-              Transport *transport, unsigned int batchSize,
-              AppReplica *app);
+              Transport *transport, unsigned int batchSize, AppReplica *app,
+              bool debug_stats);
     ~VRReplica();
-    
-    void ReceiveMessage(const TransportAddress &remote,
-                        const string &type, const string &data,
-                        void *meta_data);
 
-private:
+    void ReceiveMessage(const TransportAddress &remote, const string &type,
+                        const string &data, void *meta_data);
+
+   private:
     view_t view;
     opnum_t lastCommitted;
     opnum_t lastOp;
     view_t lastRequestStateTransferView;
     opnum_t lastRequestStateTransferOpnum;
-    std::list<std::pair<TransportAddress *,
-                        proto::PrepareMessage> > pendingPrepares;
+    std::list<std::pair<TransportAddress *, proto::PrepareMessage> >
+        pendingPrepares;
     proto::PrepareMessage lastPrepare;
     unsigned int batchSize;
     opnum_t lastBatchEnd;
-    
+
     Log log;
     std::map<uint64_t, std::unique_ptr<TransportAddress> > clientAddresses;
-    struct ClientTableEntry
-    {
+    struct ClientTableEntry {
         uint64_t lastReqId;
         bool replied;
         proto::ReplyMessage reply;
     };
     std::map<uint64_t, ClientTableEntry> clientTable;
-    
+
     QuorumSet<viewstamp_t, proto::PrepareOKMessage> prepareOKQuorum;
     QuorumSet<view_t, proto::StartViewChangeMessage> startViewChangeQuorum;
     QuorumSet<view_t, proto::DoViewChangeMessage> doViewChangeQuorum;
@@ -87,7 +85,13 @@ private:
     Timeout *stateTransferTimeout;
     Timeout *resendPrepareTimeout;
     Timeout *closeBatchTimeout;
-    
+
+    Latency_t rec_to_upcall_lat_;
+    Latency_t upcall_to_exec_lat_;
+    Latency_t exec_to_sent_lat_;
+
+    bool debug_stats_;
+
     bool AmLeader() const;
     void CommitUpTo(opnum_t upto);
     void SendPrepareOKs(opnum_t oldLastOp);
@@ -98,20 +102,21 @@ private:
     void UpdateClientTable(const Request &req);
     void ResendPrepare();
     void CloseBatch();
-    
+
     void HandleRequest(const TransportAddress &remote,
                        const proto::RequestMessage &msg);
     void HandleUnloggedRequest(const TransportAddress &remote,
                                const proto::UnloggedRequestMessage &msg);
-    
+
     void HandlePrepare(const TransportAddress &remote,
                        const proto::PrepareMessage &msg);
     void HandlePrepareOK(const TransportAddress &remote,
                          const proto::PrepareOKMessage &msg);
     void HandleCommit(const TransportAddress &remote,
                       const proto::CommitMessage &msg);
-    void HandleRequestStateTransfer(const TransportAddress &remote,
-                                    const proto::RequestStateTransferMessage &msg);
+    void HandleRequestStateTransfer(
+        const TransportAddress &remote,
+        const proto::RequestStateTransferMessage &msg);
     void HandleStateTransfer(const TransportAddress &remote,
                              const proto::StateTransferMessage &msg);
     void HandleStartViewChange(const TransportAddress &remote,
@@ -122,7 +127,7 @@ private:
                          const proto::StartViewMessage &msg);
 };
 
-} // namespace replication::vr
-} // namespace replication
+}  // namespace vr
+}  // namespace replication
 
-#endif  /* _VR_REPLICA_H_ */
+#endif /* _VR_REPLICA_H_ */

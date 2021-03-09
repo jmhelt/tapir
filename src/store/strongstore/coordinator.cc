@@ -45,20 +45,14 @@ Decision Coordinator::StartTransaction(replication::RequestID rid,
         return Decision::ABORT;
     }
 
-    auto search = prepared_transactions_.find(transaction_id);
-    if (search == prepared_transactions_.end()) {
-        prepared_transactions_.insert(
-            {transaction_id,
-             {rid, start_timestamp, n_participants, transaction}});
-        search = prepared_transactions_.find(transaction_id);
-    } else {
-        search->second.SetTimeStart(start_timestamp);
-        search->second.SetNParticipants(n_participants);
-        search->second.SetTransaction(transaction);
-        search->second.AddRequestID(rid);
-    }
+    PreparedTransaction &pt = prepared_transactions_[transaction_id];
+    pt.StartTransaction(rid, start_timestamp, n_participants, transaction);
 
-    if (search->second.TryCoord()) {
+    bool try_coord = pt.TryCoord();
+
+    prepared_transactions_[transaction_id] = std::move(pt);
+
+    if (try_coord) {
         return Decision::TRY_COORD;
     } else {
         return Decision::WAIT;
@@ -74,17 +68,18 @@ CommitDecision Coordinator::ReceivePrepareOK(replication::RequestID rid,
         return {Decision::ABORT, 0};
     }
 
-    auto search = prepared_transactions_.find(transaction_id);
-    if (search == prepared_transactions_.end()) {
-        prepared_transactions_.insert({transaction_id, {rid, shardID}});
-        search = prepared_transactions_.find(transaction_id);
-    }
+    PreparedTransaction &pt = prepared_transactions_[transaction_id];
+    pt.PrepareOK(rid, shardID, timePrepare);
 
-    search->second.PrepareOK(rid, shardID, timePrepare);
+    bool try_coord = pt.TryCoord();
+    bool can_commit = pt.CanCommit();
+    uint64_t commit_time = pt.GetTimeCommit();
 
-    if (search->second.CanCommit()) {
-        return {Decision::COMMIT, search->second.GetTimeCommit()};
-    } else if (search->second.TryCoord()) {
+    prepared_transactions_[transaction_id] = std::move(pt);
+
+    if (can_commit) {
+        return {Decision::COMMIT, commit_time};
+    } else if (try_coord) {
         return {Decision::TRY_COORD, 0};
     } else {
         return {Decision::WAIT, 0};
@@ -106,7 +101,7 @@ uint64_t Coordinator::CommitWaitMs(uint64_t commit_timestamp) {
     if (commit_timestamp <= now.earliest()) {
         return 0;
     } else {
-        return commit_timestamp - now.earliest();
+        return commit_timestamp - now.earliest() * 1000;
     }
 }
 };  // namespace strongstore
