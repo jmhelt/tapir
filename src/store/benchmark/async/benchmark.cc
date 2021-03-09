@@ -537,7 +537,7 @@ int main(int argc, char **argv) {
                 client = new strongstore::Client(
                     strongmode, config, clientId, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part,
-                    TrueTime(FLAGS_clock_error));
+                    TrueTime(FLAGS_clock_error), FLAGS_debug_stats);
                 break;
             }
             default:

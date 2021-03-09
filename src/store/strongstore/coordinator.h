@@ -23,11 +23,18 @@ struct CommitDecision {
 
 class PreparedTransaction {
    public:
+    PreparedTransaction()
+        : timeCommit_{0},
+          nParticipants_{-1},
+          okParticipants_{},
+          requestIDs_{},
+          transaction_{} {}
     PreparedTransaction(replication::RequestID requestID, int shardID)
         : timeCommit_{0},
           nParticipants_{-1},
           okParticipants_{{shardID}},
-          requestIDs_{{requestID}} {}
+          requestIDs_{{requestID}},
+          transaction_{} {}
     PreparedTransaction(replication::RequestID requestID, uint64_t timeStart,
                         int nParticipants, Transaction transaction)
         : timeCommit_{timeStart},
@@ -38,25 +45,21 @@ class PreparedTransaction {
 
     ~PreparedTransaction() {}
 
-    void SetTimeStart(uint64_t timeStart) {
-        timeCommit_ = std::max(timeCommit_, timeStart);
-    }
-
     int GetNParticipants() { return nParticipants_; }
-
-    void SetNParticipants(int nParticipants) { nParticipants_ = nParticipants; }
 
     std::unordered_set<replication::RequestID> GetRequestIDs() {
         return requestIDs_;
     }
 
-    void AddRequestID(replication::RequestID requestID) {
-        requestIDs_.insert(requestID);
-    }
-
     Transaction GetTransaction() { return transaction_; }
 
-    void SetTransaction(Transaction transaction) { transaction_ = transaction; }
+    void StartTransaction(replication::RequestID requestID, uint64_t timeStart,
+                          int nParticipants, Transaction transaction) {
+        nParticipants_ = nParticipants;
+        transaction_ = transaction;
+        requestIDs_.insert(requestID);
+        timeCommit_ = std::max(timeCommit_, timeStart);
+    }
 
     void PrepareOK(replication::RequestID requestID, int shardID,
                    uint64_t prepareTime) {

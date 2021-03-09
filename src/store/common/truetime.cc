@@ -10,15 +10,15 @@
 
 #include <chrono>
 
-TrueTime::TrueTime() { error_ = 0; }
+TrueTime::TrueTime() : error_{0} {}
 
 TrueTime::TrueTime(uint64_t error) : error_{error} {
     Debug("TrueTime variance: error=%lu", error_);
 }
 
 uint64_t TrueTime::GetTime() {
-    auto now = std::chrono::system_clock::now();
-    long count = std::chrono::duration_cast<std::chrono::milliseconds>(
+    auto now = std::chrono::high_resolution_clock::now();
+    long count = std::chrono::duration_cast<std::chrono::microseconds>(
                      now.time_since_epoch())
                      .count();
 
