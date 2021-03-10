@@ -9,12 +9,12 @@
 #ifndef _TRANSACTION_H_
 #define _TRANSACTION_H_
 
+#include <unordered_map>
+
 #include "lib/assert.h"
 #include "lib/message.h"
-#include "store/common/timestamp.h"
 #include "store/common/common-proto.pb.h"
-
-#include <unordered_map>
+#include "store/common/timestamp.h"
 
 // Reply types
 #define REPLY_OK 0
@@ -26,7 +26,7 @@
 #define REPLY_MAX 6
 
 class Transaction {
-private:
+   private:
     // map between key and timestamp at
     // which the read happened and how
     // many times this key has been read
@@ -35,16 +35,21 @@ private:
     // map between key and value(s)
     std::unordered_map<std::string, std::string> writeSet;
 
-public:
+    // Start time (used for deadlock prevention)
+    Timestamp start_time_;
+
+   public:
     Transaction();
     Transaction(const TransactionMessage &msg);
     ~Transaction();
 
-    const std::unordered_map<std::string, Timestamp>& getReadSet() const;
-    const std::unordered_map<std::string, std::string>& getWriteSet() const;
-    
+    const Timestamp &get_start_time() const;
+    const std::unordered_map<std::string, Timestamp> &getReadSet() const;
+    const std::unordered_map<std::string, std::string> &getWriteSet() const;
+
     void addReadSet(const std::string &key, const Timestamp &readTime);
     void addWriteSet(const std::string &key, const std::string &value);
+    void set_start_time(const Timestamp &ts);
     void serialize(TransactionMessage *msg) const;
 };
 

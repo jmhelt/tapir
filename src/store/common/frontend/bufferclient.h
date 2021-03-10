@@ -74,14 +74,13 @@ class BufferClient {
     virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout);
 
-   private:
+   protected:
     // Underlying single shard transaction client implementation.
     TxnClient *txnclient;
     const bool bufferPuts;
 
     std::unordered_map<std::string, std::tuple<std::string, Timestamp>> readSet;
 
-   protected:
     // Transaction to keep track of read and write set.
     Transaction txn;
 

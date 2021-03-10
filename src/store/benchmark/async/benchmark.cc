@@ -155,7 +155,7 @@ DEFINE_string(closest_replicas, "",
               "space-separated list of replica indices in"
               " order of proximity to client(s)");
 DEFINE_uint64(delay, 0, "maximum time to wait between client operations");
-DEFINE_int32(clock_error, 0, "maximum error for clock");
+DEFINE_uint64(clock_error, 0, "maximum error for clock");
 DEFINE_string(stats_file, "", "path to output stats file.");
 DEFINE_uint64(abort_backoff, 100,
               "sleep exponentially increasing amount after abort.");
@@ -298,6 +298,7 @@ Transport *tport;
 transport::Configuration *config;
 Partitioner *part;
 KeySelector *keySelector;
+TrueTime tt{FLAGS_clock_error};
 
 void Signal(int signal);
 void Cleanup();
@@ -524,7 +525,7 @@ int main(int argc, char **argv) {
                 client = new tapirstore::Client(
                     config, clientId, FLAGS_num_shards, FLAGS_closest_replica,
                     tport, part, FLAGS_ping_replicas, FLAGS_tapir_sync_commit,
-                    TrueTime(FLAGS_clock_error));
+                    tt);
                 break;
             }
             // case MODE_WEAK: {
@@ -536,8 +537,7 @@ int main(int argc, char **argv) {
             case PROTO_STRONG: {
                 client = new strongstore::Client(
                     strongmode, config, clientId, FLAGS_num_shards,
-                    FLAGS_closest_replica, tport, part,
-                    TrueTime(FLAGS_clock_error), FLAGS_debug_stats);
+                    FLAGS_closest_replica, tport, part, tt, FLAGS_debug_stats);
                 break;
             }
             default:

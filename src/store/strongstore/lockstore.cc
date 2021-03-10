@@ -132,6 +132,8 @@ void LockStore::dropLocks(uint64_t id, const Transaction &txn) {
 }
 
 bool LockStore::getLocks(uint64_t id, const Transaction &txn) {
+    Debug("start_time: %lu %lu", txn.get_start_time().getTimestamp(),
+          txn.get_start_time().getID());
     bool ret = true;
     // if we don't have read locks, get read locks
     for (auto &read : txn.getReadSet()) {

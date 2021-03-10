@@ -53,7 +53,7 @@ class Client : public ::Client {
    public:
     Client(Mode mode, transport::Configuration *config, uint64_t id,
            int nshards, int closestReplic, Transport *transport,
-           Partitioner *part, TrueTime timeServer, bool debug_stats);
+           Partitioner *part, TrueTime &tt, bool debug_stats);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -141,7 +141,7 @@ class Client : public ::Client {
     Partitioner *part;
 
     // TrueTime server.
-    TrueTime timeServer;
+    TrueTime &tt_;
 
     uint64_t lastReqId;
     std::unordered_map<uint64_t, PendingRequest *> pendingReqs;

@@ -184,7 +184,7 @@ void Server::LeaderUpcall(
                         groupIdx);
                     // Reply to client
                     replicate = false;
-                    reply.set_status(status);
+                    reply.set_status(REPLY_FAIL);
                     reply.SerializeToString(&response);
                 }
             }
