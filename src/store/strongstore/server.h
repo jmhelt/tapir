@@ -35,6 +35,7 @@
 #include "lib/latency.h"
 #include "lib/transport.h"
 #include "replication/vr/replica.h"
+#include "store/common/backend/messageserver.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
 #include "store/strongstore/coordinator.h"
@@ -45,10 +46,12 @@
 
 namespace strongstore {
 
-class Server : public replication::AppReplica, public ::Server {
+class Server : public replication::AppReplica, public MessageServer {
    public:
-    Server(InterShardClient &shardClient, int groupIdx, int myIdx, Mode mode,
-           uint64_t error, bool debug_stats);
+    Server(const transport::Configuration &shard_config,
+           const transport::Configuration &replica_config, int groupIdx,
+           int idx, Transport *transport, InterShardClient &shardClient,
+           const TrueTime &tt, bool debug_stats);
     virtual ~Server();
 
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
@@ -67,20 +70,28 @@ class Server : public replication::AppReplica, public ::Server {
     }
     void Load(const string &key, const string &value,
               const Timestamp timestamp) override;
-    virtual inline Stats &GetStats() override { return store->GetStats(); }
 
    private:
-    TrueTime timeServer;
+    void HandleGet(const TransportAddress &remote,
+                   google::protobuf::Message *msg);
+
+    const transport::Configuration &shard_config_;
+    const transport::Configuration &replica_config_;
+    Transport *transport_;
+    const TrueTime &tt_;
     Coordinator coordinator;
+
+    proto::Get get_;
+
+    proto::GetReply get_reply_;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;
 
     InterShardClient &shardClient;
     uint64_t timeMaxWrite;
-    int groupIdx;
-    int myIdx;
-    Mode mode;
+    int shard_idx_;
+    int replica_idx_;
     TxnStore *store;
     bool AmLeader;
     bool debug_stats_;

@@ -21,8 +21,7 @@ InterShardClient::InterShardClient(transport::Configuration &config,
     }
 
     for (int i = 0; i < nShards; i++) {
-        sclient.push_back(new ShardClient(strongstore::MODE_SPAN_LOCK, &config,
-                                          transport, clientID, i, -1));
+        sclient.push_back(new ShardClient(&config, transport, clientID, i, -1));
     }
 }
 

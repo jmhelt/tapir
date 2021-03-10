@@ -32,9 +32,9 @@ class TrueTime {
     TrueTime(uint64_t error);
     ~TrueTime(){};
 
-    uint64_t GetTime();
+    uint64_t GetTime() const;
 
-    TrueTimeInterval Now();
+    TrueTimeInterval Now() const;
 
    private:
     uint64_t error_;

@@ -3,8 +3,8 @@
 
 namespace strongstore {
 
-Coordinator::Coordinator(TrueTime &tt)
-    : tt{tt}, prepared_transactions_{}, aborted_transactions_{} {}
+Coordinator::Coordinator(const TrueTime &tt)
+    : tt_{tt}, prepared_transactions_{}, aborted_transactions_{} {}
 
 Coordinator::~Coordinator() {}
 
@@ -36,7 +36,7 @@ Decision Coordinator::StartTransaction(replication::RequestID rid,
                                        uint64_t transaction_id,
                                        int n_participants,
                                        Transaction transaction) {
-    auto now = tt.Now();
+    auto now = tt_.Now();
     uint64_t start_timestamp = now.latest();
     Debug("Coordinator: StartTransaction %lu %lu %lu %lu %d", rid.client_id,
           rid.request_id, transaction_id, start_timestamp, n_participants);
@@ -96,7 +96,7 @@ void Coordinator::Abort(uint64_t transaction_id) {
 }
 
 uint64_t Coordinator::CommitWaitMs(uint64_t commit_timestamp) {
-    auto now = tt.Now();
+    auto now = tt_.Now();
     Debug("CommitWaitMs: %lu ? %lu", commit_timestamp, now.earliest());
     if (commit_timestamp <= now.earliest()) {
         return 0;
