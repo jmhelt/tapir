@@ -75,6 +75,9 @@ class Server : public replication::AppReplica, public MessageServer {
     void HandleGet(const TransportAddress &remote,
                    google::protobuf::Message *msg);
 
+    void HandleRWCommitCoordinator(const TransportAddress &remote,
+                                   google::protobuf::Message *msg);
+
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
     Transport *transport_;
@@ -82,8 +85,10 @@ class Server : public replication::AppReplica, public MessageServer {
     Coordinator coordinator;
 
     proto::Get get_;
+    proto::RWCommitCoordinator rw_commit_c_;
 
     proto::GetReply get_reply_;
+    proto::RWCommitCoordinatorReply rw_commit_c_reply_;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;
