@@ -66,8 +66,8 @@ Server::Server(const transport::Configuration &shard_config,
 
     RegisterHandler(
         &get_, static_cast<MessageServer::MessageHandler>(&Server::HandleGet));
-    RegisterHandler(&get_, static_cast<MessageServer::MessageHandler>(
-                               &Server::HandleCoordinatorRWCommit));
+    RegisterHandler(&rw_commit_c_, static_cast<MessageServer::MessageHandler>(
+                                       &Server::HandleRWCommitCoordinator));
 }
 
 Server::~Server() {
@@ -91,8 +91,64 @@ void Server::HandleGet(const TransportAddress &remote,
     transport_->SendMessage(this, remote, get_reply_);
 }
 
-void Server::HandleCoordinatorRWCommit(const TransportAddress &remote,
-                                       google::protobuf::Message *m) {}
+void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
+                                       google::protobuf::Message *m) {
+    proto::RWCommitCoordinator &msg =
+        *dynamic_cast<proto::RWCommitCoordinator *>(m);
+
+    uint64_t transaction_id = msg.transaction_id();
+    int n_participants = msg.n_participants();
+
+    replication::RequestID rid{msg.rid().client_id(),
+                               msg.rid().client_req_id()};
+
+    Transaction transcation{msg.transaction()};
+    std::unordered_map<uint64_t, int> statuses;
+
+    Debug("Coordinator for transaction: %lu", transaction_id);
+
+    Decision d = coordinator.StartTransaction(rid, transaction_id,
+                                              n_participants, transcation);
+    if (d == Decision::TRY_COORD) {
+        Debug("Trying fast path commit");
+        int status = store->Prepare(transaction_id, transcation, statuses);
+        if (!status) {
+            CommitDecision cd = coordinator.ReceivePrepareOK(
+                rid, transaction_id, shard_idx_, timeMaxWrite + 1);
+            ASSERT(cd.d == Decision::COMMIT);
+
+            // TODO: Replicate commit
+
+            // request.set_op(proto::Request::COMMIT);
+            // request.mutable_commit()->set_timestamp(cd.commitTime);
+            // request.mutable_commit()->set_coordinatorshard(shard_idx_);
+
+            // replicate = true;
+            // request.SerializeToString(&response);
+        } else {  // Failed to commit
+            Debug("Fast path commit failed");
+            coordinator.Abort(transaction_id);
+            // Reply to client
+            // replicate = false;
+            // reply.set_status(REPLY_FAIL);
+            // reply.SerializeToString(&response);
+        }
+    } else if (d == Decision::ABORT) {
+        Debug("Abort: %lu", transaction_id);
+        coordinator.Abort(transaction_id);
+        // Reply to client
+        // replicate = false;
+        // reply.set_status(REPLY_FAIL);
+        // reply.SerializeToString(&response);
+    } else {  // Wait for other participants
+        Debug("Waiting for other participants");
+        // replicate = false;
+        // // Delay response to client
+        // response_request_ids.erase(response_request_ids.begin());
+    }
+
+    transport_->SendMessage(this, remote, get_reply_);
+}
 
 void Server::LeaderUpcall(
     opnum_t opnum, const string &op, bool &replicate, string &response,
