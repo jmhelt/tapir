@@ -16,7 +16,7 @@ TrueTime::TrueTime(uint64_t error) : error_{error} {
     Debug("TrueTime variance: error=%lu", error_);
 }
 
-uint64_t TrueTime::GetTime() {
+uint64_t TrueTime::GetTime() const {
     auto now = std::chrono::high_resolution_clock::now();
     long count = std::chrono::duration_cast<std::chrono::microseconds>(
                      now.time_since_epoch())
@@ -25,7 +25,7 @@ uint64_t TrueTime::GetTime() {
     return static_cast<uint64_t>(count);
 }
 
-TrueTimeInterval TrueTime::Now() {
+TrueTimeInterval TrueTime::Now() const {
     uint64_t time = GetTime();
     Debug("Now: %lu", error_);
     return {time - error_, time + error_};

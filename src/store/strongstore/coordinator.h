@@ -92,7 +92,7 @@ class PreparedTransaction {
 
 class Coordinator {
    public:
-    Coordinator(TrueTime &tt);
+    Coordinator(const TrueTime &tt);
     ~Coordinator();
 
     std::unordered_set<replication::RequestID> GetRequestIDs(uint64_t txnID);
@@ -115,7 +115,7 @@ class Coordinator {
     uint64_t CommitWaitMs(uint64_t commit_timestamp);
 
    private:
-    TrueTime &tt;
+    const TrueTime &tt_;
     std::unordered_map<uint64_t, PreparedTransaction> prepared_transactions_;
     std::unordered_set<uint64_t> aborted_transactions_;
 };

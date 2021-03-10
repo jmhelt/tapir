@@ -40,44 +40,59 @@ using namespace std;
 using namespace proto;
 using namespace replication;
 
-Server::Server(InterShardClient &shardClient, int groupIdx, int myIdx,
-               Mode mode, uint64_t error, bool debug_stats)
-    : timeServer{error},
-      coordinator{timeServer},
+Server::Server(const transport::Configuration &shard_config,
+               const transport::Configuration &replica_config, int shard_idx,
+               int replica_idx, Transport *transport,
+               InterShardClient &shardClient, const TrueTime &tt,
+               bool debug_stats)
+    : shard_config_{shard_config},
+      replica_config_{replica_config},
+      transport_{transport},
+      tt_{tt},
+      coordinator{tt_},
       shardClient(shardClient),
       timeMaxWrite{0},
-      groupIdx(groupIdx),
-      myIdx(myIdx),
-      mode(mode),
+      shard_idx_{shard_idx},
+      replica_idx_{replica_idx},
       AmLeader{false},
       debug_stats_{debug_stats} {
-    switch (mode) {
-        case MODE_LOCK:
-        case MODE_SPAN_LOCK:
-            store = new strongstore::LockStore();
-            break;
-        case MODE_OCC:
-        case MODE_SPAN_OCC:
-            store = new strongstore::OCCStore();
-            break;
-        default:
-            NOT_REACHABLE();
-    }
+    transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
+    store = new strongstore::LockStore();
 
     if (debug_stats_) {
         _Latency_Init(&prepare_lat_, "prepare_lat");
         _Latency_Init(&commit_lat_, "commit_lat");
     }
+
+    RegisterHandler(
+        &get_, static_cast<MessageServer::MessageHandler>(&Server::HandleGet));
+    RegisterHandler(&get_, static_cast<MessageServer::MessageHandler>(
+                               &Server::HandleCoordinatorRWCommit));
 }
 
 Server::~Server() {
+    delete store;
     if (debug_stats_) {
         Latency_Dump(&prepare_lat_);
         Latency_Dump(&commit_lat_);
     }
-
-    delete store;
 }
+
+void Server::HandleGet(const TransportAddress &remote,
+                       google::protobuf::Message *m) {
+    proto::Get &msg = *dynamic_cast<proto::Get *>(m);
+
+    Debug("Received GET request: %s", msg.key().c_str());
+
+    get_reply_.mutable_rid()->CopyFrom(msg.rid());
+    get_reply_.set_key(msg.key());
+    get_reply_.set_val("");
+
+    transport_->SendMessage(this, remote, get_reply_);
+}
+
+void Server::HandleCoordinatorRWCommit(const TransportAddress &remote,
+                                       google::protobuf::Message *m) {}
 
 void Server::LeaderUpcall(
     opnum_t opnum, const string &op, bool &replicate, string &response,
@@ -119,7 +134,7 @@ void Server::LeaderUpcall(
             if (debug_stats_) {
                 Latency_Start(&prepare_lat_);
             }
-            if (groupIdx ==
+            if (shard_idx_ ==
                 request.prepare().coordinatorshard()) {  // I am coordinator
 
                 Debug("Coordinator for transaction: %lu", request.txnid());
@@ -134,14 +149,14 @@ void Server::LeaderUpcall(
                         statuses);
                     if (!status) {
                         cd = coordinator.ReceivePrepareOK(
-                            requestID, request.txnid(), groupIdx,
+                            requestID, request.txnid(), shard_idx_,
                             timeMaxWrite + 1);
                         ASSERT(cd.d == Decision::COMMIT);
 
                         request.set_op(proto::Request::COMMIT);
                         request.mutable_commit()->set_timestamp(cd.commitTime);
                         request.mutable_commit()->set_coordinatorshard(
-                            groupIdx);
+                            shard_idx_);
 
                         replicate = true;
                         request.SerializeToString(&response);
@@ -181,7 +196,7 @@ void Server::LeaderUpcall(
                     // Send message to coordinator
                     shardClient.PrepareAbort(
                         request.prepare().coordinatorshard(), request.txnid(),
-                        groupIdx);
+                        shard_idx_);
                     // Reply to client
                     replicate = false;
                     reply.set_status(REPLY_FAIL);
@@ -206,19 +221,20 @@ void Server::LeaderUpcall(
                     coordinator.GetTransaction(request.txnid()), statuses);
                 if (!status) {
                     cd = coordinator.ReceivePrepareOK(
-                        requestID, request.txnid(), groupIdx, timeMaxWrite + 1);
+                        requestID, request.txnid(), shard_idx_,
+                        timeMaxWrite + 1);
                     ASSERT(cd.d == Decision::COMMIT);
 
                     request.clear_prepareok();
                     request.set_op(proto::Request::COMMIT);
                     coordinator.GetTransaction(request.txnid())
                         .serialize(request.mutable_prepare()->mutable_txn());
-                    request.mutable_prepare()->set_coordinatorshard(groupIdx);
+                    request.mutable_prepare()->set_coordinatorshard(shard_idx_);
                     request.mutable_prepare()->set_nparticipants(
                         coordinator.GetNParticipants(request.txnid()));
                     request.mutable_prepare()->set_timestamp(cd.commitTime);
                     request.mutable_commit()->set_timestamp(cd.commitTime);
-                    request.mutable_commit()->set_coordinatorshard(groupIdx);
+                    request.mutable_commit()->set_coordinatorshard(shard_idx_);
 
                     replicate = true;
                     request.SerializeToString(&response);
@@ -305,7 +321,7 @@ void Server::ReplicaUpcall(
 
             if (AmLeader) {
                 shardClient.PrepareOK(request.prepare().coordinatorshard(),
-                                      request.txnid(), groupIdx,
+                                      request.txnid(), shard_idx_,
                                       request.prepare().timestamp());
             }
 
@@ -327,7 +343,7 @@ void Server::ReplicaUpcall(
                     std::max(timeMaxWrite, request.commit().timestamp());
             }
 
-            if (groupIdx ==
+            if (shard_idx_ ==
                 request.commit().coordinatorshard())  // I am coordinator
             {
                 Debug("AmLeader: %d", AmLeader);

@@ -38,23 +38,17 @@ namespace strongstore {
 using namespace std;
 using namespace proto;
 
-ShardClient::ShardClient(Mode mode, transport::Configuration *config,
-                         Transport *transport, uint64_t client_id, int shard,
-                         int closestReplica)
-    : config(config), transport(transport), client_id(client_id), shard(shard) {
-    client =
-        new replication::vr::VRClient(*config, transport, shard, client_id);
+ShardClient::ShardClient(transport::Configuration *config, Transport *transport,
+                         uint64_t client_id, int shard, int closestReplica)
+    : config_{config},
+      transport_{transport},
+      client_id_(client_id),
+      shard_idx_(shard) {
+    transport_->Register(this, *config_, -1, -1);
+    client = new replication::vr::VRClient(*config_, transport_, shard_idx_,
+                                           client_id_);
 
-    if (mode == MODE_OCC || mode == MODE_SPAN_OCC) {
-        if (closestReplica == -1) {
-            replica = client_id % config->n;
-        } else {
-            replica = closestReplica;
-        }
-        Debug("Sending unlogged to replica %i", replica);
-    } else {
-        replica = 0;
-    }
+    replica = 0;
     _Latency_Init(&opLat, "op_lat_server");
 }
 
@@ -63,24 +57,28 @@ ShardClient::~ShardClient() {
     delete client;
 }
 
+void ShardClient::ReceiveMessage(const TransportAddress &remote,
+                                 const std::string &type,
+                                 const std::string &data, void *meta_data) {
+    Latency_End(&opLat);
+    if (type == get_reply_.GetTypeName()) {
+        get_reply_.ParseFromString(data);
+        HandleGetReply(get_reply_);
+    } else {
+        Panic("Received unexpected message type: %s", type.c_str());
+    }
+}
+
 /* Sends BEGIN to a single shard indexed by i. */
 void ShardClient::Begin(uint64_t id) {
-    Debug("[shard %i] BEGIN: %lu", shard, id);
+    Debug("[shard %i] BEGIN: %lu", shard_idx_, id);
 }
 
 /* Returns the value corresponding to the supplied key. */
 void ShardClient::Get(uint64_t id, const std::string &key, get_callback gcb,
                       get_timeout_callback gtcb, uint32_t timeout) {
     // Send the GET operation to appropriate shard.
-    Debug("[shard %i] Sending GET [%s]", shard, key.c_str());
-
-    // create request
-    string request_str;
-    Request request;
-    request.set_op(Request::GET);
-    request.set_txnid(id);
-    request.mutable_get()->set_key(key);
-    request.SerializeToString(&request_str);
+    Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
 
     uint64_t reqId = lastReqId++;
     PendingGet *pendingGet = new PendingGet(reqId);
@@ -89,29 +87,22 @@ void ShardClient::Get(uint64_t id, const std::string &key, get_callback gcb,
     pendingGet->gcb = gcb;
     pendingGet->gtcb = gtcb;
 
+    // TODO: Setup timeout
+    get_.Clear();
+    get_.mutable_rid()->set_client_id(client_id_);
+    get_.mutable_rid()->set_client_req_id(reqId);
+    get_.set_key(key);
+
     Latency_Start(&opLat);
-    client->InvokeUnlogged(
-        replica, request_str,
-        bind(&ShardClient::GetCallback, this, pendingGet->reqId,
-             std::placeholders::_1, std::placeholders::_2),
-        bind(&ShardClient::GetTimeout, this, pendingGet->reqId),
-        timeout);  // timeout in ms
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica, get_);
 }
 
 void ShardClient::Get(uint64_t id, const std::string &key,
                       const Timestamp &timestamp, get_callback gcb,
                       get_timeout_callback gtcb, uint32_t timeout) {
     // Send the GET operation to appropriate shard.
-    Debug("[shard %i] Sending GET [%s]", shard, key.c_str());
-
-    // create request
-    string request_str;
-    Request request;
-    request.set_op(Request::GET);
-    request.set_txnid(id);
-    request.mutable_get()->set_key(key);
-    timestamp.serialize(request.mutable_get()->mutable_timestamp());
-    request.SerializeToString(&request_str);
+    Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
 
     uint64_t reqId = lastReqId++;
     PendingGet *pendingGet = new PendingGet(reqId);
@@ -120,13 +111,34 @@ void ShardClient::Get(uint64_t id, const std::string &key,
     pendingGet->gcb = gcb;
     pendingGet->gtcb = gtcb;
 
+    // TODO: Setup timeout
+    get_.Clear();
+    get_.mutable_rid()->set_client_id(client_id_);
+    get_.mutable_rid()->set_client_req_id(reqId);
+    timestamp.serialize(get_.mutable_timestamp());
+    get_.set_key(key);
+
     Latency_Start(&opLat);
-    client->InvokeUnlogged(
-        replica, request_str,
-        bind(&ShardClient::GetCallback, this, pendingGet->reqId,
-             std::placeholders::_1, std::placeholders::_2),
-        bind(&ShardClient::GetTimeout, this, pendingGet->reqId),
-        timeout);  // timeout in ms
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica, get_);
+}
+
+void ShardClient::HandleGetReply(const proto::GetReply &reply) {
+    uint64_t req_id = reply.rid().client_req_id();
+
+    auto itr = pendingGets.find(req_id);
+    if (itr == pendingGets.end()) {
+        Debug("[%d][%lu] GetReply for stale request.", shard_idx_, req_id);
+        return;  // stale request
+    }
+
+    PendingGet *req = itr->second;
+    get_callback gcb = req->gcb;
+    std::string key = req->key;
+    pendingGets.erase(itr);
+    delete req;
+
+    gcb(REPLY_OK, key, reply.val(), Timestamp());
 }
 
 void ShardClient::Put(uint64_t id, const std::string &key,
@@ -155,7 +167,7 @@ void ShardClient::Abort(uint64_t id, const Transaction &txn, abort_callback acb,
 void ShardClient::Prepare(uint64_t id, const Transaction &txn, int coordShard,
                           int nParticipants, prepare_callback pcb,
                           prepare_timeout_callback ptcb, uint32_t timeout) {
-    Debug("[shard %i] Sending PREPARE: %lu", shard, id);
+    Debug("[shard %i] Sending PREPARE: %lu", shard_idx_, id);
 
     // create prepare request
     string request_str;
@@ -181,7 +193,7 @@ void ShardClient::Prepare(uint64_t id, const Transaction &txn, int coordShard,
 void ShardClient::PrepareOK(uint64_t id, int participantShard,
                             uint64_t prepareTS,
                             replication::Client::continuation_t continuation) {
-    Debug("[shard %i] Sending PREPARE_OK: %lu", shard, id);
+    Debug("[shard %i] Sending PREPARE_OK: %lu", shard_idx_, id);
 
     // create prepare_ok request
     string request_str;
@@ -192,13 +204,13 @@ void ShardClient::PrepareOK(uint64_t id, int participantShard,
     request.mutable_prepareok()->set_timestamp(prepareTS);
     request.SerializeToString(&request_str);
 
-    transport->Timer(0, [=]() { client->Invoke(request_str, continuation); });
+    transport_->Timer(0, [=]() { client->Invoke(request_str, continuation); });
 }
 
 void ShardClient::PrepareAbort(
     uint64_t id, int participantShard,
     replication::Client::continuation_t continuation) {
-    Debug("[shard %i] Sending PREPARE_ABORT: %lu", shard, id);
+    Debug("[shard %i] Sending PREPARE_ABORT: %lu", shard_idx_, id);
 
     // create prepare_ok request
     string request_str;
@@ -208,13 +220,13 @@ void ShardClient::PrepareAbort(
     request.mutable_prepareabort()->set_participantshard(participantShard);
     request.SerializeToString(&request_str);
 
-    transport->Timer(0, [=]() { client->Invoke(request_str, continuation); });
+    transport_->Timer(0, [=]() { client->Invoke(request_str, continuation); });
 }
 
 void ShardClient::Commit(int coordShard, uint64_t id, uint64_t timestamp,
                          commit_callback ccb, commit_timeout_callback ctcb,
                          uint32_t timeout) {
-    Debug("[shard %i] Sending COMMIT: %lu", shard, id);
+    Debug("[shard %i] Sending COMMIT: %lu", shard_idx_, id);
 
     // create commit request
     string request_str;
@@ -239,7 +251,7 @@ void ShardClient::Commit(int coordShard, uint64_t id, uint64_t timestamp,
 /* Aborts the ongoing transaction. */
 void ShardClient::Abort(int coordShard, uint64_t id, abort_callback acb,
                         abort_timeout_callback atcb, uint32_t timeout) {
-    Debug("[shard %i] Sending ABORT: %lu", shard, id);
+    Debug("[shard %i] Sending ABORT: %lu", shard_idx_, id);
 
     // create abort request
     string request_str;
@@ -261,7 +273,7 @@ void ShardClient::Abort(int coordShard, uint64_t id, abort_callback acb,
 }
 
 void ShardClient::GetTimeout(uint64_t reqId) {
-    Warning("[shard %i] GET[%lu] timeout.", shard, reqId);
+    Warning("[shard %i] GET[%lu] timeout.", shard_idx_, reqId);
     auto itr = this->pendingGets.find(reqId);
     if (itr != this->pendingGets.end()) {
         PendingGet *pendingGet = itr->second;
@@ -288,8 +300,8 @@ bool ShardClient::GetCallback(uint64_t reqId, const string &request_str,
         std::string key = pendingGet->key;
         this->pendingGets.erase(itr);
         delete pendingGet;
-        Debug("[shard %lu:%i] GET callback [%d] %lx %lu", client_id, shard,
-              reply.status(), *((const uint64_t *)key.c_str()),
+        Debug("[shard %lu:%i] GET callback [%d] %lx %lu", client_id_,
+              shard_idx_, reply.status(), *((const uint64_t *)key.c_str()),
               reply.timestamp());
         if (reply.has_timestamp()) {
             gcb(reply.status(), key, reply.value(),
@@ -308,7 +320,8 @@ bool ShardClient::PrepareCallback(uint64_t reqId, const string &request_str,
 
     reply.ParseFromString(reply_str);
 
-    Debug("[shard %i] Received PREPARE callback [%d]", shard, reply.status());
+    Debug("[shard %i] Received PREPARE callback [%d]", shard_idx_,
+          reply.status());
     auto itr = this->pendingPrepares.find(reqId);
     ASSERT(itr != this->pendingPrepares.end());
     PendingPrepare *pendingPrepare = itr->second;
@@ -318,7 +331,7 @@ bool ShardClient::PrepareCallback(uint64_t reqId, const string &request_str,
     switch (reply.status()) {
         case REPLY_OK:
             if (reply.has_timestamp()) {
-                Debug("[shard %i] COMMIT timestamp [%lu]", shard,
+                Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
                       reply.timestamp());
                 pcb(reply.status(), Timestamp(reply.timestamp()));
             } else {
@@ -343,7 +356,8 @@ bool ShardClient::CommitCallback(uint64_t reqId, const string &request_str,
     reply.ParseFromString(reply_str);
     ASSERT(reply.status() == REPLY_OK);
 
-    Debug("[shard %i] Received COMMIT callback [%d]", shard, reply.status());
+    Debug("[shard %i] Received COMMIT callback [%d]", shard_idx_,
+          reply.status());
 
     auto itr = this->pendingCommits.find(reqId);
     ASSERT(itr != pendingCommits.end());
@@ -364,7 +378,8 @@ bool ShardClient::AbortCallback(uint64_t reqId, const string &request_str,
     reply.ParseFromString(reply_str);
     ASSERT(reply.status() == REPLY_OK);
 
-    Debug("[shard %i] Received ABORT callback [%d]", shard, reply.status());
+    Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
+          reply.status());
 
     auto itr = this->pendingAborts.find(reqId);
     ASSERT(itr != this->pendingAborts.end());

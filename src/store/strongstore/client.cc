@@ -38,30 +38,29 @@ using namespace std;
 
 namespace strongstore {
 
-Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
+Client::Client(transport::Configuration *config, uint64_t client_id,
                int nShards, int closestReplica, Transport *transport,
                Partitioner *part, TrueTime &tt, bool debug_stats)
-    : config(config),
-      client_id(id),
+    : config_{config},
+      client_id_{client_id},
       nshards(nShards),
-      transport(transport),
-      mode(mode),
+      transport_{transport},
       part(part),
       tt_{tt},
       debug_stats_{debug_stats} {
-    t_id = client_id << 26;
+    t_id = client_id_ << 26;
 
-    Debug("Initializing StrongStore client with id [%lu]", client_id);
+    Debug("Initializing StrongStore client with id [%lu]", client_id_);
 
     /* Start a client for each shard. */
     for (uint64_t i = 0; i < nshards; i++) {
-        ShardClient *shardclient = new ShardClient(
-            mode, config, transport, client_id, i, closestReplica);
+        ShardClient *shardclient =
+            new ShardClient(config_, transport_, client_id_, i, closestReplica);
         bclient.push_back(new BufferClient(shardclient));
         sclient.push_back(shardclient);
     }
 
-    Debug("SpanStore client [%lu] created!", client_id);
+    Debug("SpanStore client [%lu] created!", client_id_);
     _Latency_Init(&opLat, "op_lat");
 
     if (debug_stats_) {
@@ -92,12 +91,12 @@ Client::~Client() {
  */
 void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
                    uint32_t timeout) {
-    transport->Timer(0, [this, bcb, btcb, timeout]() {
+    transport_->Timer(0, [this, bcb, btcb, timeout]() {
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants.clear();
 
-        Timestamp start_time{tt_.GetTime(), client_id};
+        Timestamp start_time{tt_.GetTime(), client_id_};
         for (uint64_t i = 0; i < nshards; i++) {
             bclient[i]->Begin(t_id, start_time);
         }
@@ -108,7 +107,7 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
 /* Returns the value corresponding to the supplied key. */
 void Client::Get(const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
-    transport->Timer(0, [this, key, gcb, gtcb, timeout]() {
+    transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
         Latency_Start(&opLat);
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
@@ -135,7 +134,7 @@ void Client::Get(const std::string &key, get_callback gcb,
 void Client::Put(const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
-    transport->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
+    transport_->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
         Latency_Start(&opLat);
         Debug("PUT [%lu : %s]", t_id, key.c_str());
         // Contact the appropriate shard to set the value.
@@ -247,7 +246,7 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
 /* Attempts to commit the ongoing transaction. */
 void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
-    transport->Timer(0, [this, ccb, ctcb, timeout]() {
+    transport_->Timer(0, [this, ccb, ctcb, timeout]() {
         if (debug_stats_) {
             Latency_Start(&commit_lat_);
         }
