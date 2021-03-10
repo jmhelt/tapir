@@ -21,6 +21,18 @@ message GetReply {
     required string val = 3;
 }
 
+message RWCommitCoordinator {
+    required RequestID rid = 1;
+    required uint64 transaction_id = 2;
+    required TransactionMessage transaction = 3;
+    required int32 n_participants = 4;
+}
+
+message RWCommitCoordinatorReply {
+    required RequestID rid = 1;
+    required TimestampMessage commit_timestamp = 2;
+}
+
 message GetMessage {
     required string key = 1;
     optional TimestampMessage timestamp = 2;
