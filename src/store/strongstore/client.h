@@ -51,9 +51,9 @@ namespace strongstore {
 
 class Client : public ::Client {
    public:
-    Client(Mode mode, transport::Configuration *config, uint64_t id,
-           int nshards, int closestReplic, Transport *transport,
-           Partitioner *part, TrueTime &tt, bool debug_stats);
+    Client(transport::Configuration *config, uint64_t id, int nshards,
+           int closestReplic, Transport *transport, Partitioner *part,
+           TrueTime &tt, bool debug_stats);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -114,9 +114,9 @@ class Client : public ::Client {
     // choose coordinator from participants
     int ChooseCoordinator(const std::set<int> &participants);
 
-    transport::Configuration *config;
+    transport::Configuration *config_;
     // Unique ID for this client.
-    uint64_t client_id;
+    uint64_t client_id_;
 
     // Ongoing transaction ID.
     uint64_t t_id;
@@ -128,14 +128,11 @@ class Client : public ::Client {
     std::set<int> participants;
 
     // Transport used by paxos client proxies.
-    Transport *transport;
+    Transport *transport_;
 
     // Buffering client for each shard.
     std::vector<BufferClient *> bclient;
     std::vector<ShardClient *> sclient;
-
-    // Mode in which spanstore runs.
-    Mode mode;
 
     // Partitioner
     Partitioner *part;

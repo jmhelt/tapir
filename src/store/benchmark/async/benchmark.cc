@@ -57,7 +57,9 @@ enum transmode_t {
  * System settings.
  */
 DEFINE_uint64(client_id, 0, "unique identifier for client");
-DEFINE_string(config_path, "", "path to shard configuration file");
+DEFINE_string(replica_config_path, "",
+              "path to replication configuration file");
+DEFINE_string(shard_config_path, "", "path to shard configuration file");
 DEFINE_uint64(num_shards, 1, "number of shards in the system");
 DEFINE_bool(ping_replicas, false, "determine latency to replicas via pings");
 
@@ -295,7 +297,8 @@ std::vector<::Client *> clients;
 std::vector<::BenchmarkClient *> benchClients;
 std::vector<std::thread *> threads;
 Transport *tport;
-transport::Configuration *config;
+transport::Configuration *replica_config;
+transport::Configuration *shard_config;
 Partitioner *part;
 KeySelector *keySelector;
 TrueTime tt{FLAGS_clock_error};
@@ -493,19 +496,27 @@ int main(int argc, char **argv) {
         }
     };
 
-    std::ifstream configStream(FLAGS_config_path);
-    if (configStream.fail()) {
-        std::cerr << "Unable to read configuration file: " << FLAGS_config_path
-                  << std::endl;
+    std::ifstream replica_config_stream(FLAGS_replica_config_path);
+    if (replica_config_stream.fail()) {
+        std::cerr << "Unable to read configuration file: "
+                  << FLAGS_replica_config_path << std::endl;
         return -1;
     }
-    config = new transport::Configuration(configStream);
+    replica_config = new transport::Configuration(replica_config_stream);
+
+    std::ifstream shard_config_stream(FLAGS_shard_config_path);
+    if (shard_config_stream.fail()) {
+        std::cerr << "Unable to read configuration file: "
+                  << FLAGS_shard_config_path << std::endl;
+        return -1;
+    }
+    shard_config = new transport::Configuration(shard_config_stream);
 
     if (closestReplicas.size() > 0 &&
-        closestReplicas.size() != static_cast<size_t>(config->n)) {
+        closestReplicas.size() != static_cast<size_t>(replica_config->n)) {
         std::cerr << "If specifying closest replicas, must specify all "
-                  << config->n << "; only specified " << closestReplicas.size()
-                  << std::endl;
+                  << replica_config->n << "; only specified "
+                  << closestReplicas.size() << std::endl;
         return 1;
     }
 
@@ -523,9 +534,9 @@ int main(int argc, char **argv) {
         switch (mode) {
             case PROTO_TAPIR: {
                 client = new tapirstore::Client(
-                    config, clientId, FLAGS_num_shards, FLAGS_closest_replica,
-                    tport, part, FLAGS_ping_replicas, FLAGS_tapir_sync_commit,
-                    tt);
+                    replica_config, clientId, FLAGS_num_shards,
+                    FLAGS_closest_replica, tport, part, FLAGS_ping_replicas,
+                    FLAGS_tapir_sync_commit, tt);
                 break;
             }
             // case MODE_WEAK: {
@@ -536,7 +547,7 @@ int main(int argc, char **argv) {
             // }
             case PROTO_STRONG: {
                 client = new strongstore::Client(
-                    strongmode, config, clientId, FLAGS_num_shards,
+                    shard_config, clientId, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part, tt, FLAGS_debug_stats);
                 break;
             }
@@ -620,7 +631,8 @@ int main(int argc, char **argv) {
 
     FlushStats();
 
-    delete config;
+    delete replica_config;
+    delete shard_config;
     delete keySelector;
     for (auto i : threads) {
         i->join();

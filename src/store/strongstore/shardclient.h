@@ -54,13 +54,23 @@ enum Mode {
     MODE_MVTSO
 };
 
-class ShardClient : public TxnClient {
+// typedef std::function<void(int, const std::string &, const std::string &,
+//                            const ::mortystore::Version &, uint64_t,
+//                            uint64_t)>
+//     get_callback;
+// typedef std::function<void(int, const std::string &)> get_timeout_callback;
+
+class ShardClient : public TxnClient, public TransportReceiver {
    public:
     /* Constructor needs path to shard config. */
-    ShardClient(Mode mode, transport::Configuration *config,
-                Transport *transport, uint64_t client_id, int shard,
-                int closestReplica);
+    ShardClient(transport::Configuration *config, Transport *transport,
+                uint64_t client_id, int shard, int closestReplica);
     virtual ~ShardClient();
+
+    virtual void ReceiveMessage(const TransportAddress &remote,
+                                const std::string &type,
+                                const std::string &data,
+                                void *meta_data) override;
 
     void Begin(uint64_t id) override;
     virtual void Get(uint64_t id, const std::string &key, get_callback gcb,
@@ -98,19 +108,7 @@ class ShardClient : public TxnClient {
                          uint32_t timeout) override;
 
    private:
-    transport::Configuration *config;
-    Transport *transport;  // Transport layer.
-    uint64_t client_id;    // Unique ID for this client.
-    int shard;             // which shard this client accesses
-    int replica;           // which replica to use for reads
-
-    replication::vr::VRClient *client;  // Client proxy.
-
-    std::unordered_map<uint64_t, PendingGet *> pendingGets;
-    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
-    std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
-    std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
-    Latency_t opLat;
+    void HandleGetReply(const proto::GetReply &reply);
 
     /* Timeout for Get requests, which only go to one replica. */
     void GetTimeout(uint64_t reqId);
@@ -123,6 +121,24 @@ class ShardClient : public TxnClient {
                         const std::string &);
     bool AbortCallback(uint64_t reqId, const std::string &,
                        const std::string &);
+
+    transport::Configuration *config_;
+    Transport *transport_;  // Transport layer.
+    uint64_t client_id_;    // Unique ID for this client.
+    int shard_idx_;         // which shard this client accesses
+    int replica;            // which replica to use for reads
+
+    replication::vr::VRClient *client;  // Client proxy.
+
+    std::unordered_map<uint64_t, PendingGet *> pendingGets;
+    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
+    std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
+    std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
+    Latency_t opLat;
+
+    proto::Get get_;
+
+    proto::GetReply get_reply_;
 };
 
 }  // namespace strongstore

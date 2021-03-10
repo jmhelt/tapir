@@ -56,7 +56,9 @@ enum transmode_t {
 /**
  * System settings.
  */
-DEFINE_string(config_path, "", "path to replication configuration file");
+DEFINE_string(replica_config_path, "",
+              "path to replication configuration file");
+DEFINE_string(shard_config_path, "", "path to shard configuration file");
 DEFINE_uint64(replica_idx, 0,
               "index of replica in replication configuration file");
 DEFINE_uint64(group_idx, 0, "index of the shard to which this replica belongs");
@@ -170,7 +172,7 @@ DEFINE_int64(strong_max_dep_depth, -1,
 /**
  * Experiment settings.
  */
-DEFINE_int32(clock_error, 0, "maximum error for clock");
+DEFINE_uint64(clock_error, 0, "maximum error for clock");
 DEFINE_string(stats_file, "", "path to file for server stats");
 
 /**
@@ -186,6 +188,7 @@ Server *server = nullptr;
 TransportReceiver *replica = nullptr;
 ::Transport *tport = nullptr;
 Partitioner *part = nullptr;
+TrueTime tt{FLAGS_clock_error};
 
 void Cleanup(int signal);
 
@@ -198,10 +201,17 @@ int main(int argc, char **argv) {
     Notice("Starting server.");
 
     // parse replication configuration
-    std::ifstream config_stream(FLAGS_config_path);
-    if (config_stream.fail()) {
-        std::cerr << "Unable to read configuration file: " << FLAGS_config_path
-                  << std::endl;
+    std::ifstream replica_config_stream(FLAGS_replica_config_path);
+    if (replica_config_stream.fail()) {
+        std::cerr << "Unable to read configuration file: "
+                  << FLAGS_replica_config_path << std::endl;
+    }
+
+    // parse shard configuration
+    std::ifstream shard_config_stream(FLAGS_shard_config_path);
+    if (shard_config_stream.fail()) {
+        std::cerr << "Unable to read configuration file: "
+                  << FLAGS_shard_config_path << std::endl;
     }
 
     // parse protocol and mode
@@ -228,13 +238,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    transport::Configuration config(config_stream);
-
-    if (FLAGS_replica_idx >= static_cast<uint64_t>(config.n)) {
+    transport::Configuration replica_config(replica_config_stream);
+    if (FLAGS_replica_idx >= static_cast<uint64_t>(replica_config.n)) {
         std::cerr << "Replica index " << FLAGS_replica_idx
                   << " is out of bounds"
                      "; only "
-                  << config.n << " replicas defined" << std::endl;
+                  << replica_config.n << " replicas defined" << std::endl;
+    }
+
+    transport::Configuration shard_config(shard_config_stream);
+    if (FLAGS_replica_idx >= static_cast<uint64_t>(shard_config.n)) {
+        std::cerr << "Replica index " << FLAGS_replica_idx
+                  << " is out of bounds"
+                     "; only "
+                  << shard_config.n << " replicas defined" << std::endl;
     }
 
     if (proto == PROTO_UNKNOWN) {
@@ -293,25 +310,25 @@ int main(int argc, char **argv) {
         case PROTO_TAPIR: {
             server = new tapirstore::Server(FLAGS_tapir_linearizable);
             replica = new replication::ir::IRReplica(
-                config, FLAGS_group_idx, FLAGS_replica_idx, tport,
+                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport,
                 dynamic_cast<replication::ir::IRAppReplica *>(server));
             break;
         }
         case PROTO_WEAK: {
-            server = new weakstore::Server(config, FLAGS_group_idx,
+            server = new weakstore::Server(replica_config, FLAGS_group_idx,
                                            FLAGS_replica_idx, tport,
                                            new weakstore::Store());
             break;
         }
         case PROTO_STRONG: {
             strongstore::InterShardClient *shardClient =
-                new strongstore::InterShardClient(config, tport,
+                new strongstore::InterShardClient(replica_config, tport,
                                                   FLAGS_num_shards);
             server = new strongstore::Server(
-                *shardClient, FLAGS_group_idx, FLAGS_replica_idx, strongMode,
-                FLAGS_clock_error, FLAGS_debug_stats);
+                shard_config, replica_config, FLAGS_group_idx,
+                FLAGS_replica_idx, tport, *shardClient, tt, FLAGS_debug_stats);
             replica = new replication::vr::VRReplica(
-                config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
+                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
                 dynamic_cast<replication::AppReplica *>(server),
                 FLAGS_debug_stats);
             break;
