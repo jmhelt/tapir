@@ -39,6 +39,16 @@ BufferClient::BufferClient(ShardClient *shard_client)
 
 BufferClient::~BufferClient() {}
 
+/* Begins a transaction. */
+void BufferClient::Begin(uint64_t tid, const Timestamp &start_time) {
+    // Initialize data structures.
+    txn = Transaction();
+    txn.set_start_time(start_time);
+    readSet.clear();
+    this->tid = tid;
+    txnclient->Begin(tid);
+}
+
 /* Prepare the transaction. */
 void BufferClient::Prepare(uint64_t id, int coordShard, int nParticipants,
                            prepare_callback pcb, prepare_timeout_callback ptcb,

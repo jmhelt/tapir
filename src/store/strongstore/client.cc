@@ -40,14 +40,14 @@ namespace strongstore {
 
 Client::Client(Mode mode, transport::Configuration *config, uint64_t id,
                int nShards, int closestReplica, Transport *transport,
-               Partitioner *part, TrueTime timeServer, bool debug_stats)
+               Partitioner *part, TrueTime &tt, bool debug_stats)
     : config(config),
       client_id(id),
       nshards(nShards),
       transport(transport),
       mode(mode),
       part(part),
-      timeServer(timeServer),
+      tt_{tt},
       debug_stats_{debug_stats} {
     t_id = client_id << 26;
 
@@ -96,8 +96,10 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants.clear();
+
+        Timestamp start_time{tt_.GetTime(), client_id};
         for (uint64_t i = 0; i < nshards; i++) {
-            bclient[i]->Begin(t_id);
+            bclient[i]->Begin(t_id, start_time);
         }
         bcb(t_id);
     });
@@ -116,7 +118,7 @@ void Client::Get(const std::string &key, get_callback gcb,
         // If needed, add this shard to set of participants and send BEGIN.
         if (participants.find(i) == participants.end()) {
             participants.insert(i);
-            bclient[i]->Begin(t_id);
+            // bclient[i]->Begin(t_id);
         }
 
         // Send the GET operation to appropriate shard.
@@ -143,13 +145,8 @@ void Client::Put(const std::string &key, const std::string &value,
         // If needed, add this shard to set of participants and send BEGIN.
         if (participants.find(i) == participants.end()) {
             participants.insert(i);
-            bclient[i]->Begin(t_id);
+            // bclient[i]->Begin(t_id);
         }
-
-        // Buffering, so no need to wait.
-        // bclient[i]->Get(key, [this, key, value, pcb, ptcb, timeout, i](
-        //      int status, const std::string &key, const std::string &val,
-        //      Timestamp ts){
 
         auto pcbLat = [this, pcb](int status1, const std::string &key1,
                                   const std::string &val1) {

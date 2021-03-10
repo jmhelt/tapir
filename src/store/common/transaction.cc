@@ -10,11 +10,10 @@
 
 using namespace std;
 
-Transaction::Transaction() :
-    readSet(), writeSet() { }
+Transaction::Transaction() : readSet{}, writeSet{}, start_time_{} {}
 
-Transaction::Transaction(const TransactionMessage &msg) 
-{
+Transaction::Transaction(const TransactionMessage &msg)
+    : start_time_{msg.starttime()} {
     for (int i = 0; i < msg.readset_size(); i++) {
         ReadMessage readMsg = msg.readset(i);
         readSet[readMsg.key()] = Timestamp(readMsg.readtime());
@@ -26,37 +25,30 @@ Transaction::Transaction(const TransactionMessage &msg)
     }
 }
 
-Transaction::~Transaction() { }
+Transaction::~Transaction() {}
 
-const unordered_map<string, Timestamp>&
-Transaction::getReadSet() const
-{
+const unordered_map<string, Timestamp> &Transaction::getReadSet() const {
     return readSet;
 }
 
-const unordered_map<string, string>&
-Transaction::getWriteSet() const
-{
+const unordered_map<string, string> &Transaction::getWriteSet() const {
     return writeSet;
 }
 
-void
-Transaction::addReadSet(const string &key,
-                        const Timestamp &readTime)
-{
+const Timestamp &Transaction::get_start_time() const { return start_time_; }
+
+void Transaction::set_start_time(const Timestamp &ts) { start_time_ = ts; }
+
+void Transaction::addReadSet(const string &key, const Timestamp &readTime) {
     readSet[key] = readTime;
 }
 
-void
-Transaction::addWriteSet(const string &key,
-                         const string &value)
-{
+void Transaction::addWriteSet(const string &key, const string &value) {
     writeSet[key] = value;
 }
 
-void
-Transaction::serialize(TransactionMessage *msg) const
-{
+void Transaction::serialize(TransactionMessage *msg) const {
+    start_time_.serialize(msg->mutable_starttime());
     for (auto read : readSet) {
         ReadMessage *readMsg = msg->add_readset();
         readMsg->set_key(read.first);

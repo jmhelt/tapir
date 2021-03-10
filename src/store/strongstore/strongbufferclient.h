@@ -44,6 +44,8 @@ class BufferClient : public ::BufferClient {
     BufferClient(ShardClient *shard_client);
     ~BufferClient();
 
+    void Begin(uint64_t tid, const Timestamp &start_time);
+
     // Prepare (Spanner requires a prepare timestamp)
     void Prepare(uint64_t id, int coordShard, int nParticipants,
                  prepare_callback pcb, prepare_timeout_callback ptcb,
