@@ -32,8 +32,11 @@
 #ifndef _STRONG_SERVER_H_
 #define _STRONG_SERVER_H_
 
+#include <unordered_map>
+
 #include "lib/latency.h"
 #include "lib/transport.h"
+#include "replication/vr/client.h"
 #include "replication/vr/replica.h"
 #include "store/common/backend/messageserver.h"
 #include "store/common/truetime.h"
@@ -42,6 +45,7 @@
 #include "store/strongstore/intershardclient.h"
 #include "store/strongstore/lockstore.h"
 #include "store/strongstore/occstore.h"
+#include "store/strongstore/replicaclient.h"
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore {
@@ -49,9 +53,9 @@ namespace strongstore {
 class Server : public replication::AppReplica, public MessageServer {
    public:
     Server(const transport::Configuration &shard_config,
-           const transport::Configuration &replica_config, int groupIdx,
-           int idx, Transport *transport, InterShardClient &shardClient,
-           const TrueTime &tt, bool debug_stats);
+           const transport::Configuration &replica_config, uint64_t server_id,
+           int groupIdx, int idx, Transport *transport,
+           InterShardClient &shardClient, const TrueTime &tt, bool debug_stats);
     virtual ~Server();
 
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
@@ -72,17 +76,47 @@ class Server : public replication::AppReplica, public MessageServer {
               const Timestamp timestamp) override;
 
    private:
+    class PendingReply {
+       public:
+        PendingReply(uint64_t client_id, uint64_t client_req_id,
+                     TransportAddress *remote)
+            : client_id(client_id),
+              client_req_id(client_req_id),
+              remote(remote) {}
+        uint64_t client_id;
+        uint64_t client_req_id;
+        TransportAddress *remote;
+    };
+    class PendingRWCommitCoordinatorReply : public PendingReply {
+       public:
+        PendingRWCommitCoordinatorReply(uint64_t client_id,
+                                        uint64_t client_req_id,
+                                        TransportAddress *remote)
+            : PendingReply(client_id, client_req_id, remote) {}
+        uint64_t commit_timestamp;
+    };
+
     void HandleGet(const TransportAddress &remote,
                    google::protobuf::Message *msg);
 
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    google::protobuf::Message *msg);
 
+    void CommitCallback(uint64_t transaction_id, transaction_status_t status);
+
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
+
+    ReplicaClient *replica_client_;
+
     Transport *transport_;
     const TrueTime &tt_;
     Coordinator coordinator;
+
+    uint64_t server_id_;
+
+    std::unordered_map<uint64_t, PendingRWCommitCoordinatorReply *>
+        pending_rw_commit_c_replies_;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;

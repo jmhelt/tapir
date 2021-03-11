@@ -41,15 +41,16 @@ using namespace proto;
 using namespace replication;
 
 Server::Server(const transport::Configuration &shard_config,
-               const transport::Configuration &replica_config, int shard_idx,
-               int replica_idx, Transport *transport,
-               InterShardClient &shardClient, const TrueTime &tt,
-               bool debug_stats)
+               const transport::Configuration &replica_config,
+               uint64_t server_id, int shard_idx, int replica_idx,
+               Transport *transport, InterShardClient &shardClient,
+               const TrueTime &tt, bool debug_stats)
     : shard_config_{shard_config},
       replica_config_{replica_config},
       transport_{transport},
       tt_{tt},
       coordinator{tt_},
+      server_id_{server_id},
       shardClient(shardClient),
       timeMaxWrite{0},
       shard_idx_{shard_idx},
@@ -58,6 +59,9 @@ Server::Server(const transport::Configuration &shard_config,
       debug_stats_{debug_stats} {
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
     store = new strongstore::LockStore();
+
+    replica_client_ =
+        new ReplicaClient(replica_config_, transport_, server_id_, shard_idx_);
 
     if (debug_stats_) {
         _Latency_Init(&prepare_lat_, "prepare_lat");
@@ -72,6 +76,8 @@ Server::Server(const transport::Configuration &shard_config,
 
 Server::~Server() {
     delete store;
+    delete replica_client_;
+
     if (debug_stats_) {
         Latency_Dump(&prepare_lat_);
         Latency_Dump(&commit_lat_);
@@ -99,59 +105,38 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     uint64_t transaction_id = msg.transaction_id();
     int n_participants = msg.n_participants();
 
+    PendingRWCommitCoordinatorReply *pending_reply =
+        new PendingRWCommitCoordinatorReply(
+            msg.rid().client_id(), msg.rid().client_req_id(), remote.clone());
+    pending_rw_commit_c_replies_[transaction_id] = pending_reply;
+
     replication::RequestID rid{msg.rid().client_id(),
                                msg.rid().client_req_id()};
 
-    Transaction transcation{msg.transaction()};
+    Transaction transaction{msg.transaction()};
     std::unordered_map<uint64_t, int> statuses;
 
     Debug("Coordinator for transaction: %lu", transaction_id);
 
     Decision d = coordinator.StartTransaction(rid, transaction_id,
-                                              n_participants, transcation);
+                                              n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("Trying fast path commit");
-        int status = store->Prepare(transaction_id, transcation, statuses);
+        int status = store->Prepare(transaction_id, transaction, statuses);
         if (!status) {
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 rid, transaction_id, shard_idx_, timeMaxWrite + 1);
             ASSERT(cd.d == Decision::COMMIT);
 
-            // TODO: Replicate commit
+            pending_reply->commit_timestamp = cd.commitTime;
 
-            // request.set_op(proto::Request::COMMIT);
-            // request.mutable_commit()->set_timestamp(cd.commitTime);
-            // request.mutable_commit()->set_coordinatorshard(shard_idx_);
+            // TODO: Handle timeout
+            replica_client_->FastPathCommit(
+                transaction_id, transaction, cd.commitTime,
+                std::bind(&Server::CommitCallback, this, transaction_id,
+                          std::placeholders::_1),
+                []() {}, COMMIT_TIMEOUT);
 
-            rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
-            rw_commit_c_reply_.set_status(REPLY_OK);
-            rw_commit_c_reply_.set_commit_timestamp(cd.commitTime);
-
-            if (store->Commit(transaction_id, cd.commitTime, statuses)) {
-                timeMaxWrite = std::max(timeMaxWrite, cd.commitTime);
-            }
-
-            Debug("COMMIT timestamp: %lu", cd.commitTime);
-            coordinator.Commit(transaction_id);
-            uint64_t response_delay_ms =
-                coordinator.CommitWaitMs(cd.commitTime);
-
-            if (response_delay_ms == 0) {
-                Debug("Sent");
-                transport_->SendMessage(this, remote, rw_commit_c_reply_);
-                // Latency_End(&exec_to_sent_lat_);
-            } else {
-                Debug("Delaying message by %lu ms", response_delay_ms);
-                const TransportAddress *remote2 = remote.clone();
-                transport_->Timer(
-                    response_delay_ms,
-                    [this, remote2, reply = rw_commit_c_reply_]() {
-                        Debug("Sent");
-                        transport_->SendMessage(this, *remote2, reply);
-                        delete remote2;
-                        // Latency_End(&exec_to_sent_lat_);
-                    });
-            }
         } else {  // Failed to commit
             Debug("Fast path commit failed");
             coordinator.Abort(transaction_id);
@@ -173,6 +158,47 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
         // // Delay response to client
         // response_request_ids.erase(response_request_ids.begin());
     }
+}
+
+void Server::CommitCallback(uint64_t transaction_id,
+                            transaction_status_t status) {
+    std::unordered_map<uint64_t, int> statuses;
+
+    PendingRWCommitCoordinatorReply *reply =
+        pending_rw_commit_c_replies_[transaction_id];
+
+    uint64_t commit_timestamp = reply->commit_timestamp;
+
+    rw_commit_c_reply_.mutable_rid()->set_client_id(reply->client_id);
+    rw_commit_c_reply_.mutable_rid()->set_client_req_id(reply->client_req_id);
+    rw_commit_c_reply_.set_status(REPLY_OK);
+    rw_commit_c_reply_.set_commit_timestamp(commit_timestamp);
+
+    // if (store->Commit(transaction_id, commit_timestamp, statuses)) {
+    //     timeMaxWrite = std::max(timeMaxWrite, commit_timestamp);
+    // }
+
+    Debug("COMMIT timestamp: %lu", commit_timestamp);
+    coordinator.Commit(transaction_id);
+    uint64_t response_delay_ms = coordinator.CommitWaitMs(commit_timestamp);
+
+    TransportAddress *remote = reply->remote;
+    if (response_delay_ms == 0) {
+        Debug("Sent");
+        transport_->SendMessage(this, *remote, rw_commit_c_reply_);
+        delete remote;
+    } else {
+        Debug("Delaying message by %lu ms", response_delay_ms);
+        transport_->Timer(response_delay_ms,
+                          [this, remote, reply = rw_commit_c_reply_]() {
+                              Debug("Sent");
+                              transport_->SendMessage(this, *remote, reply);
+                              delete remote;
+                          });
+    }
+
+    delete reply;
+    pending_rw_commit_c_replies_.erase(transaction_id);
 }
 
 void Server::LeaderUpcall(
@@ -236,8 +262,8 @@ void Server::LeaderUpcall(
 
                         request.set_op(proto::Request::COMMIT);
                         request.mutable_commit()->set_timestamp(cd.commitTime);
-                        request.mutable_commit()->set_coordinatorshard(
-                            shard_idx_);
+                        // request.mutable_commit()->set_coordinatorshard(
+                        //     shard_idx_);
 
                         replicate = true;
                         request.SerializeToString(&response);
@@ -315,7 +341,7 @@ void Server::LeaderUpcall(
                         coordinator.GetNParticipants(request.txnid()));
                     request.mutable_prepare()->set_timestamp(cd.commitTime);
                     request.mutable_commit()->set_timestamp(cd.commitTime);
-                    request.mutable_commit()->set_coordinatorshard(shard_idx_);
+                    // request.mutable_commit()->set_coordinatorshard(shard_idx_);
 
                     replicate = true;
                     request.SerializeToString(&response);
@@ -413,10 +439,10 @@ void Server::ReplicaUpcall(
                 Latency_Start(&commit_lat_);
             }
             Debug("Received COMMIT");
-            if (request.has_prepare())  // Fast path commit
-            {
+            if (request.commit().has_transaction()) {  // Fast path commit
                 store->Prepare(request.txnid(),
-                               Transaction(request.prepare().txn()), statuses);
+                               Transaction(request.commit().transaction()),
+                               statuses);
             }
             if (store->Commit(request.txnid(), request.commit().timestamp(),
                               statuses)) {
@@ -424,28 +450,28 @@ void Server::ReplicaUpcall(
                     std::max(timeMaxWrite, request.commit().timestamp());
             }
 
-            if (shard_idx_ ==
-                request.commit().coordinatorshard())  // I am coordinator
-            {
-                Debug("AmLeader: %d", AmLeader);
-                if (AmLeader) {
-                    Debug("Replying to client and shards");
-                    // Reply to client and shards
-                    reply.set_timestamp(request.commit().timestamp());
-                    requestIDs = coordinator.GetRequestIDs(request.txnid());
-                    response_request_ids.insert(requestIDs.begin(),
-                                                requestIDs.end());
-                } else {
-                    // Don't respond to clients or shards
-                    // Only leader needs to respond to client
-                    response_request_ids.erase(response_request_ids.begin());
-                }
+            // if (shard_idx_ ==
+            //     request.commit().coordinatorshard())  // I am coordinator
+            // {
+            //     Debug("AmLeader: %d", AmLeader);
+            //     if (AmLeader) {
+            //         Debug("Replying to client and shards");
+            //         // Reply to client and shards
+            //         reply.set_timestamp(request.commit().timestamp());
+            //         requestIDs = coordinator.GetRequestIDs(request.txnid());
+            //         response_request_ids.insert(requestIDs.begin(),
+            //                                     requestIDs.end());
+            //     } else {
+            //         // Don't respond to clients or shards
+            //         // Only leader needs to respond to client
+            //         response_request_ids.erase(response_request_ids.begin());
+            //     }
 
-                Debug("COMMIT timestamp: %lu", request.commit().timestamp());
-                coordinator.Commit(request.txnid());
-                response_delay_ms =
-                    coordinator.CommitWaitMs(request.commit().timestamp());
-            }
+            //     Debug("COMMIT timestamp: %lu", request.commit().timestamp());
+            //     coordinator.Commit(request.txnid());
+            //     response_delay_ms =
+            //         coordinator.CommitWaitMs(request.commit().timestamp());
+            // }
             if (debug_stats_) {
                 Latency_End(&commit_lat_);
             }
