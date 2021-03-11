@@ -22,6 +22,57 @@ ReplicaClient::ReplicaClient(const transport::Configuration &config,
 
 ReplicaClient::~ReplicaClient() { delete client; }
 
+void ReplicaClient::Prepare(uint64_t transaction_id,
+                            const Transaction &transaction,
+                            prepare_callback pcb, prepare_timeout_callback ptcb,
+                            uint32_t timeout) {
+    Debug("[shard %i] Sending PREPARE: %lu", shard_idx_, transaction_id);
+
+    // create prepare request
+    string request_str;
+    Request request;
+    request.set_op(Request::PREPARE);
+    request.set_txnid(transaction_id);
+    transaction.serialize(request.mutable_prepare()->mutable_txn());
+    request.SerializeToString(&request_str);
+
+    uint64_t reqId = lastReqId++;
+    PendingPrepare *pendingPrepare = new PendingPrepare(reqId);
+    pendingPrepares[reqId] = pendingPrepare;
+    pendingPrepare->pcb = pcb;
+    pendingPrepare->ptcb = ptcb;
+
+    client->Invoke(request_str, bind(&ReplicaClient::PrepareCallback, this,
+                                     pendingPrepare->reqId, placeholders::_1,
+                                     placeholders::_2));
+}
+
+/* Callback from a shard replica on prepare operation completion. */
+bool ReplicaClient::PrepareCallback(uint64_t reqId, const string &request_str,
+                                    const string &reply_str) {
+    Reply reply;
+
+    reply.ParseFromString(reply_str);
+
+    Debug("[shard %i] Received PREPARE callback [%d]", shard_idx_,
+          reply.status());
+    auto itr = this->pendingPrepares.find(reqId);
+    ASSERT(itr != this->pendingPrepares.end());
+    PendingPrepare *pendingPrepare = itr->second;
+    prepare_callback pcb = pendingPrepare->pcb;
+    this->pendingPrepares.erase(itr);
+    delete pendingPrepare;
+    if (reply.has_timestamp()) {
+        Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
+              reply.timestamp());
+        pcb(reply.status(), Timestamp(reply.timestamp()));
+    } else {
+        pcb(reply.status(), Timestamp());
+    }
+
+    return true;
+}
+
 void ReplicaClient::FastPathCommit(uint64_t transaction_id,
                                    const Transaction transaction,
                                    uint64_t commit_timestamp,
