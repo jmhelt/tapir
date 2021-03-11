@@ -54,17 +54,11 @@ enum Mode {
     MODE_MVTSO
 };
 
-// typedef std::function<void(int, const std::string &, const std::string &,
-//                            const ::mortystore::Version &, uint64_t,
-//                            uint64_t)>
-//     get_callback;
-// typedef std::function<void(int, const std::string &)> get_timeout_callback;
-
 class ShardClient : public TxnClient, public TransportReceiver {
    public:
     /* Constructor needs path to shard config. */
-    ShardClient(transport::Configuration *config, Transport *transport,
-                uint64_t client_id, int shard, int closestReplica);
+    ShardClient(const transport::Configuration &config, Transport *transport,
+                uint64_t client_id, int shard);
     virtual ~ShardClient();
 
     virtual void ReceiveMessage(const TransportAddress &remote,
@@ -83,12 +77,18 @@ class ShardClient : public TxnClient, public TransportReceiver {
                              const Transaction &transaction, int n_participants,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
+    void RWCommitParticipant(uint64_t transaction_id,
+                             const Transaction &transaction,
+                             int coordinator_shard, prepare_callback pcb,
+                             prepare_timeout_callback ptcb, uint32_t timeout);
+
+    void PrepareOK(uint64_t transaction_id, int participant_shard,
+                   uint64_t prepare_timestamp, prepare_callback pcb,
+                   prepare_timeout_callback ptcb, uint32_t timeout);
 
     void Prepare(uint64_t id, const Transaction &txn, int coordShard,
                  int nParticipants, prepare_callback pcb,
                  prepare_timeout_callback ptcb, uint32_t timeout);
-    void PrepareOK(uint64_t id, int participantShard, uint64_t prepareTS,
-                   replication::Client::continuation_t continuation);
     void PrepareAbort(uint64_t id, int participantShard,
                       replication::Client::continuation_t continuation);
     void Commit(int coordShard, uint64_t id, uint64_t timestamp,
@@ -113,9 +113,18 @@ class ShardClient : public TxnClient, public TransportReceiver {
                          uint32_t timeout) override;
 
    private:
+    struct PendingPrepareOK : public PendingRequest {
+        PendingPrepareOK(uint64_t reqId) : PendingRequest(reqId) {}
+        prepare_callback pcb;
+        prepare_timeout_callback ptcb;
+    };
+
     void HandleGetReply(const proto::GetReply &reply);
     void HandleRWCommitCoordinatorReply(
         const proto::RWCommitCoordinatorReply &reply);
+    void HandleRWCommitParticipantReply(
+        const proto::RWCommitParticipantReply &reply);
+    void HandlePrepareOKReply(const proto::PrepareOKReply &reply);
 
     /* Timeout for Get requests, which only go to one replica. */
     void GetTimeout(uint64_t reqId);
@@ -129,7 +138,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
     bool AbortCallback(uint64_t reqId, const std::string &,
                        const std::string &);
 
-    transport::Configuration *config_;
+    const transport::Configuration &config_;
     Transport *transport_;  // Transport layer.
     uint64_t client_id_;    // Unique ID for this client.
     int shard_idx_;         // which shard this client accesses
@@ -139,15 +148,20 @@ class ShardClient : public TxnClient, public TransportReceiver {
 
     std::unordered_map<uint64_t, PendingGet *> pendingGets;
     std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
+    std::unordered_map<uint64_t, PendingPrepareOK *> pendingPrepareOKs;
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
     std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
     Latency_t opLat;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;
+    proto::RWCommitParticipant rw_commit_p_;
+    proto::PrepareOK prepare_ok_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
+    proto::RWCommitParticipantReply rw_commit_p_reply_;
+    proto::PrepareOKReply prepare_ok_reply_;
 };
 
 }  // namespace strongstore

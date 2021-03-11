@@ -60,6 +60,11 @@ Server::Server(const transport::Configuration &shard_config,
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
     store = new strongstore::LockStore();
 
+    for (int i = 0; i < shard_config_.n; i++) {
+        shard_clients_.push_back(
+            new ShardClient(shard_config_, transport, server_id_, i));
+    }
+
     replica_client_ =
         new ReplicaClient(replica_config_, transport_, server_id_, shard_idx_);
 
@@ -72,10 +77,20 @@ Server::Server(const transport::Configuration &shard_config,
         &get_, static_cast<MessageServer::MessageHandler>(&Server::HandleGet));
     RegisterHandler(&rw_commit_c_, static_cast<MessageServer::MessageHandler>(
                                        &Server::HandleRWCommitCoordinator));
+    RegisterHandler(&rw_commit_p_, static_cast<MessageServer::MessageHandler>(
+                                       &Server::HandleRWCommitParticipant));
+
+    RegisterHandler(&prepare_ok_, static_cast<MessageServer::MessageHandler>(
+                                      &Server::HandlePrepareOK));
 }
 
 Server::~Server() {
     delete store;
+
+    for (auto s : shard_clients_) {
+        delete s;
+    }
+
     delete replica_client_;
 
     if (debug_stats_) {
@@ -138,25 +153,35 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
 
         } else {  // Failed to commit
-            Debug("Fast path commit failed");
+            Debug("Fast path commit failed: %lu", transaction_id);
+            store->Abort(transaction_id, statuses);
             coordinator.Abort(transaction_id);
-            // Reply to client
-            // replicate = false;
-            // reply.set_status(REPLY_FAIL);
-            // reply.SerializeToString(&response);
+
+            rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
+            rw_commit_c_reply_.set_status(REPLY_FAIL);
+            rw_commit_c_reply_.set_commit_timestamp(0);
+
+            transport_->SendMessage(this, remote, rw_commit_c_reply_);
+
+            delete pending_reply->remote;
+            delete pending_reply;
+            pending_rw_commit_c_replies_.erase(transaction_id);
         }
     } else if (d == Decision::ABORT) {
         Debug("Abort: %lu", transaction_id);
         coordinator.Abort(transaction_id);
-        // Reply to client
-        // replicate = false;
-        // reply.set_status(REPLY_FAIL);
-        // reply.SerializeToString(&response);
+
+        rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
+        rw_commit_c_reply_.set_status(REPLY_FAIL);
+        rw_commit_c_reply_.set_commit_timestamp(0);
+
+        transport_->SendMessage(this, remote, rw_commit_c_reply_);
+
+        delete pending_reply->remote;
+        delete pending_reply;
+        pending_rw_commit_c_replies_.erase(transaction_id);
     } else {  // Wait for other participants
         Debug("Waiting for other participants");
-        // replicate = false;
-        // // Delay response to client
-        // response_request_ids.erase(response_request_ids.begin());
     }
 }
 
@@ -173,10 +198,6 @@ void Server::CommitCallback(uint64_t transaction_id,
     rw_commit_c_reply_.mutable_rid()->set_client_req_id(reply->client_req_id);
     rw_commit_c_reply_.set_status(REPLY_OK);
     rw_commit_c_reply_.set_commit_timestamp(commit_timestamp);
-
-    // if (store->Commit(transaction_id, commit_timestamp, statuses)) {
-    //     timeMaxWrite = std::max(timeMaxWrite, commit_timestamp);
-    // }
 
     Debug("COMMIT timestamp: %lu", commit_timestamp);
     coordinator.Commit(transaction_id);
@@ -199,6 +220,188 @@ void Server::CommitCallback(uint64_t transaction_id,
 
     delete reply;
     pending_rw_commit_c_replies_.erase(transaction_id);
+}
+
+void Server::HandleRWCommitParticipant(const TransportAddress &remote,
+                                       google::protobuf::Message *m) {
+    proto::RWCommitParticipant &msg =
+        *dynamic_cast<proto::RWCommitParticipant *>(m);
+
+    uint64_t transaction_id = msg.transaction_id();
+    int coordinator_shard = msg.coordinator_shard();
+
+    Debug("Participant for transaction: %lu", transaction_id);
+
+    PendingRWCommitParticipantReply *pending_reply =
+        new PendingRWCommitParticipantReply(
+            msg.rid().client_id(), msg.rid().client_req_id(), remote.clone());
+    pending_rw_commit_p_replies_[transaction_id] = pending_reply;
+    pending_reply->coordinator_shard = coordinator_shard;
+
+    replication::RequestID rid{msg.rid().client_id(),
+                               msg.rid().client_req_id()};
+
+    Transaction transaction{msg.transaction()};
+    std::unordered_map<uint64_t, int> statuses;
+    int status = store->Prepare(transaction_id, transaction, statuses);
+    if (!status) {
+        pending_reply->prepare_timestamp = timeMaxWrite + 1;
+
+        // TODO: Handle timeout
+        replica_client_->Prepare(
+            transaction_id, transaction,
+            std::bind(&Server::PrepareCallback, this, transaction_id,
+                      std::placeholders::_1, std::placeholders::_2),
+            [](int, Timestamp) {}, PREPARE_TIMEOUT);
+    } else {
+        Debug("Prepare failed");
+        // Send message to coordinator
+        // shard_clients_[coordinator_shard]->PrepareAbort(
+        //     transaction_id, shard_idx_,
+        //     std::bind(&Server::PrepareAbortCallback, this, coordinator_shard,
+        //               transaction_id, shard_idx_, placeholders::_1,
+        //               placeholders::_2));
+
+        // Reply to client
+        rw_commit_p_reply_.mutable_rid()->CopyFrom(msg.rid());
+        rw_commit_p_reply_.set_status(REPLY_FAIL);
+
+        transport_->SendMessage(this, remote, rw_commit_p_reply_);
+    }
+}
+
+void Server::PrepareCallback(uint64_t transaction_id, int status,
+                             Timestamp timestamp) {
+    PendingRWCommitParticipantReply *reply =
+        pending_rw_commit_p_replies_[transaction_id];
+
+    rw_commit_p_reply_.mutable_rid()->set_client_id(reply->client_id);
+    rw_commit_p_reply_.mutable_rid()->set_client_req_id(reply->client_req_id);
+
+    if (status == REPLY_OK) {
+        // TODO: Handle timeout
+        shard_clients_[reply->coordinator_shard]->PrepareOK(
+            transaction_id, shard_idx_, reply->prepare_timestamp,
+            std::bind(&Server::PrepareOKCallback, this, transaction_id,
+                      placeholders::_1, placeholders::_2),
+            [](int, Timestamp) {}, PREPARE_TIMEOUT);
+        rw_commit_p_reply_.set_status(REPLY_OK);
+    } else {
+        rw_commit_p_reply_.set_status(REPLY_FAIL);
+    }
+
+    // Respond to client
+    TransportAddress *remote = reply->remote;
+    transport_->SendMessage(this, *remote, rw_commit_c_reply_);
+    pending_rw_commit_p_replies_.erase(transaction_id);
+    delete remote;
+    delete reply;
+}
+
+void Server::PrepareOKCallback(uint64_t transaction_id, int status,
+                               Timestamp commit_timestamp) {
+    Debug("[shard %i] Received PREPARE_OK callback [%d]", shard_idx_, status);
+
+    switch (status) {
+        case REPLY_OK:
+            // TODO: Handle timeout
+            replica_client_->Commit(
+                transaction_id, commit_timestamp.getTimestamp(),
+                std::bind(&Server::CommitCallback, this, transaction_id,
+                          std::placeholders::_1),
+                []() {}, COMMIT_TIMEOUT);
+            break;
+        case REPLY_FAIL:
+            // sclient[participantShard]->Abort(
+            //     coordShard, txnID, []() {}, []() {}, 1000);
+            break;
+        default:
+            NOT_REACHABLE();
+    }
+}
+
+void Server::HandlePrepareOK(const TransportAddress &remote,
+                             google::protobuf::Message *m) {
+    proto::PrepareOK &msg = *dynamic_cast<proto::PrepareOK *>(m);
+
+    uint64_t transaction_id = msg.transaction_id();
+    int participant_shard = msg.participant_shard();
+    uint64_t prepare_timestamp = msg.prepare_timestamp();
+
+    auto search = pending_prepare_ok_replies_.find(transaction_id);
+    PendingPrepareOKReply *pending_reply = nullptr;
+    if (search == pending_prepare_ok_replies_.end()) {
+        pending_reply = new PendingPrepareOKReply(
+            msg.rid().client_id(), msg.rid().client_req_id(), remote.clone());
+        pending_prepare_ok_replies_[transaction_id] = pending_reply;
+    } else {
+        pending_reply = pending_prepare_ok_replies_[transaction_id];
+        pending_reply->remotes.push_back(remote.clone());
+        // TODO: Handle duplicates
+    }
+
+    Debug("Received Prepare OK: %lu", transaction_id);
+
+    replication::RequestID rid{msg.rid().client_id(),
+                               msg.rid().client_req_id()};
+
+    std::unordered_map<uint64_t, int> statuses;
+
+    CommitDecision cd = coordinator.ReceivePrepareOK(
+        rid, transaction_id, participant_shard, prepare_timestamp);
+    if (cd.d == Decision::TRY_COORD) {
+        PendingRWCommitCoordinatorReply *pending_reply =
+            pending_rw_commit_c_replies_[transaction_id];
+        Transaction transaction = coordinator.GetTransaction(transaction_id);
+        Debug("Received Prepare OK from all participants");
+        int status = store->Prepare(transaction_id, transaction, statuses);
+        if (!status) {
+            cd = coordinator.ReceivePrepareOK(rid, transaction_id, shard_idx_,
+                                              timeMaxWrite + 1);
+            ASSERT(cd.d == Decision::COMMIT);
+
+            pending_reply->commit_timestamp = cd.commitTime;
+
+            // TODO: Handle timeout
+            replica_client_->FastPathCommit(
+                transaction_id, transaction, cd.commitTime,
+                std::bind(&Server::CommitCallback, this, transaction_id,
+                          std::placeholders::_1),
+                []() {}, COMMIT_TIMEOUT);
+        } else {  // Failed to commit
+            Debug("Coordinator prepare failed: %lu", transaction_id);
+            store->Abort(transaction_id, statuses);
+            coordinator.Abort(transaction_id);
+
+            rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
+            rw_commit_c_reply_.set_status(REPLY_FAIL);
+            rw_commit_c_reply_.set_commit_timestamp(0);
+
+            transport_->SendMessage(this, remote, rw_commit_c_reply_);
+
+            delete pending_reply->remote;
+            delete pending_reply;
+            pending_rw_commit_c_replies_.erase(transaction_id);
+        }
+    } else if (cd.d == Decision::ABORT) {
+        Debug("Abort: %lu", transaction_id);
+        coordinator.Abort(transaction_id);
+
+        rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
+        rw_commit_c_reply_.set_status(REPLY_FAIL);
+        rw_commit_c_reply_.set_commit_timestamp(0);
+
+        transport_->SendMessage(this, remote, rw_commit_c_reply_);
+
+        auto search = pending_rw_commit_c_replies_.find(transaction_id);
+        if (search != pending_rw_commit_c_replies_.end()) {
+            delete search->second->remote;
+            delete search->second;
+            pending_rw_commit_c_replies_.erase(search);
+        }
+    } else {  // Wait for other participants
+        Debug("Waiting for other participants");
+    }
 }
 
 void Server::LeaderUpcall(
@@ -237,83 +440,6 @@ void Server::LeaderUpcall(
             reply.set_status(status);
             reply.SerializeToString(&response);
             break;
-        case strongstore::proto::Request::PREPARE:
-            if (debug_stats_) {
-                Latency_Start(&prepare_lat_);
-            }
-            if (shard_idx_ ==
-                request.prepare().coordinatorshard()) {  // I am coordinator
-
-                Debug("Coordinator for transaction: %lu", request.txnid());
-                Decision d = coordinator.StartTransaction(
-                    requestID, request.txnid(),
-                    request.prepare().nparticipants(),
-                    Transaction(request.prepare().txn()));
-                if (d == Decision::TRY_COORD) {
-                    Debug("Trying fast path commit");
-                    status = store->Prepare(
-                        request.txnid(), Transaction(request.prepare().txn()),
-                        statuses);
-                    if (!status) {
-                        cd = coordinator.ReceivePrepareOK(
-                            requestID, request.txnid(), shard_idx_,
-                            timeMaxWrite + 1);
-                        ASSERT(cd.d == Decision::COMMIT);
-
-                        request.set_op(proto::Request::COMMIT);
-                        request.mutable_commit()->set_timestamp(cd.commitTime);
-                        // request.mutable_commit()->set_coordinatorshard(
-                        //     shard_idx_);
-
-                        replicate = true;
-                        request.SerializeToString(&response);
-                    } else {  // Failed to commit
-                        Debug("Fast path commit failed");
-                        coordinator.Abort(request.txnid());
-                        // Reply to client
-                        replicate = false;
-                        reply.set_status(REPLY_FAIL);
-                        reply.SerializeToString(&response);
-                    }
-                } else if (d == Decision::ABORT) {
-                    Debug("Abort: %lu", request.txnid());
-                    coordinator.Abort(request.txnid());
-                    // Reply to client
-                    replicate = false;
-                    reply.set_status(REPLY_FAIL);
-                    reply.SerializeToString(&response);
-                } else {  // Wait for other participants
-                    Debug("Waiting for other participants");
-                    replicate = false;
-                    // Delay response to client
-                    response_request_ids.erase(response_request_ids.begin());
-                }
-            } else {  // I am participant
-                Debug("Participant for transaction: %lu", request.txnid());
-                status = store->Prepare(request.txnid(),
-                                        Transaction(request.prepare().txn()),
-                                        statuses);
-                if (!status) {
-                    request.mutable_prepare()->set_timestamp(timeMaxWrite + 1);
-
-                    replicate = true;
-                    request.SerializeToString(&response);
-                } else {
-                    Debug("Prepare failed");
-                    // Send message to coordinator
-                    shardClient.PrepareAbort(
-                        request.prepare().coordinatorshard(), request.txnid(),
-                        shard_idx_);
-                    // Reply to client
-                    replicate = false;
-                    reply.set_status(REPLY_FAIL);
-                    reply.SerializeToString(&response);
-                }
-            }
-            if (debug_stats_) {
-                Latency_End(&prepare_lat_);
-            }
-            break;
         case strongstore::proto::Request::PREPARE_OK:  // Only coordinator
                                                        // receives prepare OK
             Debug("Received Prepare OK");
@@ -336,9 +462,9 @@ void Server::LeaderUpcall(
                     request.set_op(proto::Request::COMMIT);
                     coordinator.GetTransaction(request.txnid())
                         .serialize(request.mutable_prepare()->mutable_txn());
-                    request.mutable_prepare()->set_coordinatorshard(shard_idx_);
-                    request.mutable_prepare()->set_nparticipants(
-                        coordinator.GetNParticipants(request.txnid()));
+                    // request.mutable_prepare()->set_coordinatorshard(shard_idx_);
+                    // request.mutable_prepare()->set_nparticipants(
+                    // coordinator.GetNParticipants(request.txnid()));
                     request.mutable_prepare()->set_timestamp(cd.commitTime);
                     request.mutable_commit()->set_timestamp(cd.commitTime);
                     // request.mutable_commit()->set_coordinatorshard(shard_idx_);
@@ -388,6 +514,10 @@ void Server::LeaderUpcall(
             reply.set_status(REPLY_FAIL);
             reply.SerializeToString(&response);
             break;
+        case strongstore::proto::Request::PREPARE:
+            replicate = true;
+            response = op;
+            break;
         case strongstore::proto::Request::COMMIT:
             replicate = true;
             response = op;
@@ -426,13 +556,11 @@ void Server::ReplicaUpcall(
             store->Prepare(request.txnid(),
                            Transaction(request.prepare().txn()), statuses);
 
-            if (AmLeader) {
-                shardClient.PrepareOK(request.prepare().coordinatorshard(),
-                                      request.txnid(), shard_idx_,
-                                      request.prepare().timestamp());
-            }
-
-            // Reply to client
+            // if (AmLeader) {
+            //     shardClient.PrepareOK(request.prepare().coordinatorshard(),
+            //                           request.txnid(), shard_idx_,
+            //                           request.prepare().timestamp());
+            // }
             break;
         case strongstore::proto::Request::COMMIT:
             if (debug_stats_) {

@@ -297,8 +297,6 @@ std::vector<::Client *> clients;
 std::vector<::BenchmarkClient *> benchClients;
 std::vector<std::thread *> threads;
 Transport *tport;
-transport::Configuration *replica_config;
-transport::Configuration *shard_config;
 Partitioner *part;
 KeySelector *keySelector;
 TrueTime tt{FLAGS_clock_error};
@@ -502,7 +500,7 @@ int main(int argc, char **argv) {
                   << FLAGS_replica_config_path << std::endl;
         return -1;
     }
-    replica_config = new transport::Configuration(replica_config_stream);
+    transport::Configuration replica_config{replica_config_stream};
 
     std::ifstream shard_config_stream(FLAGS_shard_config_path);
     if (shard_config_stream.fail()) {
@@ -510,12 +508,12 @@ int main(int argc, char **argv) {
                   << FLAGS_shard_config_path << std::endl;
         return -1;
     }
-    shard_config = new transport::Configuration(shard_config_stream);
+    transport::Configuration shard_config{shard_config_stream};
 
     if (closestReplicas.size() > 0 &&
-        closestReplicas.size() != static_cast<size_t>(replica_config->n)) {
+        closestReplicas.size() != static_cast<size_t>(replica_config.n)) {
         std::cerr << "If specifying closest replicas, must specify all "
-                  << replica_config->n << "; only specified "
+                  << replica_config.n << "; only specified "
                   << closestReplicas.size() << std::endl;
         return 1;
     }
@@ -534,7 +532,7 @@ int main(int argc, char **argv) {
         switch (mode) {
             case PROTO_TAPIR: {
                 client = new tapirstore::Client(
-                    replica_config, clientId, FLAGS_num_shards,
+                    &replica_config, clientId, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part, FLAGS_ping_replicas,
                     FLAGS_tapir_sync_commit, tt);
                 break;
@@ -631,8 +629,6 @@ int main(int argc, char **argv) {
 
     FlushStats();
 
-    delete replica_config;
-    delete shard_config;
     delete keySelector;
     for (auto i : threads) {
         i->join();

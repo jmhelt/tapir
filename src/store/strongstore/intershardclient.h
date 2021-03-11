@@ -15,8 +15,8 @@ namespace strongstore {
 
 class InterShardClient {
    public:
-    InterShardClient(transport::Configuration &config, Transport *transport,
-                     int nShards);
+    InterShardClient(const transport::Configuration &config,
+                     Transport *transport, int nShards);
     ~InterShardClient();
 
     void PrepareOK(int coordShard, uint64_t txnID, int participantShard,

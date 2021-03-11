@@ -57,6 +57,15 @@ void BufferClient::RWCommitCoordinator(uint64_t transaction_id,
                                        ptcb, timeout);
 }
 
+void BufferClient::RWCommitParticipant(uint64_t transaction_id,
+                                       int coordinator_shard,
+                                       prepare_callback pcb,
+                                       prepare_timeout_callback ptcb,
+                                       uint32_t timeout) {
+    shard_client_->RWCommitParticipant(transaction_id, txn, coordinator_shard,
+                                       pcb, ptcb, timeout);
+}
+
 /* Prepare the transaction. */
 void BufferClient::Prepare(uint64_t id, int coordShard, int nParticipants,
                            prepare_callback pcb, prepare_timeout_callback ptcb,

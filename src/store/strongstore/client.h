@@ -51,7 +51,7 @@ namespace strongstore {
 
 class Client : public ::Client {
    public:
-    Client(transport::Configuration *config, uint64_t id, int nshards,
+    Client(transport::Configuration &config, uint64_t id, int nshards,
            int closestReplic, Transport *transport, Partitioner *part,
            TrueTime &tt, bool debug_stats);
     virtual ~Client();
@@ -114,7 +114,7 @@ class Client : public ::Client {
     // choose coordinator from participants
     int ChooseCoordinator(const std::set<int> &participants);
 
-    transport::Configuration *config_;
+    transport::Configuration &config_;
     // Unique ID for this client.
     uint64_t client_id_;
 
