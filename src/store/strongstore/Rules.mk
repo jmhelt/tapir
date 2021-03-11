@@ -1,14 +1,16 @@
 d := $(dir $(lastword $(MAKEFILE_LIST)))
 
 SRCS += $(addprefix $(d), occstore.cc lockstore.cc server.cc \
-					client.cc shardclient.cc intershardclient.cc coordinator.cc \
+					client.cc shardclient.cc replicaclient.cc intershardclient.cc coordinator.cc \
 					strongbufferclient.cc)
 
 PROTOS += $(addprefix $(d), strong-proto.proto)
 
 OBJS-intershard-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)shardclient.o $(o)intershardclient.o
 
-LIB-strong-store := $(o)occstore.o $(o)lockstore.o $(o)coordinator.o $(OBJS-intershard-client)
+OBJS-replica-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)replicaclient.o
+
+LIB-strong-store := $(o)occstore.o $(o)lockstore.o $(o)coordinator.o $(OBJS-intershard-client) $(OBJS-replica-client)
 
 OBJS-strong-store := $(LIB-udptransport) $(OBJS-vr-replica) \
     $(LIB-message) $(LIB-strong-store) $(LIB-store-common) \

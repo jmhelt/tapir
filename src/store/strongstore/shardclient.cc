@@ -295,7 +295,7 @@ void ShardClient::Commit(int coordShard, uint64_t id, uint64_t timestamp,
     request.set_op(Request::COMMIT);
     request.set_txnid(id);
     request.mutable_commit()->set_timestamp(timestamp);
-    request.mutable_commit()->set_coordinatorshard(coordShard);
+    // request.mutable_commit()->set_coordinatorshard(coordShard);
     request.SerializeToString(&request_str);
 
     uint64_t reqId = lastReqId++;
