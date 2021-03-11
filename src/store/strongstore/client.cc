@@ -38,7 +38,7 @@ using namespace std;
 
 namespace strongstore {
 
-Client::Client(transport::Configuration *config, uint64_t client_id,
+Client::Client(transport::Configuration &config, uint64_t client_id,
                int nShards, int closestReplica, Transport *transport,
                Partitioner *part, TrueTime &tt, bool debug_stats)
     : config_{config},
@@ -55,7 +55,7 @@ Client::Client(transport::Configuration *config, uint64_t client_id,
     /* Start a client for each shard. */
     for (uint64_t i = 0; i < nshards; i++) {
         ShardClient *shardclient =
-            new ShardClient(config_, transport_, client_id_, i, closestReplica);
+            new ShardClient(config_, transport_, client_id_, i);
         bclient.push_back(new BufferClient(shardclient));
         sclient.push_back(shardclient);
     }
@@ -183,8 +183,8 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
                           std::placeholders::_1, std::placeholders::_2),
                 timeout);
         } else {
-            bclient[p]->Prepare(
-                req->id, coordShard, nParticipants,
+            bclient[p]->RWCommitParticipant(
+                t_id, coordShard,
                 [this, tId = t_id, reqId = req->id](int status, Timestamp) {
                     Debug("PREPARE [%lu] callback status %d", tId, status);
 

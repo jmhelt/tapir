@@ -23,6 +23,9 @@ class ReplicaClient {
                   uint64_t client_id, int shard);
     virtual ~ReplicaClient();
 
+    void Prepare(uint64_t id, const Transaction &txn, prepare_callback pcb,
+                 prepare_timeout_callback ptcb, uint32_t timeout);
+
     void FastPathCommit(uint64_t transaction_id, const Transaction transaction,
                         uint64_t commit_timestamp, commit_callback ccb,
                         commit_timeout_callback ctcb, uint32_t timeout);
@@ -36,11 +39,19 @@ class ReplicaClient {
         PendingRequest(uint64_t reqId) : reqId(reqId) {}
         uint64_t reqId;
     };
+    struct PendingPrepare : public PendingRequest {
+        PendingPrepare(uint64_t reqId) : PendingRequest(reqId) {}
+        prepare_callback pcb;
+        prepare_timeout_callback ptcb;
+    };
     struct PendingCommit : public PendingRequest {
         PendingCommit(uint64_t reqId) : PendingRequest(reqId) {}
         commit_callback ccb;
         commit_timeout_callback ctcb;
     };
+
+    bool PrepareCallback(uint64_t reqId, const std::string &,
+                         const std::string &);
 
     bool CommitCallback(uint64_t reqId, const std::string &,
                         const std::string &);
@@ -52,6 +63,7 @@ class ReplicaClient {
 
     replication::vr::VRClient *client;  // Client proxy.
 
+    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
 
     uint64_t lastReqId;
