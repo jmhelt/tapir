@@ -175,8 +175,8 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
 
     for (auto p : participants) {
         if (p == coordShard) {
-            bclient[p]->Prepare(
-                req->id, coordShard, nParticipants,
+            bclient[p]->RWCommitCoordinator(
+                t_id, nParticipants,
                 std::bind(&Client::PrepareCallback, this, req->id,
                           std::placeholders::_1, std::placeholders::_2),
                 std::bind(&Client::PrepareCallback, this, req->id,
@@ -240,6 +240,7 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     if (debug_stats_) {
         Latency_End(&commit_lat_);
     }
+    Debug("PrepareCallback end");
     ccb(tstatus);
 }
 

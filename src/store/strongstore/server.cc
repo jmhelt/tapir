@@ -123,8 +123,35 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             // request.mutable_commit()->set_timestamp(cd.commitTime);
             // request.mutable_commit()->set_coordinatorshard(shard_idx_);
 
-            // replicate = true;
-            // request.SerializeToString(&response);
+            rw_commit_c_reply_.mutable_rid()->CopyFrom(msg.rid());
+            rw_commit_c_reply_.set_status(REPLY_OK);
+            rw_commit_c_reply_.set_commit_timestamp(cd.commitTime);
+
+            if (store->Commit(transaction_id, cd.commitTime, statuses)) {
+                timeMaxWrite = std::max(timeMaxWrite, cd.commitTime);
+            }
+
+            Debug("COMMIT timestamp: %lu", cd.commitTime);
+            coordinator.Commit(transaction_id);
+            uint64_t response_delay_ms =
+                coordinator.CommitWaitMs(cd.commitTime);
+
+            if (response_delay_ms == 0) {
+                Debug("Sent");
+                transport_->SendMessage(this, remote, rw_commit_c_reply_);
+                // Latency_End(&exec_to_sent_lat_);
+            } else {
+                Debug("Delaying message by %lu ms", response_delay_ms);
+                const TransportAddress *remote2 = remote.clone();
+                transport_->Timer(
+                    response_delay_ms,
+                    [this, remote2, reply = rw_commit_c_reply_]() {
+                        Debug("Sent");
+                        transport_->SendMessage(this, *remote2, reply);
+                        delete remote2;
+                        // Latency_End(&exec_to_sent_lat_);
+                    });
+            }
         } else {  // Failed to commit
             Debug("Fast path commit failed");
             coordinator.Abort(transaction_id);
@@ -146,8 +173,6 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
         // // Delay response to client
         // response_request_ids.erase(response_request_ids.begin());
     }
-
-    transport_->SendMessage(this, remote, get_reply_);
 }
 
 void Server::LeaderUpcall(
