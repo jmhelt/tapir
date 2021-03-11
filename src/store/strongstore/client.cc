@@ -240,7 +240,6 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     if (debug_stats_) {
         Latency_End(&commit_lat_);
     }
-    Debug("PrepareCallback end");
     ccb(tstatus);
 }
 

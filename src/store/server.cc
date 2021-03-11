@@ -56,6 +56,7 @@ enum transmode_t {
 /**
  * System settings.
  */
+DEFINE_uint64(server_id, 0, "unique identifier for server");
 DEFINE_string(replica_config_path, "",
               "path to replication configuration file");
 DEFINE_string(shard_config_path, "", "path to shard configuration file");
@@ -325,7 +326,7 @@ int main(int argc, char **argv) {
                 new strongstore::InterShardClient(replica_config, tport,
                                                   FLAGS_num_shards);
             server = new strongstore::Server(
-                shard_config, replica_config, FLAGS_group_idx,
+                shard_config, replica_config, FLAGS_server_id, FLAGS_group_idx,
                 FLAGS_replica_idx, tport, *shardClient, tt, FLAGS_debug_stats);
             replica = new replication::vr::VRReplica(
                 replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,

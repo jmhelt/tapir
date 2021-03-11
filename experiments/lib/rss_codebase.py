@@ -54,7 +54,8 @@ class RssCodebase(ExperimentCodebase):
             '--cooldown_secs', config['client_ramp_down'],
             '--protocol_mode', config['client_protocol_mode'],
             '--stats_file', stats_file,
-            '--num_clients', client_threads]])
+            '--num_clients', client_threads,
+            '--clock_error', truetime_error]])
 
         if config['server_emulate_wan']:
             client_command += ' --ping_replicas=true'
@@ -173,10 +174,12 @@ class RssCodebase(ExperimentCodebase):
                                       'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
 
         n = 2 * config['fault_tolerance'] + 1
+        server_id = shard_idx * n + replica_idx
 
         truetime_error = config["truetime_error"] if "truetime_error" in config else 0
         replica_command = ' '.join([str(x) for x in [
             path_to_server_bin,
+            '--server_id', server_id,
             '--replica_config_path', replica_config_path,
             '--shard_config_path', shard_config_path,
             '--group_idx', shard_idx,

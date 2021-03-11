@@ -58,7 +58,7 @@ message PrepareAbortMessage {
 
 message CommitMessage {
     required uint64 timestamp = 1;
-    required int32 coordinatorShard = 2;
+    optional TransactionMessage transaction = 2;
 }
 
 message AbortMessage {
