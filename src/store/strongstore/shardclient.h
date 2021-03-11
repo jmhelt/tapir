@@ -79,6 +79,11 @@ class ShardClient : public TxnClient, public TransportReceiver {
                      const Timestamp &timestamp, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) override;
 
+    void RWCommitCoordinator(uint64_t transaction_id,
+                             const Transaction &transaction, int n_participants,
+                             prepare_callback pcb,
+                             prepare_timeout_callback ptcb, uint32_t timeout);
+
     void Prepare(uint64_t id, const Transaction &txn, int coordShard,
                  int nParticipants, prepare_callback pcb,
                  prepare_timeout_callback ptcb, uint32_t timeout);
@@ -109,6 +114,8 @@ class ShardClient : public TxnClient, public TransportReceiver {
 
    private:
     void HandleGetReply(const proto::GetReply &reply);
+    void HandleRWCommitCoordinatorReply(
+        const proto::RWCommitCoordinatorReply &reply);
 
     /* Timeout for Get requests, which only go to one replica. */
     void GetTimeout(uint64_t reqId);
@@ -126,7 +133,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
     Transport *transport_;  // Transport layer.
     uint64_t client_id_;    // Unique ID for this client.
     int shard_idx_;         // which shard this client accesses
-    int replica;            // which replica to use for reads
+    int replica_;           // which replica to use for reads
 
     replication::vr::VRClient *client;  // Client proxy.
 
@@ -137,8 +144,10 @@ class ShardClient : public TxnClient, public TransportReceiver {
     Latency_t opLat;
 
     proto::Get get_;
+    proto::RWCommitCoordinator rw_commit_c_;
 
     proto::GetReply get_reply_;
+    proto::RWCommitCoordinatorReply rw_commit_c_reply_;
 };
 
 }  // namespace strongstore
