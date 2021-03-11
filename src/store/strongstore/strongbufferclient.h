@@ -46,6 +46,10 @@ class BufferClient : public ::BufferClient {
 
     void Begin(uint64_t tid, const Timestamp &start_time);
 
+    void RWCommitCoordinator(uint64_t transaction_id, int n_participants,
+                             prepare_callback pcb,
+                             prepare_timeout_callback ptcb, uint32_t timeout);
+
     // Prepare (Spanner requires a prepare timestamp)
     void Prepare(uint64_t id, int coordShard, int nParticipants,
                  prepare_callback pcb, prepare_timeout_callback ptcb,

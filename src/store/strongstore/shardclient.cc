@@ -48,7 +48,7 @@ ShardClient::ShardClient(transport::Configuration *config, Transport *transport,
     client = new replication::vr::VRClient(*config_, transport_, shard_idx_,
                                            client_id_);
 
-    replica = 0;
+    replica_ = 0;
     _Latency_Init(&opLat, "op_lat_server");
 }
 
@@ -64,6 +64,9 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     if (type == get_reply_.GetTypeName()) {
         get_reply_.ParseFromString(data);
         HandleGetReply(get_reply_);
+    } else if (type == rw_commit_c_reply_.GetTypeName()) {
+        rw_commit_c_reply_.ParseFromString(data);
+        HandleRWCommitCoordinatorReply(rw_commit_c_reply_);
     } else {
         Panic("Received unexpected message type: %s", type.c_str());
     }
@@ -75,8 +78,9 @@ void ShardClient::Begin(uint64_t id) {
 }
 
 /* Returns the value corresponding to the supplied key. */
-void ShardClient::Get(uint64_t id, const std::string &key, get_callback gcb,
-                      get_timeout_callback gtcb, uint32_t timeout) {
+void ShardClient::Get(uint64_t transaction_id, const std::string &key,
+                      get_callback gcb, get_timeout_callback gtcb,
+                      uint32_t timeout) {
     // Send the GET operation to appropriate shard.
     Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
 
@@ -91,14 +95,15 @@ void ShardClient::Get(uint64_t id, const std::string &key, get_callback gcb,
     get_.Clear();
     get_.mutable_rid()->set_client_id(client_id_);
     get_.mutable_rid()->set_client_req_id(reqId);
+    get_.set_transaction_id(transaction_id);
     get_.set_key(key);
 
     Latency_Start(&opLat);
 
-    transport_->SendMessageToReplica(this, shard_idx_, replica, get_);
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
 }
 
-void ShardClient::Get(uint64_t id, const std::string &key,
+void ShardClient::Get(uint64_t transaction_id, const std::string &key,
                       const Timestamp &timestamp, get_callback gcb,
                       get_timeout_callback gtcb, uint32_t timeout) {
     // Send the GET operation to appropriate shard.
@@ -115,12 +120,13 @@ void ShardClient::Get(uint64_t id, const std::string &key,
     get_.Clear();
     get_.mutable_rid()->set_client_id(client_id_);
     get_.mutable_rid()->set_client_req_id(reqId);
+    get_.set_transaction_id(transaction_id);
     timestamp.serialize(get_.mutable_timestamp());
     get_.set_key(key);
 
     Latency_Start(&opLat);
 
-    transport_->SendMessageToReplica(this, shard_idx_, replica, get_);
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
 }
 
 void ShardClient::HandleGetReply(const proto::GetReply &reply) {
@@ -138,6 +144,8 @@ void ShardClient::HandleGetReply(const proto::GetReply &reply) {
     pendingGets.erase(itr);
     delete req;
 
+    Debug("[shard %i] Received GET reply [%s]", shard_idx_, key.c_str());
+
     gcb(REPLY_OK, key, reply.val(), Timestamp());
 }
 
@@ -145,6 +153,59 @@ void ShardClient::Put(uint64_t id, const std::string &key,
                       const std::string &value, put_callback pcb,
                       put_timeout_callback ptcb, uint32_t timeout) {
     Panic("Unimplemented PUT");
+}
+
+void ShardClient::RWCommitCoordinator(uint64_t transaction_id,
+                                      const Transaction &transaction,
+                                      int n_participants, prepare_callback pcb,
+                                      prepare_timeout_callback ptcb,
+                                      uint32_t timeout) {
+    // Send the GET operation to appropriate shard.
+    Debug("[shard %i] Sending RWCommitCoordinator [%lu]", shard_idx_,
+          transaction_id);
+
+    uint64_t reqId = lastReqId++;
+    PendingPrepare *pendingPrepare = new PendingPrepare(reqId);
+    pendingPrepares[reqId] = pendingPrepare;
+    pendingPrepare->pcb = pcb;
+    pendingPrepare->ptcb = ptcb;
+
+    // TODO: Setup timeout
+    rw_commit_c_.Clear();
+    rw_commit_c_.mutable_rid()->set_client_id(client_id_);
+    rw_commit_c_.mutable_rid()->set_client_req_id(reqId);
+    rw_commit_c_.set_transaction_id(transaction_id);
+    transaction.serialize(rw_commit_c_.mutable_transaction());
+    rw_commit_c_.set_n_participants(n_participants);
+
+    Latency_Start(&opLat);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_c_);
+}
+
+void ShardClient::HandleRWCommitCoordinatorReply(
+    const proto::RWCommitCoordinatorReply &reply) {
+    uint64_t req_id = reply.rid().client_req_id();
+
+    auto itr = pendingPrepares.find(req_id);
+    if (itr == pendingPrepares.end()) {
+        Debug("[%d][%lu] RWCommitCoordinatorReply for stale request.",
+              shard_idx_, req_id);
+        return;  // stale request
+    }
+
+    PendingPrepare *req = itr->second;
+    prepare_callback pcb = req->pcb;
+    pendingPrepares.erase(itr);
+    delete req;
+
+    if (reply.has_commit_timestamp()) {
+        Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
+              reply.commit_timestamp());
+        pcb(reply.status(), Timestamp(reply.commit_timestamp()));
+    } else {
+        pcb(reply.status(), Timestamp());
+    }
 }
 
 void ShardClient::Prepare(uint64_t id, const Transaction &txn,
