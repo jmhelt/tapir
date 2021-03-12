@@ -163,7 +163,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
             transport_->SendMessage(this, remote, rw_commit_c_reply_);
 
-            delete pending_reply->remote;
+            delete pending_reply->rid.addr();
             delete pending_reply;
             pending_rw_commit_c_replies_.erase(transaction_id);
         }
@@ -177,7 +177,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
         transport_->SendMessage(this, remote, rw_commit_c_reply_);
 
-        delete pending_reply->remote;
+        delete pending_reply->rid.addr();
         delete pending_reply;
         pending_rw_commit_c_replies_.erase(transaction_id);
     } else {  // Wait for other participants
@@ -187,23 +187,23 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
 void Server::CommitCallback(uint64_t transaction_id,
                             transaction_status_t status) {
-    std::unordered_map<uint64_t, int> statuses;
+    coordinator.Commit(transaction_id);
 
     PendingRWCommitCoordinatorReply *reply =
         pending_rw_commit_c_replies_[transaction_id];
 
     uint64_t commit_timestamp = reply->commit_timestamp;
+    Debug("COMMIT timestamp: %lu", commit_timestamp);
 
-    rw_commit_c_reply_.mutable_rid()->set_client_id(reply->client_id);
-    rw_commit_c_reply_.mutable_rid()->set_client_req_id(reply->client_req_id);
+    rw_commit_c_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
+    rw_commit_c_reply_.mutable_rid()->set_client_req_id(
+        reply->rid.client_req_id());
     rw_commit_c_reply_.set_status(REPLY_OK);
     rw_commit_c_reply_.set_commit_timestamp(commit_timestamp);
 
-    Debug("COMMIT timestamp: %lu", commit_timestamp);
-    coordinator.Commit(transaction_id);
     uint64_t response_delay_ms = coordinator.CommitWaitMs(commit_timestamp);
 
-    TransportAddress *remote = reply->remote;
+    const TransportAddress *remote = reply->rid.addr();
     if (response_delay_ms == 0) {
         Debug("Sent");
         transport_->SendMessage(this, *remote, rw_commit_c_reply_);
@@ -217,9 +217,41 @@ void Server::CommitCallback(uint64_t transaction_id,
                               delete remote;
                           });
     }
-
     delete reply;
     pending_rw_commit_c_replies_.erase(transaction_id);
+
+    auto search = pending_prepare_ok_replies_.find(transaction_id);
+    if (search != pending_prepare_ok_replies_.end()) {
+        PendingPrepareOKReply *reply = search->second;
+
+        prepare_ok_reply_.set_status(REPLY_OK);
+        prepare_ok_reply_.set_commit_timestamp(commit_timestamp);
+
+        for (auto &rid : reply->rids) {
+            prepare_ok_reply_.mutable_rid()->set_client_id(rid.client_id());
+            prepare_ok_reply_.mutable_rid()->set_client_req_id(
+                rid.client_req_id());
+
+            const TransportAddress *remote = rid.addr();
+            if (response_delay_ms == 0) {
+                Debug("Sent");
+                transport_->SendMessage(this, *remote, prepare_ok_reply_);
+                delete remote;
+            } else {
+                Debug("Delaying message by %lu ms", response_delay_ms);
+                transport_->Timer(response_delay_ms,
+                                  [this, remote, reply = prepare_ok_reply_]() {
+                                      Debug("Sent");
+                                      transport_->SendMessage(this, *remote,
+                                                              reply);
+                                      delete remote;
+                                  });
+            }
+        }
+
+        delete reply;
+        pending_prepare_ok_replies_.erase(transaction_id);
+    }
 }
 
 void Server::HandleRWCommitParticipant(const TransportAddress &remote,
@@ -275,8 +307,9 @@ void Server::PrepareCallback(uint64_t transaction_id, int status,
     PendingRWCommitParticipantReply *reply =
         pending_rw_commit_p_replies_[transaction_id];
 
-    rw_commit_p_reply_.mutable_rid()->set_client_id(reply->client_id);
-    rw_commit_p_reply_.mutable_rid()->set_client_req_id(reply->client_req_id);
+    rw_commit_p_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
+    rw_commit_p_reply_.mutable_rid()->set_client_req_id(
+        reply->rid.client_req_id());
 
     if (status == REPLY_OK) {
         // TODO: Handle timeout
@@ -291,8 +324,9 @@ void Server::PrepareCallback(uint64_t transaction_id, int status,
     }
 
     // Respond to client
-    TransportAddress *remote = reply->remote;
-    transport_->SendMessage(this, *remote, rw_commit_c_reply_);
+    const TransportAddress *remote = reply->rid.addr();
+    transport_->SendMessage(this, *remote, rw_commit_p_reply_);
+    Debug("Sent participant reply");
     pending_rw_commit_p_replies_.erase(transaction_id);
     delete remote;
     delete reply;
@@ -324,26 +358,31 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                              google::protobuf::Message *m) {
     proto::PrepareOK &msg = *dynamic_cast<proto::PrepareOK *>(m);
 
+    uint64_t client_id = msg.rid().client_id();
+    uint64_t client_req_id = msg.rid().client_req_id();
+
     uint64_t transaction_id = msg.transaction_id();
     int participant_shard = msg.participant_shard();
     uint64_t prepare_timestamp = msg.prepare_timestamp();
 
-    auto search = pending_prepare_ok_replies_.find(transaction_id);
     PendingPrepareOKReply *pending_reply = nullptr;
+    auto search = pending_prepare_ok_replies_.find(transaction_id);
     if (search == pending_prepare_ok_replies_.end()) {
-        pending_reply = new PendingPrepareOKReply(
-            msg.rid().client_id(), msg.rid().client_req_id(), remote.clone());
+        pending_reply =
+            new PendingPrepareOKReply(client_id, client_req_id, remote.clone());
         pending_prepare_ok_replies_[transaction_id] = pending_reply;
     } else {
         pending_reply = pending_prepare_ok_replies_[transaction_id];
-        pending_reply->remotes.push_back(remote.clone());
-        // TODO: Handle duplicates
+    }
+
+    // Check for duplicates
+    if (pending_reply->rids.count({client_id, client_req_id, nullptr}) == 0) {
+        pending_reply->rids.insert({client_id, client_req_id, remote.clone()});
     }
 
     Debug("Received Prepare OK: %lu", transaction_id);
 
-    replication::RequestID rid{msg.rid().client_id(),
-                               msg.rid().client_req_id()};
+    replication::RequestID rid{client_id, client_req_id};
 
     std::unordered_map<uint64_t, int> statuses;
 
@@ -379,7 +418,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 
             transport_->SendMessage(this, remote, rw_commit_c_reply_);
 
-            delete pending_reply->remote;
+            delete pending_reply->rid.addr();
             delete pending_reply;
             pending_rw_commit_c_replies_.erase(transaction_id);
         }
@@ -395,7 +434,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 
         auto search = pending_rw_commit_c_replies_.find(transaction_id);
         if (search != pending_rw_commit_c_replies_.end()) {
-            delete search->second->remote;
+            delete search->second->rid.addr();
             delete search->second;
             pending_rw_commit_c_replies_.erase(search);
         }
