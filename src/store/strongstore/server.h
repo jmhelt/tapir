@@ -44,10 +44,10 @@
 #include "store/common/truetime.h"
 #include "store/server.h"
 #include "store/strongstore/coordinator.h"
-#include "store/strongstore/intershardclient.h"
 #include "store/strongstore/lockstore.h"
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/replicaclient.h"
+#include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore {
@@ -93,8 +93,8 @@ class Server : public replication::AppReplica, public MessageServer {
    public:
     Server(const transport::Configuration &shard_config,
            const transport::Configuration &replica_config, uint64_t server_id,
-           int groupIdx, int idx, Transport *transport,
-           InterShardClient &shardClient, const TrueTime &tt, bool debug_stats);
+           int groupIdx, int idx, Transport *transport, const TrueTime &tt,
+           bool debug_stats);
     virtual ~Server();
 
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
@@ -140,7 +140,6 @@ class Server : public replication::AppReplica, public MessageServer {
                               TransportAddress *remote)
             : rids{{client_id, client_req_id, remote}} {}
         std::unordered_set<strongstore::RequestID> rids;
-        uint64_t commit_timestamp;
     };
 
     void HandleGet(const TransportAddress &remote,
@@ -149,17 +148,42 @@ class Server : public replication::AppReplica, public MessageServer {
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    google::protobuf::Message *msg);
 
+    void SendRWCommmitCoordinatorReplyOK(PendingRWCommitCoordinatorReply *reply,
+                                         uint64_t response_delay_ms);
+    void SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
+                                           uint64_t client_id,
+                                           uint64_t client_req_id);
+
+    void SendRWCommmitParticipantReplyOK(
+        PendingRWCommitParticipantReply *reply);
+    void SendRWCommmitParticipantReplyFail(const TransportAddress &remote,
+                                           uint64_t client_id,
+                                           uint64_t client_req_id);
+
+    void SendPrepareOKRepliesOK(PendingPrepareOKReply *reply,
+                                uint64_t commit_timestamp,
+                                uint64_t response_delay_ms);
+    void SendPrepareOKRepliesFail(PendingPrepareOKReply *reply);
+
     void HandleRWCommitParticipant(const TransportAddress &remote,
                                    google::protobuf::Message *m);
 
     void HandlePrepareOK(const TransportAddress &remote,
                          google::protobuf::Message *m);
+    void HandlePrepareAbort(const TransportAddress &remote,
+                            google::protobuf::Message *m);
 
     void PrepareCallback(uint64_t transaction_id, int status,
                          Timestamp timestamp);
     void PrepareOKCallback(uint64_t transaction_id, int status,
                            Timestamp timestamp);
-    void CommitCallback(uint64_t transaction_id, transaction_status_t status);
+    void PrepareAbortCallback(uint64_t transaction_id, int status,
+                              Timestamp timestamp);
+
+    void CommitCoordinatorCallback(uint64_t transaction_id,
+                                   transaction_status_t status);
+    void CommitParticipantCallback(uint64_t transaction_id,
+                                   transaction_status_t status);
 
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
@@ -184,17 +208,18 @@ class Server : public replication::AppReplica, public MessageServer {
     proto::RWCommitCoordinator rw_commit_c_;
     proto::RWCommitParticipant rw_commit_p_;
     proto::PrepareOK prepare_ok_;
+    proto::PrepareAbort prepare_abort_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
     proto::RWCommitParticipantReply rw_commit_p_reply_;
     proto::PrepareOKReply prepare_ok_reply_;
+    proto::PrepareAbortReply prepare_abort_reply_;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;
 
-    InterShardClient &shardClient;
-    uint64_t timeMaxWrite;
+    uint64_t max_write_timestamp_;
     int shard_idx_;
     int replica_idx_;
     TxnStore *store;

@@ -148,4 +148,48 @@ bool ReplicaClient::CommitCallback(uint64_t reqId, const string &request_str,
     return true;
 }
 
+void ReplicaClient::Abort(uint64_t transaction_id, abort_callback acb,
+                          abort_timeout_callback atcb, uint32_t timeout) {
+    Debug("[shard %i] Sending ABORT: %lu", shard_idx_, transaction_id);
+
+    // create commit request
+    string request_str;
+    Request request;
+    request.set_op(Request::ABORT);
+    request.set_txnid(transaction_id);
+    request.SerializeToString(&request_str);
+
+    uint64_t reqId = lastReqId++;
+    PendingAbort *pendingAbort = new PendingAbort(reqId);
+    pendingAborts[reqId] = pendingAbort;
+    pendingAbort->acb = acb;
+    pendingAbort->atcb = atcb;
+
+    client->Invoke(request_str, bind(&ReplicaClient::AbortCallback, this,
+                                     pendingAbort->reqId, placeholders::_1,
+                                     placeholders::_2));
+}
+
+/* Callback from a shard replica on abort operation completion. */
+bool ReplicaClient::AbortCallback(uint64_t reqId, const string &request_str,
+                                  const string &reply_str) {
+    // ABORTS always succeed.
+    Reply reply;
+    reply.ParseFromString(reply_str);
+    ASSERT(reply.status() == REPLY_OK);
+
+    Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
+          reply.status());
+
+    auto itr = this->pendingAborts.find(reqId);
+    ASSERT(itr != pendingAborts.end());
+    PendingAbort *pendingAbort = itr->second;
+    abort_callback acb = pendingAbort->acb;
+    this->pendingAborts.erase(itr);
+    delete pendingAbort;
+    acb();
+
+    return true;
+}
+
 }  // namespace strongstore

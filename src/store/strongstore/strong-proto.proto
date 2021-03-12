@@ -60,9 +60,15 @@ message PrepareOKReply {
     required uint64 commit_timestamp = 3;
 }
 
-message GetMessage {
-    required string key = 1;
-    optional TimestampMessage timestamp = 2;
+message PrepareAbort {
+    required RequestID rid = 1;
+    required uint64 transaction_id = 2;
+    required int32 participant_shard = 3;
+}
+
+message PrepareAbortReply {
+    required RequestID rid = 1;
+    required int32 status = 2;
 }
 
 message PrepareMessage {
@@ -70,41 +76,21 @@ message PrepareMessage {
     optional uint64 timestamp = 2;
 }
 
-message PrepareOKMessage {
-    required uint64 timestamp = 1;
-    required int32 participantShard = 2;
-}
-
-message PrepareAbortMessage {
-    required int32 participantShard = 1;
-}
-
 message CommitMessage {
     required uint64 timestamp = 1;
     optional TransactionMessage transaction = 2;
 }
 
-message AbortMessage {
-    required int32 coordinatorShard = 1;
-}
-
 message Request {
      enum Operation {
-          GET = 1;
-          PREPARE = 2;
-          PREPARE_OK = 3;
-          PREPARE_ABORT = 4;
-          COMMIT = 5;
-          ABORT = 6;
+          PREPARE = 1;
+          COMMIT = 2;
+          ABORT = 3;
      }	
      required Operation op = 1;
      required uint64 txnid = 2;
-     optional GetMessage get = 3;
-     optional PrepareMessage prepare = 4;
-     optional PrepareOKMessage prepareOK = 5;
-     optional PrepareAbortMessage prepareAbort = 6;
-     optional CommitMessage commit = 7;
-     optional AbortMessage abort = 8;
+     optional PrepareMessage prepare = 3;
+     optional CommitMessage commit = 4;
 }
 
 message Reply {

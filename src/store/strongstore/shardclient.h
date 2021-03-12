@@ -36,7 +36,6 @@
 #include "lib/latency.h"
 #include "lib/message.h"
 #include "lib/transport.h"
-#include "replication/vr/client.h"
 #include "store/common/frontend/txnclient.h"
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
@@ -86,16 +85,9 @@ class ShardClient : public TxnClient, public TransportReceiver {
                    uint64_t prepare_timestamp, prepare_callback pcb,
                    prepare_timeout_callback ptcb, uint32_t timeout);
 
-    void Prepare(uint64_t id, const Transaction &txn, int coordShard,
-                 int nParticipants, prepare_callback pcb,
-                 prepare_timeout_callback ptcb, uint32_t timeout);
-    void PrepareAbort(uint64_t id, int participantShard,
-                      replication::Client::continuation_t continuation);
-    void Commit(int coordShard, uint64_t id, uint64_t timestamp,
-                commit_callback ccb, commit_timeout_callback ctcb,
-                uint32_t timeout);
-    void Abort(int coordShard, uint64_t id, abort_callback acb,
-               abort_timeout_callback atcb, uint32_t timeout);
+    void PrepareAbort(uint64_t transaction_id, int participant_shard,
+                      prepare_callback pcb, prepare_timeout_callback ptcb,
+                      uint32_t timeout);
 
     // Unimplemented
     virtual void Put(uint64_t id, const std::string &key,
@@ -118,6 +110,11 @@ class ShardClient : public TxnClient, public TransportReceiver {
         prepare_callback pcb;
         prepare_timeout_callback ptcb;
     };
+    struct PendingPrepareAbort : public PendingRequest {
+        PendingPrepareAbort(uint64_t reqId) : PendingRequest(reqId) {}
+        prepare_callback pcb;
+        prepare_timeout_callback ptcb;
+    };
 
     void HandleGetReply(const proto::GetReply &reply);
     void HandleRWCommitCoordinatorReply(
@@ -125,6 +122,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
     void HandleRWCommitParticipantReply(
         const proto::RWCommitParticipantReply &reply);
     void HandlePrepareOKReply(const proto::PrepareOKReply &reply);
+    void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
 
     /* Timeout for Get requests, which only go to one replica. */
     void GetTimeout(uint64_t reqId);
@@ -144,11 +142,10 @@ class ShardClient : public TxnClient, public TransportReceiver {
     int shard_idx_;         // which shard this client accesses
     int replica_;           // which replica to use for reads
 
-    replication::vr::VRClient *client;  // Client proxy.
-
     std::unordered_map<uint64_t, PendingGet *> pendingGets;
     std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
     std::unordered_map<uint64_t, PendingPrepareOK *> pendingPrepareOKs;
+    std::unordered_map<uint64_t, PendingPrepareAbort *> pendingPrepareAborts;
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
     std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
     Latency_t opLat;
@@ -157,11 +154,13 @@ class ShardClient : public TxnClient, public TransportReceiver {
     proto::RWCommitCoordinator rw_commit_c_;
     proto::RWCommitParticipant rw_commit_p_;
     proto::PrepareOK prepare_ok_;
+    proto::PrepareAbort prepare_abort_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
     proto::RWCommitParticipantReply rw_commit_p_reply_;
     proto::PrepareOKReply prepare_ok_reply_;
+    proto::PrepareAbortReply prepare_abort_reply_;
 };
 
 }  // namespace strongstore

@@ -45,17 +45,12 @@ ShardClient::ShardClient(const transport::Configuration &config,
       client_id_(client_id),
       shard_idx_(shard) {
     transport_->Register(this, config_, -1, -1);
-    client = new replication::vr::VRClient(config_, transport_, shard_idx_,
-                                           client_id_);
 
     replica_ = 0;
     _Latency_Init(&opLat, "op_lat_server");
 }
 
-ShardClient::~ShardClient() {
-    Latency_Dump(&opLat);
-    delete client;
-}
+ShardClient::~ShardClient() { Latency_Dump(&opLat); }
 
 void ShardClient::ReceiveMessage(const TransportAddress &remote,
                                  const std::string &type,
@@ -73,6 +68,9 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == prepare_ok_reply_.GetTypeName()) {
         prepare_ok_reply_.ParseFromString(data);
         HandlePrepareOKReply(prepare_ok_reply_);
+    } else if (type == prepare_abort_reply_.GetTypeName()) {
+        prepare_abort_reply_.ParseFromString(data);
+        HandlePrepareAbortReply(prepare_abort_reply_);
     } else {
         Panic("Received unexpected message type: %s", type.c_str());
     }
@@ -301,6 +299,50 @@ void ShardClient::HandlePrepareOKReply(const proto::PrepareOKReply &reply) {
     pcb(reply.status(), Timestamp(reply.commit_timestamp()));
 }
 
+void ShardClient::PrepareAbort(uint64_t transaction_id, int participant_shard,
+                               prepare_callback pcb,
+                               prepare_timeout_callback ptcb,
+                               uint32_t timeout) {
+    Debug("[shard %i] Sending PrepareAbort [%lu]", shard_idx_, transaction_id);
+
+    uint64_t reqId = lastReqId++;
+    PendingPrepareAbort *pendingPrepareAbort = new PendingPrepareAbort(reqId);
+    pendingPrepareAborts[reqId] = pendingPrepareAbort;
+    pendingPrepareAbort->pcb = pcb;
+    pendingPrepareAbort->ptcb = ptcb;
+
+    // TODO: Setup timeout
+    prepare_abort_.mutable_rid()->set_client_id(client_id_);
+    prepare_abort_.mutable_rid()->set_client_req_id(reqId);
+    prepare_abort_.set_transaction_id(transaction_id);
+    prepare_abort_.set_participant_shard(participant_shard);
+
+    Latency_Start(&opLat);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_,
+                                     prepare_abort_);
+}
+
+void ShardClient::HandlePrepareAbortReply(
+    const proto::PrepareAbortReply &reply) {
+    Debug("[shard %i] Received PrepareAbortReply", shard_idx_);
+    uint64_t req_id = reply.rid().client_req_id();
+
+    auto itr = pendingPrepareAborts.find(req_id);
+    if (itr == pendingPrepareAborts.end()) {
+        Debug("[%d][%lu] PrepareAbortReply for stale request.", shard_idx_,
+              req_id);
+        return;  // stale request
+    }
+
+    PendingPrepareAbort *req = itr->second;
+    prepare_callback pcb = req->pcb;
+    pendingPrepareAborts.erase(itr);
+    delete req;
+
+    pcb(reply.status(), Timestamp());
+}
+
 void ShardClient::Prepare(uint64_t id, const Transaction &txn,
                           const Timestamp &timestamp, prepare_callback pcb,
                           prepare_timeout_callback ptcb, uint32_t timeout) {
@@ -316,97 +358,6 @@ void ShardClient::Commit(uint64_t id, const Transaction &txn,
 void ShardClient::Abort(uint64_t id, const Transaction &txn, abort_callback acb,
                         abort_timeout_callback atcb, uint32_t timeout) {
     Debug("Unimplemented ABORT");
-}
-
-void ShardClient::Prepare(uint64_t id, const Transaction &txn, int coordShard,
-                          int nParticipants, prepare_callback pcb,
-                          prepare_timeout_callback ptcb, uint32_t timeout) {
-    Debug("[shard %i] Sending PREPARE: %lu", shard_idx_, id);
-
-    // create prepare request
-    string request_str;
-    Request request;
-    request.set_op(Request::PREPARE);
-    request.set_txnid(id);
-    // request.mutable_prepare()->set_coordinatorshard(coordShard);
-    // request.mutable_prepare()->set_nparticipants(nParticipants);
-    txn.serialize(request.mutable_prepare()->mutable_txn());
-    request.SerializeToString(&request_str);
-
-    uint64_t reqId = lastReqId++;
-    PendingPrepare *pendingPrepare = new PendingPrepare(reqId);
-    pendingPrepares[reqId] = pendingPrepare;
-    pendingPrepare->pcb = pcb;
-    pendingPrepare->ptcb = ptcb;
-
-    client->Invoke(request_str, bind(&ShardClient::PrepareCallback, this,
-                                     pendingPrepare->reqId, placeholders::_1,
-                                     placeholders::_2));
-}
-
-void ShardClient::PrepareAbort(
-    uint64_t id, int participantShard,
-    replication::Client::continuation_t continuation) {
-    Debug("[shard %i] Sending PREPARE_ABORT: %lu", shard_idx_, id);
-
-    // create prepare_ok request
-    string request_str;
-    Request request;
-    request.set_op(Request::PREPARE_ABORT);
-    request.set_txnid(id);
-    request.mutable_prepareabort()->set_participantshard(participantShard);
-    request.SerializeToString(&request_str);
-
-    transport_->Timer(0, [=]() { client->Invoke(request_str, continuation); });
-}
-
-void ShardClient::Commit(int coordShard, uint64_t id, uint64_t timestamp,
-                         commit_callback ccb, commit_timeout_callback ctcb,
-                         uint32_t timeout) {
-    Debug("[shard %i] Sending COMMIT: %lu", shard_idx_, id);
-
-    // create commit request
-    string request_str;
-    Request request;
-    request.set_op(Request::COMMIT);
-    request.set_txnid(id);
-    request.mutable_commit()->set_timestamp(timestamp);
-    // request.mutable_commit()->set_coordinatorshard(coordShard);
-    request.SerializeToString(&request_str);
-
-    uint64_t reqId = lastReqId++;
-    PendingCommit *pendingCommit = new PendingCommit(reqId);
-    pendingCommits[reqId] = pendingCommit;
-    pendingCommit->ccb = ccb;
-    pendingCommit->ctcb = ctcb;
-
-    client->Invoke(request_str, bind(&ShardClient::CommitCallback, this,
-                                     pendingCommit->reqId, placeholders::_1,
-                                     placeholders::_2));
-}
-
-/* Aborts the ongoing transaction. */
-void ShardClient::Abort(int coordShard, uint64_t id, abort_callback acb,
-                        abort_timeout_callback atcb, uint32_t timeout) {
-    Debug("[shard %i] Sending ABORT: %lu", shard_idx_, id);
-
-    // create abort request
-    string request_str;
-    Request request;
-    request.set_op(Request::ABORT);
-    request.set_txnid(id);
-    request.mutable_abort()->set_coordinatorshard(coordShard);
-    request.SerializeToString(&request_str);
-
-    uint64_t reqId = lastReqId++;
-    PendingAbort *pendingAbort = new PendingAbort(reqId);
-    pendingAborts[reqId] = pendingAbort;
-    pendingAbort->acb = acb;
-    pendingAbort->atcb = atcb;
-
-    client->Invoke(request_str,
-                   bind(&ShardClient::AbortCallback, this, pendingAbort->reqId,
-                        placeholders::_1, placeholders::_2));
 }
 
 void ShardClient::GetTimeout(uint64_t reqId) {
