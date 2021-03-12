@@ -85,7 +85,7 @@ int LockStore::Prepare(uint64_t id, const Transaction &txn,
         return REPLY_OK;
     } else {
         Debug("[%lu] Could not acquire write locks", id);
-        return REPLY_RETRY;
+        return REPLY_FAIL;
     }
 }
 

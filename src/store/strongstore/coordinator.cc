@@ -8,18 +8,6 @@ Coordinator::Coordinator(const TrueTime &tt)
 
 Coordinator::~Coordinator() {}
 
-std::unordered_set<replication::RequestID> Coordinator::GetRequestIDs(
-    uint64_t transaction_id) {
-    if (aborted_transactions_.find(transaction_id) !=
-        aborted_transactions_.end()) {
-        return {};
-    }
-
-    auto search = prepared_transactions_.find(transaction_id);
-    ASSERT(search != prepared_transactions_.end());
-    return search->second.GetRequestIDs();
-}
-
 Transaction Coordinator::GetTransaction(uint64_t transaction_id) {
     auto search = prepared_transactions_.find(transaction_id);
     ASSERT(search != prepared_transactions_.end());
@@ -32,21 +20,20 @@ int Coordinator::GetNParticipants(uint64_t transaction_id) {
     return search->second.GetNParticipants();
 }
 
-Decision Coordinator::StartTransaction(replication::RequestID rid,
-                                       uint64_t transaction_id,
+Decision Coordinator::StartTransaction(uint64_t transaction_id,
                                        int n_participants,
                                        Transaction transaction) {
     auto now = tt_.Now();
     uint64_t start_timestamp = now.latest();
-    Debug("Coordinator: StartTransaction %lu %lu %lu %lu %d", rid.client_id,
-          rid.request_id, transaction_id, start_timestamp, n_participants);
+    Debug("Coordinator: StartTransaction %lu %lu %d", transaction_id,
+          start_timestamp, n_participants);
     if (aborted_transactions_.find(transaction_id) !=
         aborted_transactions_.end()) {
         return Decision::ABORT;
     }
 
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
-    pt.StartTransaction(rid, start_timestamp, n_participants, transaction);
+    pt.StartTransaction(start_timestamp, n_participants, transaction);
 
     bool try_coord = pt.TryCoord();
 
@@ -59,8 +46,7 @@ Decision Coordinator::StartTransaction(replication::RequestID rid,
     }
 }
 
-CommitDecision Coordinator::ReceivePrepareOK(replication::RequestID rid,
-                                             uint64_t transaction_id,
+CommitDecision Coordinator::ReceivePrepareOK(uint64_t transaction_id,
                                              int shardID,
                                              uint64_t timePrepare) {
     if (aborted_transactions_.find(transaction_id) !=
@@ -69,7 +55,7 @@ CommitDecision Coordinator::ReceivePrepareOK(replication::RequestID rid,
     }
 
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
-    pt.PrepareOK(rid, shardID, timePrepare);
+    pt.PrepareOK(shardID, timePrepare);
 
     bool try_coord = pt.TryCoord();
     bool can_commit = pt.CanCommit();

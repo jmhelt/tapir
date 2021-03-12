@@ -6,7 +6,7 @@
     "us-east-1-1",
     "us-east-1-2"
   ],
-  "num_shards": 2,
+  "num_shards": 3,
   "shard_config": "shard.config",
   "replica_config": "replica.config",
   "fault_tolerance": 1,
@@ -20,25 +20,32 @@
       "us-east-1-0",
       "us-east-1-1",
       "us-east-1-2"
+    ],
+    [
+      "us-east-1-0",
+      "us-east-1-1",
+      "us-east-1-2"
     ]
   ],
-  "client_total": 1,
+  "client_total": 2,
   "clients": [
-    "client-0-0"
+    "client-0-0",
+    "client-0-1"
   ],
   "server_regions": {
     "us-east-1": [
       "us-east-1-0",
       "us-east-1-1",
       "us-east-1-2",
-      "client-0-0"
+      "client-0-0",
+      "client-0-1"
     ]
   },
   "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "server_port": 7087,
   "truetime_error": 0,
-  "client_num_keys": 100,
+  "client_num_keys": 100000,
   "benchmark_name": "retwis",
   "client_key_selector": "uniform",
   "client_zipf_coefficient": 0.75,
@@ -61,8 +68,8 @@
   "codebase_name": "rss",
   "pin_server_processes": false,
   "pin_client_processes": false,
-  "client_debug_output": true,
-  "server_debug_output": true,
+  "client_debug_output": false,
+  "server_debug_output": false,
   "server_debug_stats": false,
   "client_debug_stats": false,
   "client_experiment_length": 10,
