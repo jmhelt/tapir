@@ -34,6 +34,9 @@ class ReplicaClient {
                 commit_callback ccb, commit_timeout_callback ctcb,
                 uint32_t timeout);
 
+    void Abort(uint64_t transaction_id, abort_callback acb,
+               abort_timeout_callback atcb, uint32_t timeout);
+
    private:
     struct PendingRequest {
         PendingRequest(uint64_t reqId) : reqId(reqId) {}
@@ -49,12 +52,20 @@ class ReplicaClient {
         commit_callback ccb;
         commit_timeout_callback ctcb;
     };
+    struct PendingAbort : public PendingRequest {
+        PendingAbort(uint64_t reqId) : PendingRequest(reqId) {}
+        abort_callback acb;
+        abort_timeout_callback atcb;
+    };
 
     bool PrepareCallback(uint64_t reqId, const std::string &,
                          const std::string &);
 
     bool CommitCallback(uint64_t reqId, const std::string &,
                         const std::string &);
+
+    bool AbortCallback(uint64_t reqId, const std::string &,
+                       const std::string &);
 
     const transport::Configuration &config_;
     Transport *transport_;  // Transport layer.
@@ -65,6 +76,7 @@ class ReplicaClient {
 
     std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
+    std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
 
     uint64_t lastReqId;
 };

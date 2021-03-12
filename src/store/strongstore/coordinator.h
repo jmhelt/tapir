@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "lib/message.h"
-#include "replication/common/replica.h"
 #include "store/common/transaction.h"
 #include "store/common/truetime.h"
 
@@ -27,45 +26,35 @@ class PreparedTransaction {
         : timeCommit_{0},
           nParticipants_{-1},
           okParticipants_{},
-          requestIDs_{},
           transaction_{} {}
-    PreparedTransaction(replication::RequestID requestID, int shardID)
+    PreparedTransaction(int shardID)
         : timeCommit_{0},
           nParticipants_{-1},
           okParticipants_{{shardID}},
-          requestIDs_{{requestID}},
           transaction_{} {}
-    PreparedTransaction(replication::RequestID requestID, uint64_t timeStart,
-                        int nParticipants, Transaction transaction)
+    PreparedTransaction(uint64_t timeStart, int nParticipants,
+                        Transaction transaction)
         : timeCommit_{timeStart},
           nParticipants_{nParticipants},
           okParticipants_{},
-          requestIDs_{{requestID}},
           transaction_{transaction} {}
 
     ~PreparedTransaction() {}
 
     int GetNParticipants() { return nParticipants_; }
 
-    std::unordered_set<replication::RequestID> GetRequestIDs() {
-        return requestIDs_;
-    }
-
     Transaction GetTransaction() { return transaction_; }
 
-    void StartTransaction(replication::RequestID requestID, uint64_t timeStart,
-                          int nParticipants, Transaction transaction) {
+    void StartTransaction(uint64_t timeStart, int nParticipants,
+                          Transaction transaction) {
         nParticipants_ = nParticipants;
         transaction_ = transaction;
-        requestIDs_.insert(requestID);
         timeCommit_ = std::max(timeCommit_, timeStart);
     }
 
-    void PrepareOK(replication::RequestID requestID, int shardID,
-                   uint64_t prepareTime) {
+    void PrepareOK(int shardID, uint64_t prepareTime) {
         timeCommit_ = std::max(timeCommit_, prepareTime);
         okParticipants_.insert(shardID);
-        requestIDs_.insert(requestID);
     }
 
     bool TryCoord() {
@@ -86,7 +75,6 @@ class PreparedTransaction {
     uint64_t timeCommit_;
     int nParticipants_;
     std::unordered_set<int> okParticipants_;
-    std::unordered_set<replication::RequestID> requestIDs_;
     Transaction transaction_;
 };
 
@@ -95,17 +83,14 @@ class Coordinator {
     Coordinator(const TrueTime &tt);
     ~Coordinator();
 
-    std::unordered_set<replication::RequestID> GetRequestIDs(uint64_t txnID);
-
     Transaction GetTransaction(uint64_t txnID);
 
     int GetNParticipants(uint64_t txnID);
 
-    Decision StartTransaction(replication::RequestID requestID, uint64_t txnID,
-                              int nParticipants, Transaction transaction);
+    Decision StartTransaction(uint64_t txnID, int nParticipants,
+                              Transaction transaction);
 
-    CommitDecision ReceivePrepareOK(replication::RequestID requestID,
-                                    uint64_t txnID, int shardID,
+    CommitDecision ReceivePrepareOK(uint64_t txnID, int shardID,
                                     uint64_t timePrepare);
 
     void Commit(uint64_t txnID);

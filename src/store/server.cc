@@ -322,12 +322,9 @@ int main(int argc, char **argv) {
             break;
         }
         case PROTO_STRONG: {
-            strongstore::InterShardClient *shardClient =
-                new strongstore::InterShardClient(replica_config, tport,
-                                                  FLAGS_num_shards);
             server = new strongstore::Server(
                 shard_config, replica_config, FLAGS_server_id, FLAGS_group_idx,
-                FLAGS_replica_idx, tport, *shardClient, tt, FLAGS_debug_stats);
+                FLAGS_replica_idx, tport, tt, FLAGS_debug_stats);
             replica = new replication::vr::VRReplica(
                 replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
                 dynamic_cast<replication::AppReplica *>(server),

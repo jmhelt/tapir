@@ -54,11 +54,6 @@ class BufferClient : public ::BufferClient {
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 
-    // Prepare (Spanner requires a prepare timestamp)
-    void Prepare(uint64_t id, int coordShard, int nParticipants,
-                 prepare_callback pcb, prepare_timeout_callback ptcb,
-                 uint32_t timeout);
-
    private:
     // Underlying single shard transaction client implementation.
     ShardClient *shard_client_;
