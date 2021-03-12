@@ -239,6 +239,7 @@ void ShardClient::RWCommitParticipant(uint64_t transaction_id,
 
 void ShardClient::HandleRWCommitParticipantReply(
     const proto::RWCommitParticipantReply &reply) {
+    Debug("[shard %i] Received RWCommitParticipant", shard_idx_);
     uint64_t req_id = reply.rid().client_req_id();
 
     auto itr = pendingPrepares.find(req_id);

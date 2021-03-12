@@ -32,6 +32,7 @@
 #ifndef _STRONG_SERVER_H_
 #define _STRONG_SERVER_H_
 
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -48,6 +49,43 @@
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/replicaclient.h"
 #include "store/strongstore/strong-proto.pb.h"
+
+namespace strongstore {
+
+class RequestID {
+   public:
+    RequestID(uint64_t client_id, uint64_t client_req_id,
+              TransportAddress *addr)
+        : client_id_{client_id}, client_req_id_{client_req_id}, addr_{addr} {}
+    ~RequestID() {}
+
+    const uint64_t client_id() const { return client_id_; }
+    const uint64_t client_req_id() const { return client_req_id_; }
+    const TransportAddress *addr() const { return addr_; }
+
+   private:
+    uint64_t client_id_;
+    uint64_t client_req_id_;
+    TransportAddress *addr_;
+};
+
+inline bool operator==(const strongstore::RequestID &lhs,
+                       const strongstore::RequestID &rhs) {
+    return lhs.client_id() == rhs.client_id() &&
+           lhs.client_req_id() == rhs.client_req_id();
+}
+}  // namespace strongstore
+
+namespace std {
+template <>
+struct hash<strongstore::RequestID> {
+    std::size_t operator()(strongstore::RequestID const &rid) const noexcept {
+        std::size_t h1 = std::hash<std::uint64_t>{}(rid.client_id());
+        std::size_t h2 = std::hash<std::uint64_t>{}(rid.client_req_id());
+        return h1 ^ (h2 << 1);  // or use boost::hash_combine
+    }
+};
+}  // namespace std
 
 namespace strongstore {
 
@@ -77,38 +115,31 @@ class Server : public replication::AppReplica, public MessageServer {
               const Timestamp timestamp) override;
 
    private:
-    class PendingReply {
-       public:
-        PendingReply(uint64_t client_id, uint64_t client_req_id)
-            : client_id(client_id), client_req_id(client_req_id) {}
-        uint64_t client_id;
-        uint64_t client_req_id;
-    };
-    class PendingRWCommitCoordinatorReply : public PendingReply {
+    class PendingRWCommitCoordinatorReply {
        public:
         PendingRWCommitCoordinatorReply(uint64_t client_id,
                                         uint64_t client_req_id,
                                         TransportAddress *remote)
-            : PendingReply(client_id, client_req_id), remote{remote} {}
-        TransportAddress *remote;
+            : rid{client_id, client_req_id, remote} {}
+        strongstore::RequestID rid;
         uint64_t commit_timestamp;
     };
-    class PendingRWCommitParticipantReply : public PendingReply {
+    class PendingRWCommitParticipantReply {
        public:
         PendingRWCommitParticipantReply(uint64_t client_id,
                                         uint64_t client_req_id,
                                         TransportAddress *remote)
-            : PendingReply(client_id, client_req_id), remote{remote} {}
-        TransportAddress *remote;
+            : rid{client_id, client_req_id, remote} {}
+        strongstore::RequestID rid;
         uint64_t prepare_timestamp;
         int coordinator_shard;
     };
-    class PendingPrepareOKReply : public PendingReply {
+    class PendingPrepareOKReply {
        public:
         PendingPrepareOKReply(uint64_t client_id, uint64_t client_req_id,
                               TransportAddress *remote)
-            : PendingReply(client_id, client_req_id), remotes{remote} {}
-        std::vector<TransportAddress *> remotes;
+            : rids{{client_id, client_req_id, remote}} {}
+        std::unordered_set<strongstore::RequestID> rids;
         uint64_t commit_timestamp;
     };
 
