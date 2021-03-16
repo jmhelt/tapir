@@ -64,6 +64,27 @@ int LockStore::Get(uint64_t transaction_id, const string &key,
     return REPLY_OK;
 }
 
+int LockStore::ROBegin(uint64_t transaction_id,
+                       const std::unordered_set<std::string> &keys,
+                       std::unordered_set<uint64_t> &prepared_transaction_ids) {
+    ASSERT(prepared_transaction_ids.size() == 0);
+
+    for (auto &p : prepared) {
+        for (auto &w : p.second.getWriteSet()) {
+            if (keys.count(w.first) != 0) {
+                prepared_transaction_ids.insert(p.first);
+                break;
+            }
+        }
+    }
+
+    if (prepared_transaction_ids.size() == 0) {
+        return REPLY_OK;
+    } else {
+        return REPLY_FAIL;
+    }
+}
+
 int LockStore::ROGet(uint64_t transaction_id, const string &key,
                      const Timestamp &timestamp,
                      pair<Timestamp, string> &value) {
