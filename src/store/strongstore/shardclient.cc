@@ -71,6 +71,9 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == prepare_abort_reply_.GetTypeName()) {
         prepare_abort_reply_.ParseFromString(data);
         HandlePrepareAbortReply(prepare_abort_reply_);
+    } else if (type == ro_commit_reply_.GetTypeName()) {
+        ro_commit_reply_.ParseFromString(data);
+        HandleROCommitReply(ro_commit_reply_);
     } else {
         Panic("Received unexpected message type: %s", type.c_str());
     }
@@ -157,6 +160,47 @@ void ShardClient::Put(uint64_t id, const std::string &key,
                       const std::string &value, put_callback pcb,
                       put_timeout_callback ptcb, uint32_t timeout) {
     Panic("Unimplemented PUT");
+}
+
+void ShardClient::ROCommit(uint64_t transaction_id,
+                           const Transaction &transaction, commit_callback ccb,
+                           commit_timeout_callback ctcb, uint32_t timeout) {
+    Debug("[shard %i] Sending ROCommit [%lu]", shard_idx_, transaction_id);
+
+    uint64_t reqId = lastReqId++;
+    PendingROCommit *pendingROCommit = new PendingROCommit(reqId);
+    pendingROCommits[reqId] = pendingROCommit;
+    pendingROCommit->ccb = ccb;
+    pendingROCommit->ctcb = ctcb;
+
+    // TODO: Setup timeout
+    ro_commit_.mutable_rid()->set_client_id(client_id_);
+    ro_commit_.mutable_rid()->set_client_req_id(reqId);
+    ro_commit_.set_transaction_id(transaction_id);
+    ro_commit_.set_commit_timestamp(
+        transaction.get_start_time().getTimestamp());
+    transaction.serialize(ro_commit_.mutable_transaction());
+
+    Latency_Start(&opLat);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, ro_commit_);
+}
+
+void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
+    uint64_t req_id = reply.rid().client_req_id();
+
+    auto itr = pendingROCommits.find(req_id);
+    if (itr == pendingROCommits.end()) {
+        Debug("[%d][%lu] ROCommitReply for stale request.", shard_idx_, req_id);
+        return;  // stale request
+    }
+
+    PendingROCommit *req = itr->second;
+    commit_callback ccb = req->ccb;
+    pendingROCommits.erase(itr);
+    delete req;
+
+    ccb(COMMITTED);
 }
 
 void ShardClient::RWCommitCoordinator(uint64_t transaction_id,

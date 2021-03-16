@@ -50,9 +50,12 @@ class LockStore {
     LockStore();
     ~LockStore();
 
-    // Overriding from TxnStore.
     int Get(uint64_t transaction_id, const std::string &key,
             std::pair<Timestamp, std::string> &value);
+
+    int ROGet(uint64_t transaction_id, const std::string &key,
+              const Timestamp &timestamp,
+              std::pair<Timestamp, std::string> &value);
 
     int Prepare(uint64_t id, const Transaction &txn);
 

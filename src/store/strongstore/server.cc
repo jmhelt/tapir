@@ -82,6 +82,9 @@ Server::Server(const transport::Configuration &shard_config,
                                       &Server::HandlePrepareOK));
     RegisterHandler(&prepare_abort_, static_cast<MessageServer::MessageHandler>(
                                          &Server::HandlePrepareAbort));
+
+    RegisterHandler(&ro_commit_, static_cast<MessageServer::MessageHandler>(
+                                     &Server::HandleROCommit));
 }
 
 Server::~Server() {
@@ -114,6 +117,33 @@ void Server::HandleGet(const TransportAddress &remote,
     get_reply_.set_val(value.second);
 
     transport_->SendMessage(this, remote, get_reply_);
+}
+
+void Server::HandleROCommit(const TransportAddress &remote,
+                            google::protobuf::Message *m) {
+    proto::ROCommit &msg = *dynamic_cast<proto::ROCommit *>(m);
+
+    Debug("Received ROCommit request: %lu", msg.transaction_id());
+
+    ro_commit_reply_.mutable_rid()->CopyFrom(msg.rid());
+    ro_commit_reply_.set_transaction_id(msg.transaction_id());
+    ro_commit_reply_.clear_values();
+
+    Transaction transaction{msg.transaction()};
+    int status = REPLY_FAIL;
+    std::pair<Timestamp, std::string> value;
+
+    for (auto &r : transaction.getReadSet()) {
+        // TODO: Handle conflicting prepared transactions
+        status = store_->ROGet(msg.transaction_id(), r.first, r.second, value);
+        ASSERT(status == REPLY_OK);
+        proto::ReadReply *rreply = ro_commit_reply_.add_values();
+        rreply->set_key(r.first.c_str());
+        rreply->set_val(value.second.c_str());
+        value.first.serialize(rreply->mutable_timestamp());
+    }
+
+    transport_->SendMessage(this, remote, ro_commit_reply_);
 }
 
 void Server::HandleRWCommitCoordinator(const TransportAddress &remote,

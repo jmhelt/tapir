@@ -2,6 +2,8 @@
 #define RETWIS_GET_TIMELINE_H
 
 #include <functional>
+#include <string>
+#include <unordered_set>
 
 #include "store/benchmark/async/retwis/retwis_transaction.h"
 
@@ -13,6 +15,9 @@ class GetTimeline : public RetwisTransaction {
     virtual ~GetTimeline();
 
     virtual transaction_status_t Execute(SyncClient &client) override;
+
+   private:
+    std::unordered_set<std::string> keys_;
 };
 
 }  // namespace retwis
