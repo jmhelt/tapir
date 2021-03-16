@@ -35,6 +35,7 @@
 #define _STRONG_LOCK_STORE_H_
 
 #include <map>
+#include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/message.h"
@@ -52,6 +53,10 @@ class LockStore {
 
     int Get(uint64_t transaction_id, const std::string &key,
             std::pair<Timestamp, std::string> &value);
+
+    int ROBegin(uint64_t transaction_id,
+                const std::unordered_set<std::string> &keys,
+                std::unordered_set<uint64_t> &prepared_transaction_ids);
 
     int ROGet(uint64_t transaction_id, const std::string &key,
               const Timestamp &timestamp,
