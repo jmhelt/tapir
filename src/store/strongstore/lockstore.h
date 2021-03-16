@@ -38,41 +38,34 @@
 
 #include "lib/assert.h"
 #include "lib/message.h"
-#include "store/common/backend/kvstore.h"
 #include "store/common/backend/lockserver.h"
 #include "store/common/backend/txnstore.h"
+#include "store/common/backend/versionstore.h"
 #include "store/common/transaction.h"
 
 namespace strongstore {
 
-class LockStore : public TxnStore {
+class LockStore {
    public:
     LockStore();
     ~LockStore();
 
     // Overriding from TxnStore.
-    int Get(uint64_t id, const std::string &key,
-            std::pair<Timestamp, std::string> &value) override;
+    int Get(uint64_t transaction_id, const std::string &key,
+            std::pair<Timestamp, std::string> &value);
 
-    int Get(uint64_t id, const std::string &key, const Timestamp &timestamp,
-            std::pair<Timestamp, std::string> &value,
-            std::unordered_map<uint64_t, int> &statuses) override;
+    int Prepare(uint64_t id, const Transaction &txn);
 
-    int Prepare(uint64_t id, const Transaction &txn,
-                std::unordered_map<uint64_t, int> &statuses) override;
+    bool Commit(uint64_t id, const Timestamp &timestamp);
 
-    bool Commit(uint64_t id, const Timestamp &timestamp,
-                std::unordered_map<uint64_t, int> &statuses) override;
-
-    void Abort(uint64_t id,
-               std::unordered_map<uint64_t, int> &statuses) override;
+    void Abort(uint64_t id);
 
     void Load(const std::string &key, const std::string &value,
-              const Timestamp &timestamp) override;
+              const Timestamp &timestamp);
 
    private:
     // Data store.
-    KVStore store;
+    VersionedKVStore<Timestamp, std::string> store;
 
     // Locks manager.
     LockServer locks;
