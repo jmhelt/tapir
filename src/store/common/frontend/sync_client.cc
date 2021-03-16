@@ -77,6 +77,19 @@ transaction_status_t SyncClient::Commit(uint32_t timeout) {
     return static_cast<transaction_status_t>(promise.GetReply());
 }
 
+transaction_status_t SyncClient::ROCommit(
+    const std::unordered_set<std::string> &keys, uint32_t timeout) {
+    Promise promise(timeout);
+
+    client->ROCommit(
+        keys,
+        std::bind(&SyncClient::CommitCallback, this, &promise,
+                  std::placeholders::_1),
+        std::bind(&SyncClient::CommitTimeoutCallback, this, &promise), timeout);
+
+    return static_cast<transaction_status_t>(promise.GetReply());
+}
+
 void SyncClient::Abort(uint32_t timeout) {
     if (getPromises.size() > 0) {
         std::vector<std::string> strs;

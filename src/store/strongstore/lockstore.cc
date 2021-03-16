@@ -43,7 +43,7 @@ LockStore::~LockStore() {}
 
 int LockStore::Get(uint64_t transaction_id, const string &key,
                    pair<Timestamp, string> &value) {
-    Debug("[%lu] GET %s", transaction_id, key.c_str());
+    Debug("[%lu] GET %s", transaction_id, BytesToHex(key, 16).c_str());
 
     // grab the lock (ok, if we already have it)
     if (!locks.lockForRead(key, transaction_id)) {
@@ -51,12 +51,32 @@ int LockStore::Get(uint64_t transaction_id, const string &key,
     }
 
     if (!store.get(key, value)) {
-        Debug("[%lu] Couldn't find key %s", transaction_id, key.c_str());
+        Debug("[%lu] Couldn't find key %s", transaction_id,
+              BytesToHex(key, 16).c_str());
         // couldn't find the key
         return REPLY_FAIL;
     }
 
     Debug("[%lu] GET for key %s; return ts %lu.%lu.", transaction_id,
+          BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
+          value.first.getID());
+
+    return REPLY_OK;
+}
+
+int LockStore::ROGet(uint64_t transaction_id, const string &key,
+                     const Timestamp &timestamp,
+                     pair<Timestamp, string> &value) {
+    Debug("[%lu] RO GET %s", transaction_id, BytesToHex(key, 16).c_str());
+
+    if (!store.get(key, timestamp, value)) {
+        Debug("[%lu] Couldn't find key %s", transaction_id,
+              BytesToHex(key, 16).c_str());
+        // couldn't find the key
+        return REPLY_FAIL;
+    }
+
+    Debug("[%lu] RO GET for key %s; return ts %lu.%lu.", transaction_id,
           BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
           value.first.getID());
 

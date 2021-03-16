@@ -31,8 +31,9 @@
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
 
-#include <set>
+#include <string>
 #include <thread>
+#include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/configuration.h"
@@ -79,6 +80,11 @@ class Client : public ::Client {
     virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) override;
 
+    // Commit all Get(s) and Put(s) since Begin().
+    void ROCommit(const std::unordered_set<std::string> &keys,
+                  commit_callback ccb, commit_timeout_callback ctcb,
+                  uint32_t timeout) override;
+
    private:
     struct PendingRequest {
         PendingRequest(uint64_t id, uint64_t txnId)
@@ -110,6 +116,8 @@ class Client : public ::Client {
     // local Prepare function
     void Prepare(PendingRequest *req, uint32_t timeout);
     void PrepareCallback(uint64_t reqId, int status, Timestamp respTs);
+
+    void ROCommitCallback(uint64_t reqId, transaction_status_t status);
 
     // choose coordinator from participants
     int ChooseCoordinator(const std::set<int> &participants);

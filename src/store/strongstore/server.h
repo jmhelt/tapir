@@ -145,6 +145,9 @@ class Server : public replication::AppReplica, public MessageServer {
     void HandleGet(const TransportAddress &remote,
                    google::protobuf::Message *msg);
 
+    void HandleROCommit(const TransportAddress &remote,
+                        google::protobuf::Message *m);
+
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    google::protobuf::Message *msg);
 
@@ -209,12 +212,14 @@ class Server : public replication::AppReplica, public MessageServer {
     proto::RWCommitParticipant rw_commit_p_;
     proto::PrepareOK prepare_ok_;
     proto::PrepareAbort prepare_abort_;
+    proto::ROCommit ro_commit_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
     proto::RWCommitParticipantReply rw_commit_p_reply_;
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
+    proto::ROCommitReply ro_commit_reply_;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;
