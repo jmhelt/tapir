@@ -56,7 +56,7 @@ Server::Server(const transport::Configuration &shard_config,
       AmLeader{false},
       debug_stats_{debug_stats} {
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
-    store = new strongstore::LockStore();
+    store_ = new strongstore::LockStore();
 
     for (int i = 0; i < shard_config_.n; i++) {
         shard_clients_.push_back(
@@ -85,7 +85,7 @@ Server::Server(const transport::Configuration &shard_config,
 }
 
 Server::~Server() {
-    delete store;
+    delete store_;
 
     for (auto s : shard_clients_) {
         delete s;
@@ -105,9 +105,13 @@ void Server::HandleGet(const TransportAddress &remote,
 
     Debug("Received GET request: %s", msg.key().c_str());
 
+    std::pair<Timestamp, std::string> value;
+    store_->Get(msg.transaction_id(), msg.key(), value);
+
     get_reply_.mutable_rid()->CopyFrom(msg.rid());
     get_reply_.set_key(msg.key());
-    get_reply_.set_val("");
+    value.first.serialize(get_reply_.mutable_timestamp());
+    get_reply_.set_val(value.second);
 
     transport_->SendMessage(this, remote, get_reply_);
 }
@@ -124,7 +128,6 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     int n_participants = msg.n_participants();
 
     Transaction transaction{msg.transaction()};
-    std::unordered_map<uint64_t, int> statuses;
 
     Debug("Coordinator for transaction: %lu", transaction_id);
 
@@ -132,7 +135,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                                               transaction);
     if (d == Decision::TRY_COORD) {
         Debug("Trying fast path commit");
-        int status = store->Prepare(transaction_id, transaction, statuses);
+        int status = store_->Prepare(transaction_id, transaction);
         if (!status) {
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 transaction_id, shard_idx_, max_write_timestamp_ + 1);
@@ -153,7 +156,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
         } else {  // Failed to commit
             Debug("Fast path commit failed: %lu", transaction_id);
-            store->Abort(transaction_id, statuses);
+            store_->Abort(transaction_id);
             coordinator.Abort(transaction_id);
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
@@ -307,9 +310,8 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     Debug("Participant for transaction: %lu", transaction_id);
 
     Transaction transaction{msg.transaction()};
-    std::unordered_map<uint64_t, int> statuses;
 
-    if (!store->Prepare(transaction_id, transaction, statuses)) {
+    if (!store_->Prepare(transaction_id, transaction)) {
         PendingRWCommitParticipantReply *pending_reply =
             new PendingRWCommitParticipantReply(client_id, client_req_id,
                                                 remote.clone());
@@ -326,7 +328,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
     } else {
         Debug("Prepare failed");
-        store->Abort(transaction_id, statuses);
+        store_->Abort(transaction_id);
         // TODO: Handle timeout
         shard_clients_[coordinator_shard]->PrepareAbort(
             transaction_id, shard_idx_,
@@ -422,8 +424,6 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 
     Debug("Received Prepare OK: %lu", transaction_id);
 
-    std::unordered_map<uint64_t, int> statuses;
-
     CommitDecision cd = coordinator.ReceivePrepareOK(
         transaction_id, participant_shard, prepare_timestamp);
     if (cd.d == Decision::TRY_COORD) {
@@ -431,7 +431,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             pending_rw_commit_c_replies_[transaction_id];
         Transaction transaction = coordinator.GetTransaction(transaction_id);
         Debug("Received Prepare OK from all participants");
-        if (!store->Prepare(transaction_id, transaction, statuses)) {
+        if (!store_->Prepare(transaction_id, transaction)) {
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
                                               max_write_timestamp_ + 1);
             ASSERT(cd.d == Decision::COMMIT);
@@ -446,7 +446,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Coordinator prepare failed: %lu", transaction_id);
-            store->Abort(transaction_id, statuses);
+            store_->Abort(transaction_id);
             coordinator.Abort(transaction_id);
 
             // Reply to client
@@ -557,11 +557,10 @@ void Server::ReplicaUpcall(
 
     request.ParseFromString(op);
 
-    std::unordered_map<uint64_t, int> statuses;
     switch (request.op()) {
         case strongstore::proto::Request::PREPARE:
-            store->Prepare(request.txnid(),
-                           Transaction(request.prepare().txn()), statuses);
+            store_->Prepare(request.txnid(),
+                            Transaction(request.prepare().txn()));
             break;
         case strongstore::proto::Request::COMMIT:
             if (debug_stats_) {
@@ -569,12 +568,10 @@ void Server::ReplicaUpcall(
             }
             Debug("Received COMMIT");
             if (request.commit().has_transaction()) {  // Fast path commit
-                store->Prepare(request.txnid(),
-                               Transaction(request.commit().transaction()),
-                               statuses);
+                store_->Prepare(request.txnid(),
+                                Transaction(request.commit().transaction()));
             }
-            if (store->Commit(request.txnid(), request.commit().timestamp(),
-                              statuses)) {
+            if (store_->Commit(request.txnid(), request.commit().timestamp())) {
                 max_write_timestamp_ = std::max(max_write_timestamp_,
                                                 request.commit().timestamp());
             }
@@ -584,7 +581,7 @@ void Server::ReplicaUpcall(
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");
-            store->Abort(request.txnid(), statuses);
+            store_->Abort(request.txnid());
             break;
         default:
             Panic("Unrecognized operation.");
@@ -599,7 +596,7 @@ void Server::UnloggedUpcall(const string &op, string &response) {
 
 void Server::Load(const string &key, const string &value,
                   const Timestamp timestamp) {
-    store->Load(key, value, timestamp);
+    store_->Load(key, value, timestamp);
 }
 
 }  // namespace strongstore

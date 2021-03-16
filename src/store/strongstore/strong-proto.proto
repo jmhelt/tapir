@@ -18,8 +18,9 @@ message Get {
 
 message GetReply {
     required RequestID rid = 1;
-    required string key = 2;
-    required string val = 3;
+    required TimestampMessage timestamp = 2;
+    required string key = 3;
+    required string val = 4;
 }
 
 message RWCommitCoordinator {

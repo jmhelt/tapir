@@ -222,7 +222,7 @@ class Server : public replication::AppReplica, public MessageServer {
     uint64_t max_write_timestamp_;
     int shard_idx_;
     int replica_idx_;
-    TxnStore *store;
+    LockStore *store_;
     bool AmLeader;
     bool debug_stats_;
 };
