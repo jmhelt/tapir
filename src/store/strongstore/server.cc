@@ -119,21 +119,78 @@ void Server::HandleGet(const TransportAddress &remote,
     transport_->SendMessage(this, remote, get_reply_);
 }
 
-void Server::HandleROCommit(const TransportAddress &remote,
-                            google::protobuf::Message *m) {
-    proto::ROCommit &msg = *dynamic_cast<proto::ROCommit *>(m);
+void Server::SendROCommitReply(PendingROCommitReply *reply) {
+    uint64_t transaction_id = reply->transaction_id;
+    Timestamp commit_timestamp = Timestamp(reply->commit_timestamp);
 
-    Debug("Received ROCommit request: %lu", msg.transaction_id());
-
-    ro_commit_reply_.mutable_rid()->CopyFrom(msg.rid());
-    ro_commit_reply_.set_transaction_id(msg.transaction_id());
+    ro_commit_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
+    ro_commit_reply_.mutable_rid()->set_client_req_id(
+        reply->rid.client_req_id());
+    ro_commit_reply_.set_transaction_id(transaction_id);
     ro_commit_reply_.clear_values();
 
     int status = REPLY_FAIL;
     std::pair<Timestamp, std::string> value;
 
-    for (auto &k : msg.keys()) {
-        // TODO: Handle conflicting prepared transactions
+    for (auto &k : reply->keys) {
+        status = store_->ROGet(transaction_id, k, commit_timestamp, value);
+        ASSERT(status == REPLY_OK);
+        proto::ReadReply *rreply = ro_commit_reply_.add_values();
+        rreply->set_val(value.second.c_str());
+        value.first.serialize(rreply->mutable_timestamp());
+    }
+
+    const TransportAddress *remote = reply->rid.addr();
+    transport_->Timer(0, [this, remote, reply = ro_commit_reply_]() {
+        Debug("Sent");
+        transport_->SendMessage(this, *remote, reply);
+        delete remote;
+    });
+}
+
+void Server::HandleROCommit(const TransportAddress &remote,
+                            google::protobuf::Message *m) {
+    proto::ROCommit &msg = *dynamic_cast<proto::ROCommit *>(m);
+
+    uint64_t client_id = msg.rid().client_id();
+    uint64_t client_req_id = msg.rid().client_req_id();
+    uint64_t transaction_id = msg.transaction_id();
+
+    Debug("Received ROCommit request: %lu", transaction_id);
+
+    std::unordered_set<std::string> keys;
+    keys.insert(msg.keys().begin(), msg.keys().end());
+
+    std::unordered_set<uint64_t> prepared_transaction_ids;
+
+    // TODO: Handle conflicting prepared transactions
+    if (store_->ROBegin(transaction_id, keys, prepared_transaction_ids) !=
+        REPLY_OK) {
+        Debug("Waiting for prepared transactions");
+        PendingROCommitReply *reply =
+            new PendingROCommitReply(client_id, client_req_id, remote.clone());
+        reply->transaction_id = transaction_id;
+        reply->commit_timestamp = msg.commit_timestamp();
+        reply->n_waiting_prepared = prepared_transaction_ids.size();
+        reply->keys = std::move(keys);
+        pending_ro_commit_repies_[transaction_id] = reply;
+
+        for (uint64_t prepared_tid : prepared_transaction_ids) {
+            Debug("Prepared transaction: %lu", prepared_tid);
+            // TODO: Handle conflicting prepared transactions
+        }
+
+        return;
+    }
+
+    ro_commit_reply_.mutable_rid()->CopyFrom(msg.rid());
+    ro_commit_reply_.set_transaction_id(transaction_id);
+    ro_commit_reply_.clear_values();
+
+    int status = REPLY_FAIL;
+    std::pair<Timestamp, std::string> value;
+
+    for (auto &k : keys) {
         status = store_->ROGet(msg.transaction_id(), k,
                                Timestamp(msg.commit_timestamp()), value);
         ASSERT(status == REPLY_OK);

@@ -141,6 +141,17 @@ class Server : public replication::AppReplica, public MessageServer {
             : rids{{client_id, client_req_id, remote}} {}
         std::unordered_set<strongstore::RequestID> rids;
     };
+    class PendingROCommitReply {
+       public:
+        PendingROCommitReply(uint64_t client_id, uint64_t client_req_id,
+                             TransportAddress *remote)
+            : rid{client_id, client_req_id, remote} {}
+        strongstore::RequestID rid;
+        uint64_t transaction_id;
+        uint64_t commit_timestamp;
+        uint64_t n_waiting_prepared;
+        std::unordered_set<std::string> keys;
+    };
 
     void HandleGet(const TransportAddress &remote,
                    google::protobuf::Message *msg);
@@ -150,6 +161,8 @@ class Server : public replication::AppReplica, public MessageServer {
 
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    google::protobuf::Message *msg);
+
+    void SendROCommitReply(PendingROCommitReply *reply);
 
     void SendRWCommmitCoordinatorReplyOK(PendingRWCommitCoordinatorReply *reply,
                                          uint64_t response_delay_ms);
@@ -206,6 +219,8 @@ class Server : public replication::AppReplica, public MessageServer {
         pending_rw_commit_p_replies_;
     std::unordered_map<uint64_t, PendingPrepareOKReply *>
         pending_prepare_ok_replies_;
+    std::unordered_map<uint64_t, PendingROCommitReply *>
+        pending_ro_commit_repies_;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;
