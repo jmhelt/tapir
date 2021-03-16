@@ -70,6 +70,12 @@ class Client {
     virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) = 0;
 
+    virtual void ROCommit(const std::unordered_set<std::string> &keys,
+                          commit_callback ccb, commit_timeout_callback ctcb,
+                          uint32_t timeout) {
+        Panic("Unimplemented ROCommit!");
+    }
+
     // Abort all Get(s) and Put(s) since Begin().
     virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) = 0;

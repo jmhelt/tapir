@@ -11,6 +11,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "lib/assert.h"
@@ -44,6 +45,10 @@ class SyncClient {
 
     // Commit all Get(s) and Put(s) since Begin().
     virtual transaction_status_t Commit(uint32_t timeout);
+
+    // Commit all Get(s) and Put(s) since Begin().
+    virtual transaction_status_t ROCommit(
+        const std::unordered_set<std::string> &keys, uint32_t timeout);
 
     // Abort all Get(s) and Put(s) since Begin().
     virtual void Abort(uint32_t timeout);

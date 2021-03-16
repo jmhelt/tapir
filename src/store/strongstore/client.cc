@@ -271,4 +271,79 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
     Panic("Unimplemented ABORT");
 }
 
+/* Commits RO transaction. */
+void Client::ROCommit(const std::unordered_set<std::string> &keys,
+                      commit_callback ccb, commit_timeout_callback ctcb,
+                      uint32_t timeout) {
+    t_id++;
+    participants.clear();
+
+    Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
+
+    for (auto &key : keys) {
+        int i = (*part)(key, nshards, -1, participants);
+        auto search = participants.find(i);
+        if (search == participants.end()) {
+            bclient[i]->Begin(t_id, commit_timestamp);
+            participants.insert(i);
+        }
+
+        bclient[i]->AddReadSet(key, commit_timestamp);
+    }
+
+    transport_->Timer(0, [this, ccb, ctcb, timeout]() {
+        if (debug_stats_) {
+            Latency_Start(&commit_lat_);
+        }
+        uint64_t reqId = lastReqId++;
+        PendingRequest *req = new PendingRequest(reqId, t_id);
+        pendingReqs[reqId] = req;
+        req->ccb = ccb;
+        req->ctcb = ctcb;
+        req->maxRepliedTs = 0;
+        req->callbackInvoked = false;
+        req->timeout = timeout;
+        req->outstandingPrepares = 0;
+        req->prepareStatus = REPLY_OK;
+
+        stats.IncrementList("txn_groups", participants.size());
+
+        ASSERT(participants.size() > 0);
+
+        for (auto p : participants) {
+            // TODO: Handle timeout
+            bclient[p]->ROCommit(
+                std::bind(&Client::ROCommitCallback, this, req->id,
+                          std::placeholders::_1),
+                []() {}, timeout);
+            req->outstandingPrepares++;
+        }
+    });
+}
+
+void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status) {
+    Debug("ROCommit [%lu] callback status %d", t_id, status);
+
+    auto itr = this->pendingReqs.find(reqId);
+    if (itr == this->pendingReqs.end()) {
+        Debug(
+            "ROCommitCallback for terminated request id %lu (txn already "
+            "committed or aborted.",
+            reqId);
+        return;
+    }
+    PendingRequest *req = itr->second;
+    --req->outstandingPrepares;
+    if (req->outstandingPrepares == 0) {
+        commit_callback ccb = req->ccb;
+        pendingReqs.erase(reqId);
+        delete req;
+        if (debug_stats_) {
+            Latency_End(&commit_lat_);
+        }
+        Debug("COMMIT [%lu] OK", t_id);
+        ccb(COMMITTED);
+    }
+}
+
 }  // namespace strongstore

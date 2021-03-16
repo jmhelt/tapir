@@ -4,19 +4,20 @@ namespace retwis {
 
 GetTimeline::GetTimeline(KeySelector *keySelector, std::mt19937 &rand,
                          uint32_t timeout)
-    : RetwisTransaction(keySelector, 1 + rand() % 10, rand, timeout) {}
+    : RetwisTransaction(keySelector, 1 + rand() % 10, rand, timeout), keys_{} {}
 
 GetTimeline::~GetTimeline() {}
 
 transaction_status_t GetTimeline::Execute(SyncClient &client) {
     Debug("GET_TIMELINE %lu", GetNumKeys());
 
+    keys_.clear();
     for (std::size_t i = 0; i < GetNumKeys(); i++) {
-        client.Get(GetKey(i), timeout);
+        keys_.insert(GetKey(i));
     }
 
-    Debug("COMMIT");
-    return client.Commit(timeout);
+    Debug("RO COMMIT");
+    return client.ROCommit(keys_, timeout);
 }
 
 }  // namespace retwis

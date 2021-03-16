@@ -65,4 +65,15 @@ void BufferClient::RWCommitParticipant(uint64_t transaction_id,
     shard_client_->RWCommitParticipant(transaction_id, txn, coordinator_shard,
                                        pcb, ptcb, timeout);
 }
+
+void BufferClient::AddReadSet(const std::string &key,
+                              const Timestamp &timestamp) {
+    this->txn.addReadSet(key, timestamp);
+    this->readSet.insert(std::make_pair(key, std::make_tuple("", timestamp)));
+}
+
+void BufferClient::ROCommit(commit_callback ccb, commit_timeout_callback ctcb,
+                            uint32_t timeout) {
+    shard_client_->ROCommit(tid, txn, ccb, ctcb, timeout);
+}
 };  // namespace strongstore

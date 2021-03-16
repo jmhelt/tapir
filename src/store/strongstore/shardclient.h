@@ -72,6 +72,10 @@ class ShardClient : public TxnClient, public TransportReceiver {
                      const Timestamp &timestamp, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) override;
 
+    void ROCommit(uint64_t transaction_id, const Transaction &transaction,
+                  commit_callback ccb, commit_timeout_callback ctcb,
+                  uint32_t timeout);
+
     void RWCommitCoordinator(uint64_t transaction_id,
                              const Transaction &transaction, int n_participants,
                              prepare_callback pcb,
@@ -115,6 +119,11 @@ class ShardClient : public TxnClient, public TransportReceiver {
         prepare_callback pcb;
         prepare_timeout_callback ptcb;
     };
+    struct PendingROCommit : public PendingRequest {
+        PendingROCommit(uint64_t reqId) : PendingRequest(reqId) {}
+        commit_callback ccb;
+        commit_timeout_callback ctcb;
+    };
 
     void HandleGetReply(const proto::GetReply &reply);
     void HandleRWCommitCoordinatorReply(
@@ -123,6 +132,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
         const proto::RWCommitParticipantReply &reply);
     void HandlePrepareOKReply(const proto::PrepareOKReply &reply);
     void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
+    void HandleROCommitReply(const proto::ROCommitReply &reply);
 
     /* Timeout for Get requests, which only go to one replica. */
     void GetTimeout(uint64_t reqId);
@@ -148,6 +158,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
     std::unordered_map<uint64_t, PendingPrepareAbort *> pendingPrepareAborts;
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
     std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
+    std::unordered_map<uint64_t, PendingROCommit *> pendingROCommits;
     Latency_t opLat;
 
     proto::Get get_;
@@ -155,12 +166,14 @@ class ShardClient : public TxnClient, public TransportReceiver {
     proto::RWCommitParticipant rw_commit_p_;
     proto::PrepareOK prepare_ok_;
     proto::PrepareAbort prepare_abort_;
+    proto::ROCommit ro_commit_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
     proto::RWCommitParticipantReply rw_commit_p_reply_;
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
+    proto::ROCommitReply ro_commit_reply_;
 };
 
 }  // namespace strongstore

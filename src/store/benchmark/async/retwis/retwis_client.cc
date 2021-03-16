@@ -26,7 +26,7 @@ RetwisClient::~RetwisClient() {}
 
 SyncTransaction *RetwisClient::GetNextTransaction() {
     // int ttype = GetRand()() % 100;
-    int ttype = 0;
+    int ttype = 99;
     if (ttype < 5) {
         lastOp = "add_user";
         return new AddUser(keySelector, GetRand(), GetTimeout());
