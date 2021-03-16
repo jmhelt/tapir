@@ -129,16 +129,15 @@ void Server::HandleROCommit(const TransportAddress &remote,
     ro_commit_reply_.set_transaction_id(msg.transaction_id());
     ro_commit_reply_.clear_values();
 
-    Transaction transaction{msg.transaction()};
     int status = REPLY_FAIL;
     std::pair<Timestamp, std::string> value;
 
-    for (auto &r : transaction.getReadSet()) {
+    for (auto &k : msg.keys()) {
         // TODO: Handle conflicting prepared transactions
-        status = store_->ROGet(msg.transaction_id(), r.first, r.second, value);
+        status = store_->ROGet(msg.transaction_id(), k,
+                               Timestamp(msg.commit_timestamp()), value);
         ASSERT(status == REPLY_OK);
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
-        rreply->set_key(r.first.c_str());
         rreply->set_val(value.second.c_str());
         value.first.serialize(rreply->mutable_timestamp());
     }

@@ -76,13 +76,12 @@ message ROCommit {
     required RequestID rid = 1;
     required uint64 transaction_id = 2;
     required uint64 commit_timestamp = 3;
-    required TransactionMessage transaction = 4;
+    repeated string keys = 4;
 }
 
 message ReadReply {
     required TimestampMessage timestamp = 1;
-    required string key = 2;
-    required string val = 3;
+    required string val = 2;
 }
 
 message ROCommitReply {

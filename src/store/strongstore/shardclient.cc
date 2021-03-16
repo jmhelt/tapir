@@ -179,7 +179,10 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     ro_commit_.set_transaction_id(transaction_id);
     ro_commit_.set_commit_timestamp(
         transaction.get_start_time().getTimestamp());
-    transaction.serialize(ro_commit_.mutable_transaction());
+    ro_commit_.clear_keys();
+    for (auto &r : transaction.getReadSet()) {
+        ro_commit_.add_keys(r.first.c_str());
+    }
 
     Latency_Start(&opLat);
 
