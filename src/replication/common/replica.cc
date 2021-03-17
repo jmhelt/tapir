@@ -53,28 +53,21 @@ Replica::Replica(const transport::Configuration &configuration, int groupIdx,
 Replica::~Replica() {}
 
 void Replica::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
-                           string &res,
-                           std::unordered_set<RequestID> &response_client_ids) {
+                           string &res) {
     Debug("Making leader upcall for operation %s", op.c_str());
-    app->LeaderUpcall(opnum, op, replicate, res, response_client_ids);
+    app->LeaderUpcall(opnum, op, replicate, res);
     Debug("Upcall result: %s %s", replicate ? "yes" : "no", res.c_str());
 }
 
-void Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res,
-                            std::unordered_set<RequestID> &response_client_ids,
-                            uint64_t &response_delay_ms) {
+void Replica::ReplicaUpcall(opnum_t opnum, const string &op, string &res) {
     Debug("Making upcall for operation %s", op.c_str());
-    app->ReplicaUpcall(opnum, op, res, response_client_ids, response_delay_ms);
+    app->ReplicaUpcall(opnum, op, res);
 
     Debug("Upcall result: %s", res.c_str());
 }
 
 void Replica::UnloggedUpcall(const string &op, string &res) {
     app->UnloggedUpcall(op, res);
-}
-
-void Replica::LeaderStatusUpcall(bool AmLeader) {
-    app->LeaderStatusUpcall(AmLeader);
 }
 
 }  // namespace replication

@@ -137,13 +137,16 @@ bool ReplicaClient::CommitCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received COMMIT callback [%d]", shard_idx_,
           reply.status());
 
+    std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
+                                            reply.notify_ros().end()};
+
     auto itr = this->pendingCommits.find(reqId);
     ASSERT(itr != pendingCommits.end());
     PendingCommit *pendingCommit = itr->second;
     commit_callback ccb = pendingCommit->ccb;
     this->pendingCommits.erase(itr);
     delete pendingCommit;
-    ccb(COMMITTED);
+    ccb(COMMITTED, notify_ros);
 
     return true;
 }
@@ -181,13 +184,16 @@ bool ReplicaClient::AbortCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
           reply.status());
 
+    std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
+                                            reply.notify_ros().end()};
+
     auto itr = this->pendingAborts.find(reqId);
     ASSERT(itr != pendingAborts.end());
     PendingAbort *pendingAbort = itr->second;
     abort_callback acb = pendingAbort->acb;
     this->pendingAborts.erase(itr);
     delete pendingAbort;
-    acb();
+    acb(notify_ros);
 
     return true;
 }

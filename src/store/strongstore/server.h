@@ -98,19 +98,11 @@ class Server : public replication::AppReplica, public MessageServer {
     virtual ~Server();
 
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
-                              string &response,
-                              std::unordered_set<replication::RequestID>
-                                  &response_request_ids) override;
-    virtual void ReplicaUpcall(
-        opnum_t opnum, const string &op, string &response,
-        std::unordered_set<replication::RequestID> &response_request_ids,
-        uint64_t &response_delay_ms) override;
+                              string &response) override;
+    virtual void ReplicaUpcall(opnum_t opnum, const string &op,
+                               string &response) override;
 
     virtual void UnloggedUpcall(const string &op, string &response) override;
-    virtual void LeaderStatusUpcall(bool l) override {
-        Debug("Updating AmLeader: %d", l);
-        AmLeader = l;
-    }
     void Load(const string &key, const string &value,
               const Timestamp timestamp) override;
 
@@ -121,7 +113,7 @@ class Server : public replication::AppReplica, public MessageServer {
                                         uint64_t client_req_id,
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
-        strongstore::RequestID rid;
+        RequestID rid;
         uint64_t commit_timestamp;
     };
     class PendingRWCommitParticipantReply {
@@ -130,7 +122,7 @@ class Server : public replication::AppReplica, public MessageServer {
                                         uint64_t client_req_id,
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
-        strongstore::RequestID rid;
+        RequestID rid;
         uint64_t prepare_timestamp;
         int coordinator_shard;
     };
@@ -139,14 +131,14 @@ class Server : public replication::AppReplica, public MessageServer {
         PendingPrepareOKReply(uint64_t client_id, uint64_t client_req_id,
                               TransportAddress *remote)
             : rids{{client_id, client_req_id, remote}} {}
-        std::unordered_set<strongstore::RequestID> rids;
+        std::unordered_set<RequestID> rids;
     };
     class PendingROCommitReply {
        public:
         PendingROCommitReply(uint64_t client_id, uint64_t client_req_id,
                              TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
-        strongstore::RequestID rid;
+        RequestID rid;
         uint64_t transaction_id;
         uint64_t commit_timestamp;
         uint64_t n_waiting_prepared;
@@ -196,10 +188,18 @@ class Server : public replication::AppReplica, public MessageServer {
     void PrepareAbortCallback(uint64_t transaction_id, int status,
                               Timestamp timestamp);
 
-    void CommitCoordinatorCallback(uint64_t transaction_id,
-                                   transaction_status_t status);
-    void CommitParticipantCallback(uint64_t transaction_id,
-                                   transaction_status_t status);
+    void CommitCoordinatorCallback(
+        uint64_t transaction_id, transaction_status_t status,
+        const std::unordered_set<uint64_t> &notify_ros);
+    void CommitParticipantCallback(
+        uint64_t transaction_id, transaction_status_t status,
+        const std::unordered_set<uint64_t> &notify_ros);
+    void AbortParticipantCallback(
+        uint64_t transaction_id,
+        const std::unordered_set<uint64_t> &notify_ros);
+
+    void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
+    bool NotifyPendingRO(PendingROCommitReply *reply);
 
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;

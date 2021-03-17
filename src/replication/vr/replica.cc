@@ -86,7 +86,6 @@ VRReplica::VRReplica(transport::Configuration config, int groupIdx, int myIdx,
     this->closeBatchTimeout =
         new Timeout(transport, 300, [this]() { CloseBatch(); });
 
-    LeaderStatusUpcall(AmLeader());
     if (AmLeader()) {
         nullCommitTimeout->Start();
     } else {
@@ -138,59 +137,32 @@ void VRReplica::CommitUpTo(opnum_t upto) {
         /* Execute it */
         RDebug("Executing request " FMT_OPNUM, lastCommitted);
         ReplyMessage reply;
-        std::unordered_set<RequestID> response_client_ids{};
-        response_client_ids.emplace(request.clientid(), request.clientreqid());
-        uint64_t response_delay_ms = 0;
-        // if (AmLeader()) {
-        //     Latency_End(&upcall_to_exec_lat_);
-        // }
-        Execute(lastCommitted, entry->request, reply, response_client_ids,
-                response_delay_ms);
-        // if (AmLeader()) {
-        //     Latency_Start(&exec_to_sent_lat_);
-        // }
+        Execute(lastCommitted, entry->request, reply);
+
+        reply.set_view(entry->viewstamp.view);
+        reply.set_opnum(entry->viewstamp.opnum);
+        reply.set_clientreqid(entry->request.clientreqid());
 
         /* Mark it as committed */
         log.SetStatus(lastCommitted, LOG_STATE_COMMITTED);
 
-        reply.set_view(entry->viewstamp.view);
-        reply.set_opnum(entry->viewstamp.opnum);
+        // Store reply in the client table
+        ClientTableEntry &cte = clientTable[entry->request.clientid()];
+        if (cte.lastReqId <= entry->request.clientreqid()) {
+            cte.lastReqId = entry->request.clientreqid();
+            cte.replied = true;
+            cte.reply = reply;
+        } else {
+            // We've subsequently prepared another operation from the
+            // same client. So this request must have been completed
+            // at the client, and there's no need to record the
+            // result.
+        }
 
-        for (RequestID id : response_client_ids) {
-            Debug("Responding to request: %lu %lu", id.client_id,
-                  id.request_id);
-            reply.set_clientreqid(id.request_id);
-
-            // Store reply in the client table
-            ClientTableEntry &cte = clientTable[id.client_id];
-            ASSERT(cte.replied == false);
-            if (cte.lastReqId <= id.request_id) {
-                cte.lastReqId = id.request_id;
-                cte.replied = true;
-                cte.reply = reply;
-            } else {
-                // We've subsequently prepared another operation from the
-                // same client. So this request must have been completed
-                // at the client, and there's no need to record the
-                // result.
-            }
-
-            /* Send reply */
-            auto iter = clientAddresses.find(id.client_id);
-            if (iter != clientAddresses.end()) {
-                if (response_delay_ms == 0) {
-                    Debug("Sent");
-                    transport->SendMessage(this, *iter->second, reply);
-                    // Latency_End(&exec_to_sent_lat_);
-                } else {
-                    Debug("Delaying message by %lu ms", response_delay_ms);
-                    transport->Timer(response_delay_ms, [=]() {
-                        Debug("Sent");
-                        transport->SendMessage(this, *iter->second, reply);
-                        // Latency_End(&exec_to_sent_lat_);
-                    });
-                }
-            }
+        /* Send reply */
+        auto iter = clientAddresses.find(entry->request.clientid());
+        if (iter != clientAddresses.end()) {
+            transport->SendMessage(this, *iter->second, reply);
         }
     }
 }
@@ -256,7 +228,6 @@ void VRReplica::EnterView(view_t newview) {
     view = newview;
     status = STATUS_NORMAL;
     lastBatchEnd = lastOp;
-    LeaderStatusUpcall(AmLeader());
 
     if (AmLeader()) {
         viewChangeTimeout->Stop();
@@ -278,7 +249,6 @@ void VRReplica::StartViewChange(view_t newview) {
 
     view = newview;
     status = STATUS_VIEW_CHANGE;
-    LeaderStatusUpcall(AmLeader());
 
     viewChangeTimeout->Reset();
     nullCommitTimeout->Stop();
@@ -471,12 +441,8 @@ void VRReplica::HandleRequest(const TransportAddress &remote,
     // Leader Upcall
     bool replicate = false;
     string res;
-    RequestID rid{msg.req().clientid(), msg.req().clientreqid()};
-    Debug("Received request: %lu %lu", rid.client_id, rid.request_id);
-    std::unordered_set<RequestID> resClientIDs{rid};
-    // Latency_End(&rec_to_upcall_lat_);
-    LeaderUpcall(lastCommitted, msg.req().op(), replicate, res, resClientIDs);
-    // Latency_Start(&upcall_to_exec_lat_);
+    LeaderUpcall(lastCommitted, msg.req().op(), replicate, res);
+    ClientTableEntry &cte = clientTable[msg.req().clientid()];
 
     // Check whether this request should be committed to replicas
     if (!replicate) {
@@ -485,19 +451,11 @@ void VRReplica::HandleRequest(const TransportAddress &remote,
         reply.set_reply(res);
         reply.set_view(0);
         reply.set_opnum(0);
-        for (RequestID rid : resClientIDs) {
-            Debug("Responding to request: %lu %lu", rid.client_id,
-                  rid.request_id);
-            ClientTableEntry &cte = clientTable[rid.client_id];
-            ASSERT(cte.replied == false);
-            reply.set_clientreqid(rid.request_id);
-            cte.replied = true;
-            cte.reply = reply;
-            transport->SendMessage(this, *clientAddresses[rid.client_id],
-                                   reply);
-        }
+        reply.set_clientreqid(msg.req().clientreqid());
+        cte.replied = true;
+        cte.reply = reply;
+        transport->SendMessage(this, remote, reply);
     } else {
-        ASSERT(resClientIDs.size() == 1 && *resClientIDs.begin() == rid);
         Request request;
         request.set_op(res);
         request.set_clientid(msg.req().clientid());
@@ -942,7 +900,8 @@ void VRReplica::HandleDoViewChange(const TransportAddress &remote,
             } else {
                 if (latestMsg->entries(0).opnum() > lastCommitted + 1) {
                     RPanic(
-                        "Received log that didn't include enough entries to "
+                        "Received log that didn't include enough entries "
+                        "to "
                         "install it");
                 }
 
@@ -1030,7 +989,8 @@ void VRReplica::HandleStartView(const TransportAddress &remote,
     } else {
         if (msg.entries(0).opnum() > lastCommitted + 1) {
             RPanic(
-                "Not enough entries in STARTVIEW message to install new log");
+                "Not enough entries in STARTVIEW message to install new "
+                "log");
         }
 
         // Install the new log

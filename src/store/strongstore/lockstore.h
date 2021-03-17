@@ -56,32 +56,62 @@ class LockStore {
 
     int ROBegin(uint64_t transaction_id,
                 const std::unordered_set<std::string> &keys,
-                std::unordered_set<uint64_t> &prepared_transaction_ids);
+                uint64_t &n_conflicting_prepared);
 
     int ROGet(uint64_t transaction_id, const std::string &key,
               const Timestamp &timestamp,
               std::pair<Timestamp, std::string> &value);
 
-    int Prepare(uint64_t id, const Transaction &txn);
+    int Prepare(uint64_t transaction_id, const Transaction &txn);
 
-    bool Commit(uint64_t id, const Timestamp &timestamp);
+    bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
+                std::unordered_set<uint64_t> &notify_ros);
 
-    void Abort(uint64_t id);
+    void Abort(uint64_t transaction_id);
 
     void Load(const std::string &key, const std::string &value,
               const Timestamp &timestamp);
 
    private:
+    class PreparedTransaction {
+       public:
+        PreparedTransaction()
+            : transaction_{}, waiting_ros_{}, transaction_id_{0} {}
+
+        PreparedTransaction(uint64_t transaction_id,
+                            const Transaction &transaction)
+            : transaction_{transaction},
+              waiting_ros_{},
+              transaction_id_{transaction_id} {}
+
+        const Transaction &transaction() const { return transaction_; }
+
+        const uint64_t transaction_id() const { return transaction_id_; }
+
+        const std::unordered_set<uint64_t> &waiting_ros() const {
+            return waiting_ros_;
+        }
+
+        void add_waiting_ro(uint64_t transaction_id) {
+            waiting_ros_.insert(transaction_id);
+        }
+
+       private:
+        Transaction transaction_;
+        std::unordered_set<uint64_t> waiting_ros_;
+        uint64_t transaction_id_;
+    };
+
     // Data store.
     VersionedKVStore<Timestamp, std::string> store;
 
     // Locks manager.
     LockServer locks;
 
-    std::map<uint64_t, Transaction> prepared;
+    std::map<uint64_t, PreparedTransaction> prepared_;
 
-    void dropLocks(uint64_t id, const Transaction &txn);
-    bool getLocks(uint64_t id, const Transaction &txn);
+    void dropLocks(uint64_t transaction_id, const Transaction &txn);
+    bool getLocks(uint64_t transaction_id, const Transaction &txn);
 };
 
 }  // namespace strongstore
