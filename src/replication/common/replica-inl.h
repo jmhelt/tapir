@@ -32,11 +32,9 @@
 #define _COMMON_REPLICA_INL_H_
 
 template <class MSG>
-void Replica::Execute(opnum_t opnum, const Request &msg, MSG &reply,
-                      std::unordered_set<RequestID> &response_client_ids,
-                      uint64_t &response_delay_ms) {
+void Replica::Execute(opnum_t opnum, const Request &msg, MSG &reply) {
     string res;
-    ReplicaUpcall(opnum, msg.op(), res, response_client_ids, response_delay_ms);
+    ReplicaUpcall(opnum, msg.op(), res);
 
     reply.set_reply(res);
 }

@@ -33,6 +33,7 @@
 #include "store/strongstore/server.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace strongstore {
 
@@ -119,6 +120,34 @@ void Server::HandleGet(const TransportAddress &remote,
     transport_->SendMessage(this, remote, get_reply_);
 }
 
+void Server::NotifyPendingROs(const std::unordered_set<uint64_t> &ros) {
+    for (uint64_t waiting_ro : ros) {
+        auto search = pending_ro_commit_repies_.find(waiting_ro);
+        ASSERT(search != pending_ro_commit_repies_.end());
+
+        PendingROCommitReply *reply = search->second;
+
+        if (NotifyPendingRO(reply)) {
+            delete reply;
+            pending_ro_commit_repies_.erase(search);
+        }
+    }
+}
+
+bool Server::NotifyPendingRO(PendingROCommitReply *reply) {
+    uint64_t n_waiting = reply->n_waiting_prepared;
+    n_waiting -= 1;
+    bool finish = n_waiting == 0;
+
+    if (finish) {
+        Debug("Sending reply for RO transacion: %lu", reply->transaction_id);
+        SendROCommitReply(reply);
+    }
+
+    reply->n_waiting_prepared = n_waiting;
+    return finish;
+}
+
 void Server::SendROCommitReply(PendingROCommitReply *reply) {
     uint64_t transaction_id = reply->transaction_id;
     Timestamp commit_timestamp = Timestamp(reply->commit_timestamp);
@@ -161,29 +190,24 @@ void Server::HandleROCommit(const TransportAddress &remote,
     std::unordered_set<std::string> keys;
     keys.insert(msg.keys().begin(), msg.keys().end());
 
-    std::unordered_set<uint64_t> prepared_transaction_ids;
+    std::unordered_set<uint64_t> conflicting_prepares;
 
-    // TODO: Handle conflicting prepared transactions
-    if (store_->ROBegin(transaction_id, keys, prepared_transaction_ids) !=
-        REPLY_OK) {
+    uint64_t n_conflicting_prepared = 0;
+    if (store_->ROBegin(transaction_id, keys, n_conflicting_prepared)) {
         Debug("Waiting for prepared transactions");
         PendingROCommitReply *reply =
             new PendingROCommitReply(client_id, client_req_id, remote.clone());
         reply->transaction_id = transaction_id;
         reply->commit_timestamp = msg.commit_timestamp();
-        reply->n_waiting_prepared = prepared_transaction_ids.size();
+        reply->n_waiting_prepared = n_conflicting_prepared;
         reply->keys = std::move(keys);
         pending_ro_commit_repies_[transaction_id] = reply;
-
-        for (uint64_t prepared_tid : prepared_transaction_ids) {
-            Debug("Prepared transaction: %lu", prepared_tid);
-            // TODO: Handle conflicting prepared transactions
-        }
 
         return;
     }
 
-    ro_commit_reply_.mutable_rid()->CopyFrom(msg.rid());
+    ro_commit_reply_.mutable_rid()->set_client_id(client_id);
+    ro_commit_reply_.mutable_rid()->set_client_req_id(client_req_id);
     ro_commit_reply_.set_transaction_id(transaction_id);
     ro_commit_reply_.clear_values();
 
@@ -237,7 +261,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             replica_client_->FastPathCommit(
                 transaction_id, transaction, cd.commitTime,
                 std::bind(&Server::CommitCoordinatorCallback, this,
-                          transaction_id, std::placeholders::_1),
+                          transaction_id, std::placeholders::_1,
+                          std::placeholders::_2),
                 []() {}, COMMIT_TIMEOUT);
 
         } else {  // Failed to commit
@@ -329,8 +354,9 @@ void Server::SendPrepareOKRepliesFail(PendingPrepareOKReply *reply) {
     }
 }
 
-void Server::CommitCoordinatorCallback(uint64_t transaction_id,
-                                       transaction_status_t status) {
+void Server::CommitCoordinatorCallback(
+    uint64_t transaction_id, transaction_status_t status,
+    const std::unordered_set<uint64_t> &notify_ros) {
     ASSERT(status == REPLY_OK);
 
     PendingRWCommitCoordinatorReply *reply =
@@ -347,6 +373,7 @@ void Server::CommitCoordinatorCallback(uint64_t transaction_id,
     delete reply;
     pending_rw_commit_c_replies_.erase(transaction_id);
 
+    // Reply to participants
     auto search = pending_prepare_ok_replies_.find(transaction_id);
     if (search != pending_prepare_ok_replies_.end()) {
         PendingPrepareOKReply *reply = search->second;
@@ -356,6 +383,10 @@ void Server::CommitCoordinatorCallback(uint64_t transaction_id,
         delete reply;
         pending_prepare_ok_replies_.erase(transaction_id);
     }
+
+    // Reply to waiting RO transactions
+    std::unordered_set<uint64_t> ros{};
+    NotifyPendingROs(notify_ros);
 }
 
 void Server::SendRWCommmitParticipantReplyOK(
@@ -457,12 +488,15 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
         replica_client_->Commit(
             transaction_id, commit_timestamp.getTimestamp(),
             std::bind(&Server::CommitParticipantCallback, this, transaction_id,
-                      std::placeholders::_1),
+                      std::placeholders::_1, std::placeholders::_2),
             []() {}, COMMIT_TIMEOUT);
     } else {
         // TODO: Handle timeout
         replica_client_->Abort(
-            transaction_id, []() {}, []() {}, ABORT_TIMEOUT);
+            transaction_id,
+            std::bind(&Server::AbortParticipantCallback, this, transaction_id,
+                      std::placeholders::_1),
+            []() {}, ABORT_TIMEOUT);
     }
 }
 
@@ -474,12 +508,22 @@ void Server::PrepareAbortCallback(uint64_t transaction_id, int status,
           status);
 }
 
-void Server::CommitParticipantCallback(uint64_t transaction_id,
-                                       transaction_status_t status) {
+void Server::CommitParticipantCallback(
+    uint64_t transaction_id, transaction_status_t status,
+    const std::unordered_set<uint64_t> &notify_ros) {
     ASSERT(status == REPLY_OK);
 
     Debug("[shard %i] Received COMMIT participant callback [%d]", shard_idx_,
           status);
+
+    NotifyPendingROs(notify_ros);
+}
+
+void Server::AbortParticipantCallback(
+    uint64_t transaction_id, const std::unordered_set<uint64_t> &notify_ros) {
+    Debug("[shard %i] Received ABORT participant callback", shard_idx_);
+
+    NotifyPendingROs(notify_ros);
 }
 
 void Server::HandlePrepareOK(const TransportAddress &remote,
@@ -528,7 +572,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             replica_client_->FastPathCommit(
                 transaction_id, transaction, cd.commitTime,
                 std::bind(&Server::CommitCoordinatorCallback, this,
-                          transaction_id, std::placeholders::_1),
+                          transaction_id, std::placeholders::_1,
+                          std::placeholders::_2),
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Coordinator prepare failed: %lu", transaction_id);
@@ -599,9 +644,8 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
     transport_->SendMessage(this, remote, prepare_abort_reply_);
 }
 
-void Server::LeaderUpcall(
-    opnum_t opnum, const string &op, bool &replicate, string &response,
-    std::unordered_set<replication::RequestID> &response_request_ids) {
+void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
+                          string &response) {
     Debug("Received LeaderUpcall: %lu %s", opnum, op.c_str());
 
     Request request;
@@ -632,14 +676,12 @@ void Server::LeaderUpcall(
  * op is the request string passed by the client.
  * response is the reply which will be sent back to the client.
  */
-void Server::ReplicaUpcall(
-    opnum_t opnum, const string &op, string &response,
-    std::unordered_set<replication::RequestID> &response_request_ids,
-    uint64_t &response_delay_ms) {
+void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     Debug("Received Upcall: %lu %s", opnum, op.c_str());
     Request request;
     Reply reply;
     int status = REPLY_OK;
+    std::unordered_set<uint64_t> notify_ros;
 
     request.ParseFromString(op);
 
@@ -657,13 +699,17 @@ void Server::ReplicaUpcall(
                 store_->Prepare(request.txnid(),
                                 Transaction(request.commit().transaction()));
             }
-            if (store_->Commit(request.txnid(), request.commit().timestamp())) {
+            if (store_->Commit(request.txnid(), request.commit().timestamp(),
+                               notify_ros)) {
                 max_write_timestamp_ = std::max(max_write_timestamp_,
                                                 request.commit().timestamp());
             }
             if (debug_stats_) {
                 Latency_End(&commit_lat_);
             }
+
+            reply.mutable_notify_ros()->Add(notify_ros.begin(),
+                                            notify_ros.end());
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");

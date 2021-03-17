@@ -31,9 +31,9 @@
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
 
+#include <set>
 #include <string>
 #include <thread>
-#include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/configuration.h"
@@ -120,7 +120,7 @@ class Client : public ::Client {
     void ROCommitCallback(uint64_t reqId, transaction_status_t status);
 
     // choose coordinator from participants
-    int ChooseCoordinator(const std::set<int> &participants);
+    int ChooseCoordinator();
 
     transport::Configuration &config_;
     // Unique ID for this client.
@@ -133,7 +133,7 @@ class Client : public ::Client {
     uint64_t nshards;
 
     // List of participants in the ongoing transaction.
-    std::set<int> participants;
+    std::set<int> participants_;
 
     // Transport used by paxos client proxies.
     Transport *transport_;
