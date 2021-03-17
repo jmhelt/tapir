@@ -8,7 +8,7 @@
 #include "lib/message.h"
 #include "lib/transport.h"
 #include "replication/vr/client.h"
-#include "store/common/frontend/txnclient.h"
+#include "store/common/frontend/client.h"
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
@@ -17,6 +17,17 @@
 namespace strongstore {
 
 class ReplicaClient {
+    typedef std::function<void(int, Timestamp)> prepare_callback;
+    typedef std::function<void(int, Timestamp)> prepare_timeout_callback;
+
+    typedef std::function<void(transaction_status_t,
+                               std::unordered_set<uint64_t> &)>
+        commit_callback;
+    typedef std::function<void()> commit_timeout_callback;
+
+    typedef std::function<void(std::unordered_set<uint64_t> &)> abort_callback;
+    typedef std::function<void()> abort_timeout_callback;
+
    public:
     /* Constructor needs path to shard config. */
     ReplicaClient(const transport::Configuration &config, Transport *transport,

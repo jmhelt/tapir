@@ -94,7 +94,7 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
-        participants.clear();
+        participants_.clear();
 
         Timestamp start_time{tt_.GetTime(), client_id_};
         for (uint64_t i = 0; i < nshards; i++) {
@@ -111,12 +111,12 @@ void Client::Get(const std::string &key, get_callback gcb,
         Latency_Start(&opLat);
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
-        std::vector<int> txnGroups(participants.begin(), participants.end());
+        std::vector<int> txnGroups(participants_.begin(), participants_.end());
         int i = (*part)(key, nshards, -1, txnGroups);
 
         // If needed, add this shard to set of participants and send BEGIN.
-        if (participants.find(i) == participants.end()) {
-            participants.insert(i);
+        if (participants_.find(i) == participants_.end()) {
+            participants_.insert(i);
             // bclient[i]->Begin(t_id);
         }
 
@@ -138,12 +138,12 @@ void Client::Put(const std::string &key, const std::string &value,
         Latency_Start(&opLat);
         Debug("PUT [%lu : %s]", t_id, key.c_str());
         // Contact the appropriate shard to set the value.
-        std::vector<int> txnGroups(participants.begin(), participants.end());
+        std::vector<int> txnGroups(participants_.begin(), participants_.end());
         int i = (*part)(key, nshards, -1, txnGroups);
 
         // If needed, add this shard to set of participants and send BEGIN.
-        if (participants.find(i) == participants.end()) {
-            participants.insert(i);
+        if (participants_.find(i) == participants_.end()) {
+            participants_.insert(i);
             // bclient[i]->Begin(t_id);
         }
 
@@ -156,24 +156,24 @@ void Client::Put(const std::string &key, const std::string &value,
     });
 }
 
-int Client::ChooseCoordinator(const std::set<int> &participants) {
-    ASSERT(participants.size() != 0);
+int Client::ChooseCoordinator() {
+    ASSERT(participants_.size() != 0);
     // TODO: Choose coordinator
-    return *participants.begin();
+    return *participants_.begin();
 }
 
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     Debug("PREPARE [%lu]", t_id);
-    ASSERT(participants.size() > 0);
+    ASSERT(participants_.size() > 0);
 
     req->outstandingPrepares = 0;
     req->prepareStatus = REPLY_OK;
     req->maxRepliedTs = 0UL;
 
-    int coordShard = ChooseCoordinator(participants);
-    int nParticipants = participants.size();
+    int coordShard = ChooseCoordinator();
+    int nParticipants = participants_.size();
 
-    for (auto p : participants) {
+    for (auto p : participants_) {
         if (p == coordShard) {
             bclient[p]->RWCommitCoordinator(
                 t_id, nParticipants,
@@ -259,7 +259,7 @@ void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
         req->callbackInvoked = false;
         req->timeout = timeout;
 
-        stats.IncrementList("txn_groups", participants.size());
+        stats.IncrementList("txn_groups", participants_.size());
 
         Prepare(req, timeout);
     });
@@ -276,16 +276,16 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
     t_id++;
-    participants.clear();
+    participants_.clear();
 
     Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
 
     for (auto &key : keys) {
-        int i = (*part)(key, nshards, -1, participants);
-        auto search = participants.find(i);
-        if (search == participants.end()) {
+        int i = (*part)(key, nshards, -1, participants_);
+        auto search = participants_.find(i);
+        if (search == participants_.end()) {
             bclient[i]->Begin(t_id, commit_timestamp);
-            participants.insert(i);
+            participants_.insert(i);
         }
 
         bclient[i]->AddReadSet(key, commit_timestamp);
@@ -306,11 +306,11 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
         req->outstandingPrepares = 0;
         req->prepareStatus = REPLY_OK;
 
-        stats.IncrementList("txn_groups", participants.size());
+        stats.IncrementList("txn_groups", participants_.size());
 
-        ASSERT(participants.size() > 0);
+        ASSERT(participants_.size() > 0);
 
-        for (auto p : participants) {
+        for (auto p : participants_) {
             // TODO: Handle timeout
             bclient[p]->ROCommit(
                 std::bind(&Client::ROCommitCallback, this, req->id,
