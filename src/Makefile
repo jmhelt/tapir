@@ -30,9 +30,9 @@ LIBSSL_CFLAGS := $(shell pkg-config --cflags openssl)
 LIBSSL_LDFLAGS := $(shell pkg-config --libs openssl)
 CFLAGS += $(LIBSSL_CFLAGS)
 LDFLAGS += $(LIBSSL_LDFLAGS)
-# Debian package: gflags
-GFLAGS_CFLAGS := $(shell pkg-config --cflags gflags)
-GFLAGS_LDFLAGS := $(shell pkg-config --libs gflags)
+# Debian package: libgflags-dev
+GFLAGS_CFLAGS := -lgflags
+GFLAGS_LDFLAGS := -lgflags
 CFLAGS += $(GFLAGS_CFLAGS)
 LDFLAGS += $(GFLAGS_LDFLAGS)
 
