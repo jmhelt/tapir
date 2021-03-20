@@ -12,8 +12,8 @@
 
 TrueTime::TrueTime() : error_{0} {}
 
-TrueTime::TrueTime(uint64_t error) : error_{error} {
-    Debug("TrueTime variance: error=%lu", error_);
+TrueTime::TrueTime(uint64_t error_ms) : error_{error_ms * 1000} {
+    Debug("TrueTime variance: error_ms=%lu", error_ms);
 }
 
 uint64_t TrueTime::GetTime() const {
@@ -27,6 +27,17 @@ uint64_t TrueTime::GetTime() const {
 
 TrueTimeInterval TrueTime::Now() const {
     uint64_t time = GetTime();
-    Debug("Now: %lu", error_);
+    Debug("Now: %lu %lu", time - error_, time + error_);
     return {time - error_, time + error_};
+}
+
+uint64_t TrueTime::TimeToWaitUntilMS(uint64_t ts) const {
+    auto now = Now();
+    uint64_t earliest = now.earliest();
+    Debug("TimeToWaitUntilMS: %lu ? %lu", ts, earliest);
+    if (ts <= earliest) {
+        return 0;
+    } else {
+        return (ts - earliest) / 1000;
+    }
 }

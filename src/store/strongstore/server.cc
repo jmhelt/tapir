@@ -41,7 +41,8 @@ using namespace std;
 using namespace proto;
 using namespace replication;
 
-Server::Server(const transport::Configuration &shard_config,
+Server::Server(Consistency consistency,
+               const transport::Configuration &shard_config,
                const transport::Configuration &replica_config,
                uint64_t server_id, int shard_idx, int replica_idx,
                Transport *transport, const TrueTime &tt, bool debug_stats)
@@ -54,7 +55,7 @@ Server::Server(const transport::Configuration &shard_config,
       max_write_timestamp_{},
       shard_idx_{shard_idx},
       replica_idx_{replica_idx},
-      AmLeader{false},
+      consistency_{consistency},
       debug_stats_{debug_stats} {
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
     store_ = new strongstore::LockStore();
@@ -238,6 +239,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     int n_participants = msg.n_participants();
 
     Transaction transaction{msg.transaction()};
+    Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
     Debug("Coordinator for transaction: %lu", transaction_id);
 
@@ -245,8 +247,16 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                                               n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("Trying fast path commit");
-        int status = store_->Prepare(transaction_id, transaction);
-        if (!status) {
+        int status = REPLY_FAIL;
+        if (consistency_ == Consistency::SS) {
+            status = store_->Prepare(transaction_id, transaction);
+        } else if (consistency_ == Consistency::RSS) {
+            status = store_->Prepare(transaction_id, transaction,
+                                     nonblock_timestamp);
+        } else {
+            NOT_REACHABLE();
+        }
+        if (status == REPLY_OK) {
             Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
                                         client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
@@ -260,13 +270,12 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             pending_rw_commit_c_replies_[transaction_id] = pending_reply;
 
             // TODO: Handle timeout
-            replica_client_->FastPathCommit(
+            replica_client_->CoordinatorCommit(
                 transaction_id, transaction, cd.commit_timestamp,
                 std::bind(&Server::CommitCoordinatorCallback, this,
                           transaction_id, std::placeholders::_1,
                           std::placeholders::_2),
                 []() {}, COMMIT_TIMEOUT);
-
         } else {  // Failed to commit
             Debug("Fast path commit failed: %lu", transaction_id);
             store_->Abort(transaction_id);
@@ -283,9 +292,11 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     } else {  // Wait for other participants
         Debug("Waiting for other participants");
 
-        pending_rw_commit_c_replies_[transaction_id] =
+        PendingRWCommitCoordinatorReply *pending_reply =
             new PendingRWCommitCoordinatorReply(client_id, client_req_id,
                                                 remote.clone());
+        pending_reply->nonblock_timestamp = nonblock_timestamp;
+        pending_rw_commit_c_replies_[transaction_id] = pending_reply;
     }
 }
 
@@ -370,7 +381,7 @@ void Server::CommitCoordinatorCallback(
           commit_timestamp.getID());
 
     coordinator.Commit(transaction_id);
-    uint64_t response_delay_ms = coordinator.CommitWaitMs(commit_timestamp);
+    uint64_t response_delay_ms = coordinator.CommitWaitMS(commit_timestamp);
 
     // Reply to client
     SendRWCommmitCoordinatorReplyOK(reply, response_delay_ms);
@@ -569,9 +580,18 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
     if (cd.d == Decision::TRY_COORD) {
         PendingRWCommitCoordinatorReply *coord_reply =
             pending_rw_commit_c_replies_[transaction_id];
-        Transaction transaction = coordinator.GetTransaction(transaction_id);
+        Transaction &transaction = coordinator.GetTransaction(transaction_id);
         Debug("Received Prepare OK from all participants");
-        if (!store_->Prepare(transaction_id, transaction)) {
+        int status = REPLY_FAIL;
+        if (consistency_ == Consistency::SS) {
+            status = store_->Prepare(transaction_id, transaction);
+        } else if (consistency_ == Consistency::RSS) {
+            status = store_->Prepare(transaction_id, transaction,
+                                     coord_reply->nonblock_timestamp);
+        } else {
+            NOT_REACHABLE();
+        }
+        if (status == REPLY_OK) {
             Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
                                         client_id};
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
@@ -581,7 +601,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             coord_reply->commit_timestamp = cd.commit_timestamp;
 
             // TODO: Handle timeout
-            replica_client_->FastPathCommit(
+            replica_client_->CoordinatorCommit(
                 transaction_id, transaction, cd.commit_timestamp,
                 std::bind(&Server::CommitCoordinatorCallback, this,
                           transaction_id, std::placeholders::_1,
@@ -666,13 +686,7 @@ void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
 
     switch (request.op()) {
         case strongstore::proto::Request::PREPARE:
-            replicate = true;
-            response = op;
-            break;
         case strongstore::proto::Request::COMMIT:
-            replicate = true;
-            response = op;
-            break;
         case strongstore::proto::Request::ABORT:
             replicate = true;
             response = op;
@@ -708,7 +722,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 Latency_Start(&commit_lat_);
             }
             Debug("Received COMMIT");
-            if (request.commit().has_transaction()) {  // Fast path commit
+            if (request.commit().has_transaction()) {  // Coordinator commit
                 store_->Prepare(request.txnid(),
                                 Transaction(request.commit().transaction()));
             }

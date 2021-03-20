@@ -91,7 +91,8 @@ namespace strongstore {
 
 class Server : public replication::AppReplica, public MessageServer {
    public:
-    Server(const transport::Configuration &shard_config,
+    Server(Consistency consistency,
+           const transport::Configuration &shard_config,
            const transport::Configuration &replica_config, uint64_t server_id,
            int groupIdx, int idx, Transport *transport, const TrueTime &tt,
            bool debug_stats);
@@ -115,6 +116,7 @@ class Server : public replication::AppReplica, public MessageServer {
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
         Timestamp commit_timestamp;
+        Timestamp nonblock_timestamp;
     };
     class PendingRWCommitParticipantReply {
        public:
@@ -243,7 +245,7 @@ class Server : public replication::AppReplica, public MessageServer {
     int shard_idx_;
     int replica_idx_;
     LockStore *store_;
-    bool AmLeader;
+    Consistency consistency_;
     bool debug_stats_;
 };
 

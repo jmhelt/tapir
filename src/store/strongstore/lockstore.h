@@ -62,7 +62,9 @@ class LockStore {
               const Timestamp &timestamp,
               std::pair<Timestamp, std::string> &value);
 
-    int Prepare(uint64_t transaction_id, const Transaction &txn);
+    int Prepare(uint64_t transaction_id, const Transaction &transaction);
+    int Prepare(uint64_t transaction_id, const Transaction &transaction,
+                const Timestamp &nonblock_timestamp);
 
     bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
                 std::unordered_set<uint64_t> &notify_ros);
@@ -76,17 +78,28 @@ class LockStore {
     class PreparedTransaction {
        public:
         PreparedTransaction()
-            : transaction_{}, waiting_ros_{}, transaction_id_{0} {}
+            : transaction_{},
+              waiting_ros_{},
+              nonblock_timestamp_{},
+              transaction_id_{} {}
 
         PreparedTransaction(uint64_t transaction_id,
                             const Transaction &transaction)
             : transaction_{transaction},
               waiting_ros_{},
+              nonblock_timestamp_{},
               transaction_id_{transaction_id} {}
 
         const Transaction &transaction() const { return transaction_; }
 
         const uint64_t transaction_id() const { return transaction_id_; }
+
+        const Timestamp &nonblock_timestamp() const {
+            return nonblock_timestamp_;
+        }
+        void set_nonblock_timestamp(const Timestamp &nonblock_timestamp) {
+            nonblock_timestamp_ = nonblock_timestamp;
+        }
 
         const std::unordered_set<uint64_t> &waiting_ros() const {
             return waiting_ros_;
@@ -99,6 +112,7 @@ class LockStore {
        private:
         Transaction transaction_;
         std::unordered_set<uint64_t> waiting_ros_;
+        Timestamp nonblock_timestamp_;
         uint64_t transaction_id_;
     };
 

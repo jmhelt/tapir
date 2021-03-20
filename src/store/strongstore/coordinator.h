@@ -41,9 +41,9 @@ class PreparedTransaction {
 
     ~PreparedTransaction() {}
 
-    int GetNParticipants() { return n_participants_; }
+    int n_participants() { return n_participants_; }
 
-    Transaction GetTransaction() { return transaction_; }
+    Transaction &transaction() { return transaction_; }
 
     void StartTransaction(Timestamp &start_timestamp, int n_participants,
                           Transaction transaction) {
@@ -69,7 +69,7 @@ class PreparedTransaction {
                    static_cast<std::size_t>(n_participants_);
     }
 
-    Timestamp GetTimeCommit() { return commit_timestamp_; }
+    Timestamp &GetTimeCommit() { return commit_timestamp_; }
 
    private:
     Timestamp commit_timestamp_;
@@ -83,7 +83,7 @@ class Coordinator {
     Coordinator(const TrueTime &tt);
     ~Coordinator();
 
-    Transaction GetTransaction(uint64_t transaction_id);
+    Transaction &GetTransaction(uint64_t transaction_id);
 
     int GetNParticipants(uint64_t transaction_id);
 
@@ -97,7 +97,7 @@ class Coordinator {
 
     void Abort(uint64_t transaction_id);
 
-    uint64_t CommitWaitMs(Timestamp &commit_timestamp);
+    uint64_t CommitWaitMS(Timestamp &commit_timestamp);
 
    private:
     const TrueTime &tt_;
