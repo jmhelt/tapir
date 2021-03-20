@@ -44,6 +44,8 @@
 
 namespace strongstore {
 
+enum Consistency { SS, RSS };
+
 enum Mode {
     MODE_UNKNOWN,
     MODE_OCC,
@@ -78,15 +80,18 @@ class ShardClient : public TxnClient, public TransportReceiver {
 
     void RWCommitCoordinator(uint64_t transaction_id,
                              const Transaction &transaction, int n_participants,
+                             Timestamp &nonblock_timestamp,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
     void RWCommitParticipant(uint64_t transaction_id,
                              const Transaction &transaction,
-                             int coordinator_shard, prepare_callback pcb,
+                             int coordinator_shard,
+                             Timestamp &nonblock_timestamp,
+                             prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 
     void PrepareOK(uint64_t transaction_id, int participant_shard,
-                   uint64_t prepare_timestamp, prepare_callback pcb,
+                   Timestamp &prepare_timestamp, prepare_callback pcb,
                    prepare_timeout_callback ptcb, uint32_t timeout);
 
     void PrepareAbort(uint64_t transaction_id, int participant_shard,

@@ -114,7 +114,7 @@ class Server : public replication::AppReplica, public MessageServer {
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
-        uint64_t commit_timestamp;
+        Timestamp commit_timestamp;
     };
     class PendingRWCommitParticipantReply {
        public:
@@ -123,7 +123,7 @@ class Server : public replication::AppReplica, public MessageServer {
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
-        uint64_t prepare_timestamp;
+        Timestamp prepare_timestamp;
         int coordinator_shard;
     };
     class PendingPrepareOKReply {
@@ -140,7 +140,7 @@ class Server : public replication::AppReplica, public MessageServer {
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
         uint64_t transaction_id;
-        uint64_t commit_timestamp;
+        Timestamp commit_timestamp;
         uint64_t n_waiting_prepared;
         std::unordered_set<std::string> keys;
     };
@@ -169,7 +169,7 @@ class Server : public replication::AppReplica, public MessageServer {
                                            uint64_t client_req_id);
 
     void SendPrepareOKRepliesOK(PendingPrepareOKReply *reply,
-                                uint64_t commit_timestamp,
+                                Timestamp &commit_timestamp,
                                 uint64_t response_delay_ms);
     void SendPrepareOKRepliesFail(PendingPrepareOKReply *reply);
 
@@ -239,7 +239,7 @@ class Server : public replication::AppReplica, public MessageServer {
     Latency_t prepare_lat_;
     Latency_t commit_lat_;
 
-    uint64_t max_write_timestamp_;
+    Timestamp max_write_timestamp_;
     int shard_idx_;
     int replica_idx_;
     LockStore *store_;

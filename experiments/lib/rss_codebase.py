@@ -187,7 +187,8 @@ class RssCodebase(ExperimentCodebase):
             '--protocol', config['replication_protocol'],
             '--num_shards', config['num_shards'],
             '--stats_file', stats_file,
-            '--clock_error', truetime_error]])
+            '--clock_error', truetime_error,
+            '--strong_consistency', config['consistency']]])
 
         if 'message_transport_type' in config['replication_protocol_settings']:
             replica_command += ' --trans_protocol %s' % config['replication_protocol_settings']['message_transport_type']

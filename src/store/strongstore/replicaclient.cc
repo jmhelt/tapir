@@ -75,7 +75,7 @@ bool ReplicaClient::PrepareCallback(uint64_t reqId, const string &request_str,
 
 void ReplicaClient::FastPathCommit(uint64_t transaction_id,
                                    const Transaction transaction,
-                                   uint64_t commit_timestamp,
+                                   Timestamp &commit_timestamp,
                                    commit_callback ccb,
                                    commit_timeout_callback ctcb,
                                    uint32_t timeout) {
@@ -87,7 +87,8 @@ void ReplicaClient::FastPathCommit(uint64_t transaction_id,
     Request request;
     request.set_op(Request::COMMIT);
     request.set_txnid(transaction_id);
-    request.mutable_commit()->set_timestamp(commit_timestamp);
+    commit_timestamp.serialize(
+        request.mutable_commit()->mutable_commit_timestamp());
     transaction.serialize(request.mutable_commit()->mutable_transaction());
     request.SerializeToString(&request_str);
 
@@ -102,7 +103,7 @@ void ReplicaClient::FastPathCommit(uint64_t transaction_id,
                                      placeholders::_2));
 }
 
-void ReplicaClient::Commit(uint64_t transaction_id, uint64_t commit_timestamp,
+void ReplicaClient::Commit(uint64_t transaction_id, Timestamp &commit_timestamp,
                            commit_callback ccb, commit_timeout_callback ctcb,
                            uint32_t timeout) {
     Debug("[shard %i] Sending COMMIT: %lu", shard_idx_, transaction_id);
@@ -112,7 +113,8 @@ void ReplicaClient::Commit(uint64_t transaction_id, uint64_t commit_timestamp,
     Request request;
     request.set_op(Request::COMMIT);
     request.set_txnid(transaction_id);
-    request.mutable_commit()->set_timestamp(commit_timestamp);
+    commit_timestamp.serialize(
+        request.mutable_commit()->mutable_commit_timestamp());
     request.SerializeToString(&request_str);
 
     uint64_t reqId = lastReqId++;

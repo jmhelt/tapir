@@ -51,7 +51,7 @@ Server::Server(const transport::Configuration &shard_config,
       tt_{tt},
       coordinator{tt_},
       server_id_{server_id},
-      max_write_timestamp_{0},
+      max_write_timestamp_{},
       shard_idx_{shard_idx},
       replica_idx_{replica_idx},
       AmLeader{false},
@@ -241,25 +241,27 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
     Debug("Coordinator for transaction: %lu", transaction_id);
 
-    Decision d = coordinator.StartTransaction(transaction_id, n_participants,
-                                              transaction);
+    Decision d = coordinator.StartTransaction(client_id, transaction_id,
+                                              n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("Trying fast path commit");
         int status = store_->Prepare(transaction_id, transaction);
         if (!status) {
+            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
+                                        client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
-                transaction_id, shard_idx_, max_write_timestamp_ + 1);
+                transaction_id, shard_idx_, prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
 
             PendingRWCommitCoordinatorReply *pending_reply =
                 new PendingRWCommitCoordinatorReply(client_id, client_req_id,
                                                     remote.clone());
-            pending_reply->commit_timestamp = cd.commitTime;
+            pending_reply->commit_timestamp = cd.commit_timestamp;
             pending_rw_commit_c_replies_[transaction_id] = pending_reply;
 
             // TODO: Handle timeout
             replica_client_->FastPathCommit(
-                transaction_id, transaction, cd.commitTime,
+                transaction_id, transaction, cd.commit_timestamp,
                 std::bind(&Server::CommitCoordinatorCallback, this,
                           transaction_id, std::placeholders::_1,
                           std::placeholders::_2),
@@ -293,7 +295,8 @@ void Server::SendRWCommmitCoordinatorReplyOK(
     rw_commit_c_reply_.mutable_rid()->set_client_req_id(
         reply->rid.client_req_id());
     rw_commit_c_reply_.set_status(REPLY_OK);
-    rw_commit_c_reply_.set_commit_timestamp(reply->commit_timestamp);
+    reply->commit_timestamp.serialize(
+        rw_commit_c_reply_.mutable_commit_timestamp());
 
     Debug("Delaying message by %lu ms", response_delay_ms);
     const TransportAddress *remote = reply->rid.addr();
@@ -311,16 +314,16 @@ void Server::SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
     rw_commit_c_reply_.mutable_rid()->set_client_id(client_id);
     rw_commit_c_reply_.mutable_rid()->set_client_req_id(client_req_id);
     rw_commit_c_reply_.set_status(REPLY_FAIL);
-    rw_commit_c_reply_.set_commit_timestamp(0);
+    rw_commit_c_reply_.clear_commit_timestamp();
 
     transport_->SendMessage(this, remote, rw_commit_c_reply_);
 }
 
 void Server::SendPrepareOKRepliesOK(PendingPrepareOKReply *reply,
-                                    uint64_t commit_timestamp,
+                                    Timestamp &commit_timestamp,
                                     uint64_t response_delay_ms) {
     prepare_ok_reply_.set_status(REPLY_OK);
-    prepare_ok_reply_.set_commit_timestamp(commit_timestamp);
+    commit_timestamp.serialize(prepare_ok_reply_.mutable_commit_timestamp());
 
     for (auto &rid : reply->rids) {
         prepare_ok_reply_.mutable_rid()->set_client_id(rid.client_id());
@@ -339,7 +342,7 @@ void Server::SendPrepareOKRepliesOK(PendingPrepareOKReply *reply,
 
 void Server::SendPrepareOKRepliesFail(PendingPrepareOKReply *reply) {
     prepare_ok_reply_.set_status(REPLY_FAIL);
-    prepare_ok_reply_.set_commit_timestamp(0);
+    prepare_ok_reply_.clear_commit_timestamp();
 
     for (auto &rid : reply->rids) {
         prepare_ok_reply_.mutable_rid()->set_client_id(rid.client_id());
@@ -362,8 +365,9 @@ void Server::CommitCoordinatorCallback(
     PendingRWCommitCoordinatorReply *reply =
         pending_rw_commit_c_replies_[transaction_id];
 
-    uint64_t commit_timestamp = reply->commit_timestamp;
-    Debug("COMMIT timestamp: %lu", commit_timestamp);
+    Timestamp &commit_timestamp = reply->commit_timestamp;
+    Debug("COMMIT timestamp: %lu %lu", commit_timestamp.getTimestamp(),
+          commit_timestamp.getID());
 
     coordinator.Commit(transaction_id);
     uint64_t response_delay_ms = coordinator.CommitWaitMs(commit_timestamp);
@@ -433,7 +437,8 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
             new PendingRWCommitParticipantReply(client_id, client_req_id,
                                                 remote.clone());
         pending_reply->coordinator_shard = coordinator_shard;
-        pending_reply->prepare_timestamp = max_write_timestamp_ + 1;
+        pending_reply->prepare_timestamp = {
+            max_write_timestamp_.getTimestamp() + 1, client_id};
 
         pending_rw_commit_p_replies_[transaction_id] = pending_reply;
 
@@ -484,9 +489,14 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
     Debug("[shard %i] Received PREPARE_OK callback [%d]", shard_idx_, status);
 
     if (status == REPLY_OK) {
+        PendingRWCommitParticipantReply *reply =
+            pending_rw_commit_p_replies_[transaction_id];
+
+        commit_timestamp.setID(reply->rid.client_id());
+
         // TODO: Handle timeout
         replica_client_->Commit(
-            transaction_id, commit_timestamp.getTimestamp(),
+            transaction_id, commit_timestamp,
             std::bind(&Server::CommitParticipantCallback, this, transaction_id,
                       std::placeholders::_1, std::placeholders::_2),
             []() {}, COMMIT_TIMEOUT);
@@ -535,7 +545,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 
     uint64_t transaction_id = msg.transaction_id();
     int participant_shard = msg.participant_shard();
-    uint64_t prepare_timestamp = msg.prepare_timestamp();
+    Timestamp prepare_timestamp{msg.prepare_timestamp()};
 
     PendingPrepareOKReply *reply = nullptr;
     auto search = pending_prepare_ok_replies_.find(transaction_id);
@@ -562,15 +572,17 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Transaction transaction = coordinator.GetTransaction(transaction_id);
         Debug("Received Prepare OK from all participants");
         if (!store_->Prepare(transaction_id, transaction)) {
+            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
+                                        client_id};
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
-                                              max_write_timestamp_ + 1);
+                                              prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
 
-            coord_reply->commit_timestamp = cd.commitTime;
+            coord_reply->commit_timestamp = cd.commit_timestamp;
 
             // TODO: Handle timeout
             replica_client_->FastPathCommit(
-                transaction_id, transaction, cd.commitTime,
+                transaction_id, transaction, cd.commit_timestamp,
                 std::bind(&Server::CommitCoordinatorCallback, this,
                           transaction_id, std::placeholders::_1,
                           std::placeholders::_2),
@@ -682,6 +694,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     Reply reply;
     int status = REPLY_OK;
     std::unordered_set<uint64_t> notify_ros;
+    Timestamp commit_timestamp;
 
     request.ParseFromString(op);
 
@@ -699,10 +712,10 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 store_->Prepare(request.txnid(),
                                 Transaction(request.commit().transaction()));
             }
-            if (store_->Commit(request.txnid(), request.commit().timestamp(),
-                               notify_ros)) {
-                max_write_timestamp_ = std::max(max_write_timestamp_,
-                                                request.commit().timestamp());
+            commit_timestamp = {request.commit().commit_timestamp()};
+            if (store_->Commit(request.txnid(), commit_timestamp, notify_ros)) {
+                max_write_timestamp_ =
+                    std::max(max_write_timestamp_, commit_timestamp);
             }
             if (debug_stats_) {
                 Latency_End(&commit_lat_);
