@@ -38,15 +38,17 @@ using namespace std;
 
 namespace strongstore {
 
-Client::Client(transport::Configuration &config, uint64_t client_id,
-               int nShards, int closestReplica, Transport *transport,
-               Partitioner *part, TrueTime &tt, bool debug_stats)
+Client::Client(Consistency consistency, transport::Configuration &config,
+               uint64_t client_id, int nShards, int closestReplica,
+               Transport *transport, Partitioner *part, TrueTime &tt,
+               bool debug_stats)
     : config_{config},
       client_id_{client_id},
       nshards(nShards),
       transport_{transport},
       part(part),
       tt_{tt},
+      consistency_{consistency},
       debug_stats_{debug_stats} {
     t_id = client_id_ << 26;
 
@@ -111,13 +113,11 @@ void Client::Get(const std::string &key, get_callback gcb,
         Latency_Start(&opLat);
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
-        std::vector<int> txnGroups(participants_.begin(), participants_.end());
-        int i = (*part)(key, nshards, -1, txnGroups);
+        int i = (*part)(key, nshards, -1, participants_);
 
-        // If needed, add this shard to set of participants and send BEGIN.
+        // If needed, add this shard to set of participants
         if (participants_.find(i) == participants_.end()) {
             participants_.insert(i);
-            // bclient[i]->Begin(t_id);
         }
 
         // Send the GET operation to appropriate shard.
@@ -138,13 +138,11 @@ void Client::Put(const std::string &key, const std::string &value,
         Latency_Start(&opLat);
         Debug("PUT [%lu : %s]", t_id, key.c_str());
         // Contact the appropriate shard to set the value.
-        std::vector<int> txnGroups(participants_.begin(), participants_.end());
-        int i = (*part)(key, nshards, -1, txnGroups);
+        int i = (*part)(key, nshards, -1, participants_);
 
-        // If needed, add this shard to set of participants and send BEGIN.
+        // If needed, add this shard to set of participants
         if (participants_.find(i) == participants_.end()) {
             participants_.insert(i);
-            // bclient[i]->Begin(t_id);
         }
 
         auto pcbLat = [this, pcb](int status1, const std::string &key1,
@@ -162,6 +160,11 @@ int Client::ChooseCoordinator() {
     return *participants_.begin();
 }
 
+Timestamp Client::ChooseNonBlockTimestamp() {
+    // TODO: Choose coordinator
+    return {tt_.GetTime() + 1, client_id_};
+}
+
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     Debug("PREPARE [%lu]", t_id);
     ASSERT(participants_.size() > 0);
@@ -170,13 +173,18 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     req->prepareStatus = REPLY_OK;
     req->maxRepliedTs = 0UL;
 
-    int coordShard = ChooseCoordinator();
-    int nParticipants = participants_.size();
+    int coordinator_shard = ChooseCoordinator();
+    int n_participants = participants_.size();
+
+    Timestamp nonblock_timestamp = Timestamp();
+    if (consistency_ == Consistency::RSS) {
+        nonblock_timestamp = ChooseNonBlockTimestamp();
+    }
 
     for (auto p : participants_) {
-        if (p == coordShard) {
+        if (p == coordinator_shard) {
             bclient[p]->RWCommitCoordinator(
-                t_id, nParticipants,
+                t_id, n_participants, nonblock_timestamp,
                 std::bind(&Client::PrepareCallback, this, req->id,
                           std::placeholders::_1, std::placeholders::_2),
                 std::bind(&Client::PrepareCallback, this, req->id,
@@ -184,7 +192,7 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
                 timeout);
         } else {
             bclient[p]->RWCommitParticipant(
-                t_id, coordShard,
+                t_id, coordinator_shard, nonblock_timestamp,
                 [this, tId = t_id, reqId = req->id](int status, Timestamp) {
                     Debug("PREPARE [%lu] callback status %d", tId, status);
 

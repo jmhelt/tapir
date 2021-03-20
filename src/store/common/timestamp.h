@@ -31,6 +31,7 @@ class Timestamp {
     bool isValid() const;
     uint64_t getID() const { return id; };
     uint64_t getTimestamp() const { return timestamp; };
+    void setID(uint64_t i) { id = i; };
     void setTimestamp(uint64_t t) { timestamp = t; };
     void serialize(TimestampMessage *msg) const;
 

@@ -117,6 +117,28 @@ DEFINE_string(protocol_mode, protocol_args[0],
               " use during this experiment");
 DEFINE_validator(protocol_mode, &ValidateProtocolMode);
 
+const std::string strong_consistency_args[] = {"ss", "rss"};
+const strongstore::Consistency strong_consistency[]{
+    strongstore::Consistency::SS,
+    strongstore::Consistency::RSS,
+};
+static bool ValidateStrongConsistency(const char *flagname,
+                                      const std::string &value) {
+    int n = sizeof(strong_consistency_args);
+    for (int i = 0; i < n; ++i) {
+        if (value == strong_consistency_args[i]) {
+            return true;
+        }
+    }
+    std::cerr << "Invalid value for --" << flagname << ": " << value
+              << std::endl;
+    return false;
+}
+DEFINE_string(strong_consistency, strong_consistency_args[0],
+              "the consistency model to use during this"
+              " experiment");
+DEFINE_validator(strong_consistency, &ValidateStrongConsistency);
+
 const std::string benchmark_args[] = {"retwis"};
 const benchmode_t benchmodes[]{BENCH_RETWIS};
 static bool ValidateBenchmark(const char *flagname, const std::string &value) {
@@ -345,6 +367,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // parse consistency
+    strongstore::Consistency consistency = strongstore::Consistency::SS;
+    int n_consistencies = sizeof(strong_consistency);
+    for (int i = 0; i < n_consistencies; ++i) {
+        if (FLAGS_strong_consistency == strong_consistency_args[i]) {
+            consistency = strong_consistency[i];
+            break;
+        }
+    }
+
     // parse benchmark
     benchmode_t benchMode = BENCH_UNKNOWN;
     int numBenchs = sizeof(benchmark_args);
@@ -545,7 +577,7 @@ int main(int argc, char **argv) {
             // }
             case PROTO_STRONG: {
                 client = new strongstore::Client(
-                    shard_config, clientId, FLAGS_num_shards,
+                    consistency, shard_config, clientId, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part, tt, FLAGS_debug_stats);
                 break;
             }

@@ -42,8 +42,8 @@ ShardClient::ShardClient(const transport::Configuration &config,
                          Transport *transport, uint64_t client_id, int shard)
     : config_{config},
       transport_{transport},
-      client_id_(client_id),
-      shard_idx_(shard) {
+      client_id_{client_id},
+      shard_idx_{shard} {
     transport_->Register(this, config_, -1, -1);
 
     replica_ = 0;
@@ -177,8 +177,8 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     ro_commit_.mutable_rid()->set_client_id(client_id_);
     ro_commit_.mutable_rid()->set_client_req_id(reqId);
     ro_commit_.set_transaction_id(transaction_id);
-    ro_commit_.set_commit_timestamp(
-        transaction.get_start_time().getTimestamp());
+    transaction.get_start_time().serialize(
+        ro_commit_.mutable_commit_timestamp());
     ro_commit_.clear_keys();
     for (auto &r : transaction.getReadSet()) {
         ro_commit_.add_keys(r.first.c_str());
@@ -206,11 +206,10 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
     ccb(COMMITTED);
 }
 
-void ShardClient::RWCommitCoordinator(uint64_t transaction_id,
-                                      const Transaction &transaction,
-                                      int n_participants, prepare_callback pcb,
-                                      prepare_timeout_callback ptcb,
-                                      uint32_t timeout) {
+void ShardClient::RWCommitCoordinator(
+    uint64_t transaction_id, const Transaction &transaction, int n_participants,
+    Timestamp &nonblock_timestamp, prepare_callback pcb,
+    prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending RWCommitCoordinator [%lu]", shard_idx_,
           transaction_id);
 
@@ -227,6 +226,7 @@ void ShardClient::RWCommitCoordinator(uint64_t transaction_id,
     rw_commit_c_.set_transaction_id(transaction_id);
     transaction.serialize(rw_commit_c_.mutable_transaction());
     rw_commit_c_.set_n_participants(n_participants);
+    nonblock_timestamp.serialize((rw_commit_c_.mutable_nonblock_timestamp()));
 
     Latency_Start(&opLat);
 
@@ -249,17 +249,15 @@ void ShardClient::HandleRWCommitCoordinatorReply(
     pendingPrepares.erase(itr);
     delete req;
 
-    Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
-          reply.commit_timestamp());
+    Debug("[shard %i] COMMIT timestamp [%lu %lu]", shard_idx_,
+          reply.commit_timestamp().timestamp(), reply.commit_timestamp().id());
     pcb(reply.status(), Timestamp(reply.commit_timestamp()));
 }
 
-void ShardClient::RWCommitParticipant(uint64_t transaction_id,
-                                      const Transaction &transaction,
-                                      int coordinator_shard,
-                                      prepare_callback pcb,
-                                      prepare_timeout_callback ptcb,
-                                      uint32_t timeout) {
+void ShardClient::RWCommitParticipant(
+    uint64_t transaction_id, const Transaction &transaction,
+    int coordinator_shard, Timestamp &nonblock_timestamp, prepare_callback pcb,
+    prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending RWCommitParticipant [%lu]", shard_idx_,
           transaction_id);
 
@@ -276,6 +274,7 @@ void ShardClient::RWCommitParticipant(uint64_t transaction_id,
     rw_commit_p_.set_transaction_id(transaction_id);
     transaction.serialize(rw_commit_p_.mutable_transaction());
     rw_commit_p_.set_coordinator_shard(coordinator_shard);
+    nonblock_timestamp.serialize((rw_commit_p_.mutable_nonblock_timestamp()));
 
     Latency_Start(&opLat);
 
@@ -303,7 +302,7 @@ void ShardClient::HandleRWCommitParticipantReply(
 }
 
 void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
-                            uint64_t prepare_timestamp, prepare_callback pcb,
+                            Timestamp &prepare_timestamp, prepare_callback pcb,
                             prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending PrepareOK [%lu]", shard_idx_, transaction_id);
 
@@ -318,7 +317,7 @@ void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
     prepare_ok_.mutable_rid()->set_client_req_id(reqId);
     prepare_ok_.set_transaction_id(transaction_id);
     prepare_ok_.set_participant_shard(participant_shard);
-    prepare_ok_.set_prepare_timestamp(prepare_timestamp);
+    prepare_timestamp.serialize(prepare_ok_.mutable_prepare_timestamp());
 
     Latency_Start(&opLat);
 
@@ -341,8 +340,8 @@ void ShardClient::HandlePrepareOKReply(const proto::PrepareOKReply &reply) {
     pendingPrepareOKs.erase(itr);
     delete req;
 
-    Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
-          reply.commit_timestamp());
+    Debug("[shard %i] COMMIT timestamp [%lu %lu]", shard_idx_,
+          reply.commit_timestamp().timestamp(), reply.commit_timestamp().id());
     pcb(reply.status(), Timestamp(reply.commit_timestamp()));
 }
 
