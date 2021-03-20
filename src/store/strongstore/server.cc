@@ -735,8 +735,9 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 Latency_End(&commit_lat_);
             }
 
-            reply.mutable_notify_ros()->Add(notify_ros.begin(),
-                                            notify_ros.end());
+            for (uint64_t ro : notify_ros) {
+              reply.mutable_notify_ros()->Add(ro);
+            }
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");
