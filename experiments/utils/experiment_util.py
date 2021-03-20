@@ -23,14 +23,18 @@ def collect_exp_data(config, remote_exp_directory, local_directory_base, executo
         master_host = get_master_host(config)
         copy_remote_directory_to_local(os.path.join(
             local_directory_base, 'master'), config['emulab_user'], master_host, remote_directory)
-    for i in range(len(config['server_names'])):
-        server_host = get_server_host(config, i)
-        download_futures.append(executor.submit(copy_remote_directory_to_local, os.path.join(
-            local_directory_base, 'server-%d' % i), config['emulab_user'], server_host, remote_directory))
-        for j in range(config['client_nodes_per_server']):
-            client_host = get_client_host(config, i, j)
+
+    for shard_idx in range(len(config["shards"])):
+        shard = config["shards"][shard_idx]
+        for replica_idx in range(len(shard)):
+            replica = shard[replica_idx]
+            server_host = get_server_host(config, replica)
             download_futures.append(executor.submit(copy_remote_directory_to_local, os.path.join(
-                local_directory_base, 'client-%d-%d' % (i, j)), config['emulab_user'], client_host, remote_directory))
+                local_directory_base, 'server-%d' % shard_idx), config['emulab_user'], server_host, remote_directory))
+    for client in config['clients']:
+        client_host = get_client_host(config, client)
+        download_futures.append(executor.submit(copy_remote_directory_to_local, os.path.join(
+            local_directory_base, client), config['emulab_user'], client_host, remote_directory))
     return download_futures
 
 
