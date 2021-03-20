@@ -27,8 +27,7 @@
       "us-east-1-0",
       "us-east-1-1",
       "us-east-1-2",
-      "client-0-0",
-      "client-0-1"
+      "client-0-0"
     ]
   },
   "client_processes_per_client_node": 1,
@@ -69,7 +68,7 @@
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
-  "project_name": "morty-pg0",
+  "project_name": "cops-pg0",
   "region_rtt_latencies": {
     "us-east-1": {
       "us-east-1": 0,
