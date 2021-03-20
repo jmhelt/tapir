@@ -52,9 +52,9 @@ namespace strongstore {
 
 class Client : public ::Client {
    public:
-    Client(transport::Configuration &config, uint64_t id, int nshards,
-           int closestReplic, Transport *transport, Partitioner *part,
-           TrueTime &tt, bool debug_stats);
+    Client(Consistency consistency, transport::Configuration &config,
+           uint64_t id, int nshards, int closestReplic, Transport *transport,
+           Partitioner *part, TrueTime &tt, bool debug_stats);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -122,6 +122,9 @@ class Client : public ::Client {
     // choose coordinator from participants
     int ChooseCoordinator();
 
+    // Choose nonblock time
+    Timestamp ChooseNonBlockTimestamp();
+
     transport::Configuration &config_;
     // Unique ID for this client.
     uint64_t client_id_;
@@ -154,6 +157,8 @@ class Client : public ::Client {
 
     Latency_t opLat;
     Latency_t commit_lat_;
+
+    Consistency consistency_;
 
     bool debug_stats_;
 };

@@ -47,10 +47,12 @@ class BufferClient : public ::BufferClient {
     void Begin(uint64_t tid, const Timestamp &start_time);
 
     void RWCommitCoordinator(uint64_t transaction_id, int n_participants,
+                             Timestamp &nonblock_timestamp,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 
     void RWCommitParticipant(uint64_t transaction_id, int coordinator_shard,
+                             Timestamp &nonblock_timestamp,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 

@@ -16,65 +16,65 @@ namespace strongstore {
 enum Decision { WAIT = 1, TRY_COORD = 2, COMMIT = 3, ABORT = 4 };
 
 struct CommitDecision {
+    Timestamp commit_timestamp;
     Decision d;
-    uint64_t commitTime;
 };
 
 class PreparedTransaction {
    public:
     PreparedTransaction()
-        : timeCommit_{0},
-          nParticipants_{-1},
-          okParticipants_{},
+        : commit_timestamp_{},
+          n_participants_{-1},
+          ok_participants_{},
           transaction_{} {}
-    PreparedTransaction(int shardID)
-        : timeCommit_{0},
-          nParticipants_{-1},
-          okParticipants_{{shardID}},
+    PreparedTransaction(int shard_idx)
+        : commit_timestamp_{},
+          n_participants_{-1},
+          ok_participants_{{shard_idx}},
           transaction_{} {}
-    PreparedTransaction(uint64_t timeStart, int nParticipants,
+    PreparedTransaction(Timestamp &start_timestamp, int n_participants,
                         Transaction transaction)
-        : timeCommit_{timeStart},
-          nParticipants_{nParticipants},
-          okParticipants_{},
+        : commit_timestamp_{start_timestamp},
+          n_participants_{n_participants},
+          ok_participants_{},
           transaction_{transaction} {}
 
     ~PreparedTransaction() {}
 
-    int GetNParticipants() { return nParticipants_; }
+    int GetNParticipants() { return n_participants_; }
 
     Transaction GetTransaction() { return transaction_; }
 
-    void StartTransaction(uint64_t timeStart, int nParticipants,
+    void StartTransaction(Timestamp &start_timestamp, int n_participants,
                           Transaction transaction) {
-        nParticipants_ = nParticipants;
+        n_participants_ = n_participants;
         transaction_ = transaction;
-        timeCommit_ = std::max(timeCommit_, timeStart);
+        commit_timestamp_ = std::max(commit_timestamp_, start_timestamp);
     }
 
-    void PrepareOK(int shardID, uint64_t prepareTime) {
-        timeCommit_ = std::max(timeCommit_, prepareTime);
-        okParticipants_.insert(shardID);
+    void PrepareOK(int shard_idx, Timestamp &prepare_timestamp) {
+        commit_timestamp_ = std::max(commit_timestamp_, prepare_timestamp);
+        ok_participants_.insert(shard_idx);
     }
 
     bool TryCoord() {
-        return nParticipants_ != -1 &&
-               okParticipants_.size() ==
-                   (static_cast<std::size_t>(nParticipants_) - 1);
+        return n_participants_ != -1 &&
+               ok_participants_.size() ==
+                   (static_cast<std::size_t>(n_participants_) - 1);
     }
 
     bool CanCommit() {
-        return nParticipants_ != -1 &&
-               okParticipants_.size() ==
-                   static_cast<std::size_t>(nParticipants_);
+        return n_participants_ != -1 &&
+               ok_participants_.size() ==
+                   static_cast<std::size_t>(n_participants_);
     }
 
-    uint64_t GetTimeCommit() { return timeCommit_; }
+    Timestamp GetTimeCommit() { return commit_timestamp_; }
 
    private:
-    uint64_t timeCommit_;
-    int nParticipants_;
-    std::unordered_set<int> okParticipants_;
+    Timestamp commit_timestamp_;
+    int n_participants_;
+    std::unordered_set<int> ok_participants_;
     Transaction transaction_;
 };
 
@@ -83,21 +83,21 @@ class Coordinator {
     Coordinator(const TrueTime &tt);
     ~Coordinator();
 
-    Transaction GetTransaction(uint64_t txnID);
+    Transaction GetTransaction(uint64_t transaction_id);
 
-    int GetNParticipants(uint64_t txnID);
+    int GetNParticipants(uint64_t transaction_id);
 
-    Decision StartTransaction(uint64_t txnID, int nParticipants,
-                              Transaction transaction);
+    Decision StartTransaction(uint64_t client_id, uint64_t transaction_id,
+                              int n_participants, Transaction transaction);
 
-    CommitDecision ReceivePrepareOK(uint64_t txnID, int shardID,
-                                    uint64_t timePrepare);
+    CommitDecision ReceivePrepareOK(uint64_t transaction_id, int shard_idx,
+                                    Timestamp &prepare_timestamp);
 
-    void Commit(uint64_t txnID);
+    void Commit(uint64_t transaction_id);
 
-    void Abort(uint64_t txnID);
+    void Abort(uint64_t transaction_id);
 
-    uint64_t CommitWaitMs(uint64_t commit_timestamp);
+    uint64_t CommitWaitMs(Timestamp &commit_timestamp);
 
    private:
     const TrueTime &tt_;

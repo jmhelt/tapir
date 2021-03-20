@@ -170,6 +170,28 @@ DEFINE_int64(strong_max_dep_depth, -1,
              "maximum length of dependency chain"
              " [-1 is no maximum] (for StrongStore MVTSO)");
 
+const std::string strong_consistency_args[] = {"ss", "rss"};
+const strongstore::Consistency strong_consistency[]{
+    strongstore::Consistency::SS,
+    strongstore::Consistency::RSS,
+};
+static bool ValidateStrongConsistency(const char *flagname,
+                                      const std::string &value) {
+    int n = sizeof(strong_consistency_args);
+    for (int i = 0; i < n; ++i) {
+        if (value == strong_consistency_args[i]) {
+            return true;
+        }
+    }
+    std::cerr << "Invalid value for --" << flagname << ": " << value
+              << std::endl;
+    return false;
+}
+DEFINE_string(strong_consistency, strong_consistency_args[0],
+              "the consistency model to use during this"
+              " experiment");
+DEFINE_validator(strong_consistency, &ValidateStrongConsistency);
+
 /**
  * Experiment settings.
  */

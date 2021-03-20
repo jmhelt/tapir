@@ -38,10 +38,10 @@ class ReplicaClient {
                  prepare_timeout_callback ptcb, uint32_t timeout);
 
     void FastPathCommit(uint64_t transaction_id, const Transaction transaction,
-                        uint64_t commit_timestamp, commit_callback ccb,
+                        Timestamp &commit_timestamp, commit_callback ccb,
                         commit_timeout_callback ctcb, uint32_t timeout);
 
-    void Commit(uint64_t transaction_id, uint64_t commit_timestamp,
+    void Commit(uint64_t transaction_id, Timestamp &commit_timestamp,
                 commit_callback ccb, commit_timeout_callback ctcb,
                 uint32_t timeout);
 
