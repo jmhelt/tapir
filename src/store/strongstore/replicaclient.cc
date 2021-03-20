@@ -73,12 +73,12 @@ bool ReplicaClient::PrepareCallback(uint64_t reqId, const string &request_str,
     return true;
 }
 
-void ReplicaClient::FastPathCommit(uint64_t transaction_id,
-                                   const Transaction transaction,
-                                   Timestamp &commit_timestamp,
-                                   commit_callback ccb,
-                                   commit_timeout_callback ctcb,
-                                   uint32_t timeout) {
+void ReplicaClient::CoordinatorCommit(uint64_t transaction_id,
+                                      const Transaction transaction,
+                                      Timestamp &commit_timestamp,
+                                      commit_callback ccb,
+                                      commit_timeout_callback ctcb,
+                                      uint32_t timeout) {
     Debug("[shard %i] Sending fast path COMMIT: %lu", shard_idx_,
           transaction_id);
 

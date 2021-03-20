@@ -109,7 +109,20 @@ int LockStore::ROGet(uint64_t transaction_id, const string &key,
     return REPLY_OK;
 }
 
-int LockStore::Prepare(uint64_t transaction_id, const Transaction &txn) {
+int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
+                       const Timestamp &nonblock_timestamp) {
+    int status = Prepare(transaction_id, transaction);
+    if (status == REPLY_OK) {
+        Debug("nonblock_timestamp: %lu.%lu", nonblock_timestamp.getTimestamp(),
+              nonblock_timestamp.getID());
+        prepared_[transaction_id].set_nonblock_timestamp(nonblock_timestamp);
+    }
+
+    return status;
+}
+
+int LockStore::Prepare(uint64_t transaction_id,
+                       const Transaction &transaction) {
     Debug("[%lu] START PREPARE", transaction_id);
 
     if (prepared_.size() > 100) {
@@ -121,9 +134,9 @@ int LockStore::Prepare(uint64_t transaction_id, const Transaction &txn) {
         return REPLY_OK;
     }
 
-    if (getLocks(transaction_id, txn)) {
+    if (getLocks(transaction_id, transaction)) {
         prepared_.emplace(transaction_id,
-                          PreparedTransaction{transaction_id, txn});
+                          PreparedTransaction{transaction_id, transaction});
         Debug("[%lu] PREPARED TO COMMIT", transaction_id);
         return REPLY_OK;
     } else {
@@ -139,20 +152,20 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
 
     const PreparedTransaction &prepared = prepared_[transaction_id];
 
-    const Transaction &txn = prepared.transaction();
+    const Transaction &transaction = prepared.transaction();
 
-    for (auto &write : txn.getWriteSet()) {
+    for (auto &write : transaction.getWriteSet()) {
         store.put(write.first, write.second, timestamp);
     }
 
     notify_ros = std::move(prepared.waiting_ros());
 
     // Drop locks.
-    dropLocks(transaction_id, txn);
+    dropLocks(transaction_id, transaction);
 
     prepared_.erase(transaction_id);
 
-    return !txn.getWriteSet().empty();
+    return !transaction.getWriteSet().empty();
 }
 
 void LockStore::Abort(uint64_t transaction_id) {
@@ -167,27 +180,29 @@ void LockStore::Load(const string &key, const string &value,
 }
 
 /* Used on commit and abort for second phase of 2PL. */
-void LockStore::dropLocks(uint64_t transaction_id, const Transaction &txn) {
-    for (auto &write : txn.getWriteSet()) {
+void LockStore::dropLocks(uint64_t transaction_id,
+                          const Transaction &transaction) {
+    for (auto &write : transaction.getWriteSet()) {
         locks.releaseForWrite(write.first, transaction_id);
     }
 
-    for (auto &read : txn.getReadSet()) {
+    for (auto &read : transaction.getReadSet()) {
         locks.releaseForRead(read.first, transaction_id);
     }
 }
 
-bool LockStore::getLocks(uint64_t transaction_id, const Transaction &txn) {
-    Debug("start_time: %lu %lu", txn.get_start_time().getTimestamp(),
-          txn.get_start_time().getID());
+bool LockStore::getLocks(uint64_t transaction_id,
+                         const Transaction &transaction) {
+    Debug("start_time: %lu.%lu", transaction.get_start_time().getTimestamp(),
+          transaction.get_start_time().getID());
     bool ret = true;
     // if we don't have read locks, get read locks
-    for (auto &read : txn.getReadSet()) {
+    for (auto &read : transaction.getReadSet()) {
         if (!locks.lockForRead(read.first, transaction_id)) {
             ret = false;
         }
     }
-    for (auto &write : txn.getWriteSet()) {
+    for (auto &write : transaction.getWriteSet()) {
         if (!locks.lockForWrite(write.first, transaction_id)) {
             ret = false;
         }

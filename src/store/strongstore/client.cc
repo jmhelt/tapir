@@ -42,7 +42,8 @@ Client::Client(Consistency consistency, transport::Configuration &config,
                uint64_t client_id, int nShards, int closestReplica,
                Transport *transport, Partitioner *part, TrueTime &tt,
                bool debug_stats)
-    : config_{config},
+    : min_read_timestamp_{},
+      config_{config},
       client_id_{client_id},
       nshards(nShards),
       transport_{transport},
@@ -161,8 +162,7 @@ int Client::ChooseCoordinator() {
 }
 
 Timestamp Client::ChooseNonBlockTimestamp() {
-    // TODO: Choose coordinator
-    return {tt_.GetTime() + 1, client_id_};
+    return {tt_.GetTime() + 10000, client_id_};
 }
 
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {
@@ -179,6 +179,7 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     Timestamp nonblock_timestamp = Timestamp();
     if (consistency_ == Consistency::RSS) {
         nonblock_timestamp = ChooseNonBlockTimestamp();
+        req->nonblock_timestamp = nonblock_timestamp;
     }
 
     for (auto p : participants_) {
@@ -205,13 +206,9 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
                             reqId);
                         return;
                     }
-                    PendingRequest *req = itr->second;
-
-                    --req->outstandingPrepares;
                 },
                 [](int, Timestamp) {}, timeout);
         }
-        req->outstandingPrepares++;
     }
 }
 
@@ -228,7 +225,6 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     }
     PendingRequest *req = itr->second;
 
-    --req->outstandingPrepares;
     transaction_status_t tstatus = ABORTED_SYSTEM;
     switch (status) {
         case REPLY_OK:
@@ -243,34 +239,50 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     }
 
     commit_callback ccb = req->ccb;
+    Timestamp nonblock_timestamp = req->nonblock_timestamp;
     pendingReqs.erase(reqId);
     delete req;
-    if (debug_stats_) {
-        Latency_End(&commit_lat_);
+
+    if (consistency_ == Consistency::SS) {
+        if (debug_stats_) {
+            Latency_End(&commit_lat_);
+        }
+        ccb(tstatus);
+    } else if (consistency_ == Consistency::RSS) {
+        uint64_t ms = tt_.TimeToWaitUntilMS(nonblock_timestamp.getTimestamp());
+        Debug("Waiting for nonblock time: %lu", ms);
+        min_read_timestamp_ = std::max(min_read_timestamp_, respTs);
+        Debug("min_read_timestamp_: %lu.%lu",
+              min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
+        transport_->Timer(ms, [this, ccb, tstatus] {
+            if (debug_stats_) {
+                Latency_End(&commit_lat_);
+            }
+            ccb(tstatus);
+        });
+    } else {
+        NOT_REACHABLE();
     }
-    ccb(tstatus);
 }
 
 /* Attempts to commit the ongoing transaction. */
 void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
-    transport_->Timer(0, [this, ccb, ctcb, timeout]() {
-        if (debug_stats_) {
-            Latency_Start(&commit_lat_);
-        }
-        uint64_t reqId = lastReqId++;
-        PendingRequest *req = new PendingRequest(reqId, t_id);
-        pendingReqs[reqId] = req;
-        req->ccb = ccb;
-        req->ctcb = ctcb;
-        req->maxRepliedTs = 0;
-        req->callbackInvoked = false;
-        req->timeout = timeout;
+    if (debug_stats_) {
+        Latency_Start(&commit_lat_);
+    }
+    uint64_t reqId = lastReqId++;
+    PendingRequest *req = new PendingRequest(reqId, t_id);
+    pendingReqs[reqId] = req;
+    req->ccb = ccb;
+    req->ctcb = ctcb;
+    req->maxRepliedTs = 0;
+    req->callbackInvoked = false;
+    req->timeout = timeout;
 
-        stats.IncrementList("txn_groups", participants_.size());
+    stats.IncrementList("txn_groups", participants_.size());
 
-        Prepare(req, timeout);
-    });
+    Prepare(req, timeout);
 }
 
 /* Aborts the ongoing transaction. */
@@ -299,34 +311,31 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
         bclient[i]->AddReadSet(key, commit_timestamp);
     }
 
-    transport_->Timer(0, [this, ccb, ctcb, timeout]() {
-        if (debug_stats_) {
-            Latency_Start(&commit_lat_);
-        }
-        uint64_t reqId = lastReqId++;
-        PendingRequest *req = new PendingRequest(reqId, t_id);
-        pendingReqs[reqId] = req;
-        req->ccb = ccb;
-        req->ctcb = ctcb;
-        req->maxRepliedTs = 0;
-        req->callbackInvoked = false;
-        req->timeout = timeout;
-        req->outstandingPrepares = 0;
-        req->prepareStatus = REPLY_OK;
+    if (debug_stats_) {
+        Latency_Start(&commit_lat_);
+    }
+    uint64_t reqId = lastReqId++;
+    PendingRequest *req = new PendingRequest(reqId, t_id);
+    pendingReqs[reqId] = req;
+    req->ccb = ccb;
+    req->ctcb = ctcb;
+    req->maxRepliedTs = 0;
+    req->callbackInvoked = false;
+    req->timeout = timeout;
+    req->outstandingPrepares = participants_.size();
+    req->prepareStatus = REPLY_OK;
 
-        stats.IncrementList("txn_groups", participants_.size());
+    stats.IncrementList("txn_groups", participants_.size());
 
-        ASSERT(participants_.size() > 0);
+    ASSERT(participants_.size() > 0);
 
-        for (auto p : participants_) {
-            // TODO: Handle timeout
-            bclient[p]->ROCommit(
-                std::bind(&Client::ROCommitCallback, this, req->id,
-                          std::placeholders::_1),
-                []() {}, timeout);
-            req->outstandingPrepares++;
-        }
-    });
+    for (auto p : participants_) {
+        // TODO: Handle timeout
+        bclient[p]->ROCommit(
+            std::bind(&Client::ROCommitCallback, this, req->id,
+                      std::placeholders::_1),
+            []() {}, timeout);
+    }
 }
 
 void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status) {

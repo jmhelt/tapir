@@ -8,16 +8,16 @@ Coordinator::Coordinator(const TrueTime &tt)
 
 Coordinator::~Coordinator() {}
 
-Transaction Coordinator::GetTransaction(uint64_t transaction_id) {
+Transaction &Coordinator::GetTransaction(uint64_t transaction_id) {
     auto search = prepared_transactions_.find(transaction_id);
     ASSERT(search != prepared_transactions_.end());
-    return search->second.GetTransaction();
+    return search->second.transaction();
 }
 
 int Coordinator::GetNParticipants(uint64_t transaction_id) {
     auto search = prepared_transactions_.find(transaction_id);
     ASSERT(search != prepared_transactions_.end());
-    return search->second.GetNParticipants();
+    return search->second.n_participants();
 }
 
 Decision Coordinator::StartTransaction(uint64_t client_id,
@@ -37,11 +37,7 @@ Decision Coordinator::StartTransaction(uint64_t client_id,
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
     pt.StartTransaction(start_timestamp, n_participants, transaction);
 
-    bool try_coord = pt.TryCoord();
-
-    // prepared_transactions_[transaction_id] = std::move(pt);
-
-    if (try_coord) {
+    if (pt.TryCoord()) {
         return Decision::TRY_COORD;
     } else {
         return Decision::WAIT;
@@ -59,15 +55,9 @@ CommitDecision Coordinator::ReceivePrepareOK(uint64_t transaction_id,
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
     pt.PrepareOK(shard_idx, prepare_timestamp);
 
-    bool try_coord = pt.TryCoord();
-    bool can_commit = pt.CanCommit();
-    Timestamp commit_timestamp = pt.GetTimeCommit();
-
-    // prepared_transactions_[transaction_id] = std::move(pt);
-
-    if (can_commit) {
-        return {commit_timestamp, Decision::COMMIT};
-    } else if (try_coord) {
+    if (pt.CanCommit()) {
+        return {pt.GetTimeCommit(), Decision::COMMIT};
+    } else if (pt.TryCoord()) {
         return {Decision::TRY_COORD};
     } else {
         return {Decision::WAIT};
@@ -83,14 +73,7 @@ void Coordinator::Abort(uint64_t transaction_id) {
     prepared_transactions_.erase(transaction_id);
 }
 
-uint64_t Coordinator::CommitWaitMs(Timestamp &commit_timestamp) {
-    uint64_t timestamp = commit_timestamp.getTimestamp();
-    auto now = tt_.Now();
-    Debug("CommitWaitMs: %lu ? %lu", timestamp, now.earliest());
-    if (timestamp <= now.earliest()) {
-        return 0;
-    } else {
-        return timestamp - now.earliest() * 1000;
-    }
+uint64_t Coordinator::CommitWaitMS(Timestamp &commit_timestamp) {
+    return tt_.TimeToWaitUntilMS(commit_timestamp.getTimestamp());
 }
 };  // namespace strongstore

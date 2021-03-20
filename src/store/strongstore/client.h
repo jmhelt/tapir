@@ -88,20 +88,21 @@ class Client : public ::Client {
    private:
     struct PendingRequest {
         PendingRequest(uint64_t id, uint64_t txnId)
-            : id(id),
+            : nonblock_timestamp{},
+              id(id),
               txnId(txnId),
               outstandingPrepares(0),
               commitTries(0),
               maxRepliedTs(0UL),
               prepareStatus(REPLY_OK),
               callbackInvoked(false),
-              timeout(0UL),
-              spannerSleep(false) {}
+              timeout(0UL) {}
 
         ~PendingRequest() {}
 
         commit_callback ccb;
         commit_timeout_callback ctcb;
+        Timestamp nonblock_timestamp;
         uint64_t id;
         uint64_t txnId;
         int outstandingPrepares;
@@ -110,7 +111,6 @@ class Client : public ::Client {
         int prepareStatus;
         bool callbackInvoked;
         uint32_t timeout;
-        bool spannerSleep;
     };
 
     // local Prepare function
@@ -124,6 +124,8 @@ class Client : public ::Client {
 
     // Choose nonblock time
     Timestamp ChooseNonBlockTimestamp();
+
+    Timestamp min_read_timestamp_;
 
     transport::Configuration &config_;
     // Unique ID for this client.

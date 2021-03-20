@@ -340,7 +340,7 @@ void ShardClient::HandlePrepareOKReply(const proto::PrepareOKReply &reply) {
     pendingPrepareOKs.erase(itr);
     delete req;
 
-    Debug("[shard %i] COMMIT timestamp [%lu %lu]", shard_idx_,
+    Debug("[shard %i] COMMIT timestamp [%lu.%lu]", shard_idx_,
           reply.commit_timestamp().timestamp(), reply.commit_timestamp().id());
     pcb(reply.status(), Timestamp(reply.commit_timestamp()));
 }

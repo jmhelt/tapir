@@ -55,7 +55,8 @@ class RssCodebase(ExperimentCodebase):
             '--protocol_mode', config['client_protocol_mode'],
             '--stats_file', stats_file,
             '--num_clients', client_threads,
-            '--clock_error', truetime_error]])
+            '--clock_error', truetime_error,
+            '--strong_consistency', config['consistency']]])
 
         if config['server_emulate_wan']:
             client_command += ' --ping_replicas=true'
