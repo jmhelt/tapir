@@ -148,12 +148,12 @@ def calculate_statistics_for_run(config, local_out_directory, run):
         for client in config["clients"]:
             if get_region(config, client) != region:
                 continue
-            
+
             client_dir = client
             for k in range(config["client_processes_per_client_node"]):
                 client_out_file = os.path.join(local_out_directory,
-                                                client_dir,
-                                                '%s-%d-stdout-%d.log' % (client, k, run))
+                                               client_dir,
+                                               '%s-%d-stdout-%d.log' % (client, k, run))
                 start_time_sec = -1
                 start_time_usec = -1
                 end_time_sec = {}
@@ -275,8 +275,8 @@ def calculate_statistics_for_run(config, local_out_directory, run):
                                         op_tputs[k1] = v / run_time_sec
 
                 client_stats_file = os.path.join(local_out_directory,
-                                                    client_dir,
-                                                    '%s-%d-stats-%d.json' % (client, k, run))
+                                                 client_dir,
+                                                 '%s-%d-stats-%d.json' % (client, k, run))
                 try:
                     with open(client_stats_file) as f:
                         client_stats = json.load(f)
@@ -309,7 +309,7 @@ def calculate_statistics_for_run(config, local_out_directory, run):
                     continue
 
                 server_stats_file = os.path.join(local_out_directory, 'server-%d' % shard_idx,
-                                                    'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
+                                                 'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
                 print(server_stats_file)
                 try:
                     with open(server_stats_file) as f:
