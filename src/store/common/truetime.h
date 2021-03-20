@@ -36,6 +36,8 @@ class TrueTime {
 
     TrueTimeInterval Now() const;
 
+    uint64_t TimeToWaitUntilMS(uint64_t ts) const;
+
    private:
     uint64_t error_;
 };

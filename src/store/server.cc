@@ -211,7 +211,6 @@ Server *server = nullptr;
 TransportReceiver *replica = nullptr;
 ::Transport *tport = nullptr;
 Partitioner *part = nullptr;
-TrueTime tt{FLAGS_clock_error};
 
 void Cleanup(int signal);
 
@@ -222,6 +221,8 @@ int main(int argc, char **argv) {
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     Notice("Starting server.");
+
+    TrueTime tt{FLAGS_clock_error};
 
     // parse replication configuration
     std::ifstream replica_config_stream(FLAGS_replica_config_path);
@@ -243,6 +244,16 @@ int main(int argc, char **argv) {
     for (int i = 0; i < numProtos; ++i) {
         if (FLAGS_protocol == protocol_args[i]) {
             proto = protos[i];
+            break;
+        }
+    }
+
+    // parse consistency
+    strongstore::Consistency consistency = strongstore::Consistency::SS;
+    int n_consistencies = sizeof(strong_consistency);
+    for (int i = 0; i < n_consistencies; ++i) {
+        if (FLAGS_strong_consistency == strong_consistency_args[i]) {
+            consistency = strong_consistency[i];
             break;
         }
     }
@@ -344,9 +355,10 @@ int main(int argc, char **argv) {
             break;
         }
         case PROTO_STRONG: {
-            server = new strongstore::Server(
-                shard_config, replica_config, FLAGS_server_id, FLAGS_group_idx,
-                FLAGS_replica_idx, tport, tt, FLAGS_debug_stats);
+            server = new strongstore::Server(consistency, shard_config,
+                                             replica_config, FLAGS_server_id,
+                                             FLAGS_group_idx, FLAGS_replica_idx,
+                                             tport, tt, FLAGS_debug_stats);
             replica = new replication::vr::VRReplica(
                 replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
                 dynamic_cast<replication::AppReplica *>(server),

@@ -321,7 +321,6 @@ std::vector<std::thread *> threads;
 Transport *tport;
 Partitioner *part;
 KeySelector *keySelector;
-TrueTime tt{FLAGS_clock_error};
 
 void Signal(int signal);
 void Cleanup();
@@ -334,6 +333,10 @@ int main(int argc, char **argv) {
         "transaction\n"
         "           processing systems.");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+    Notice("Starting benchmark.");
+
+    TrueTime tt{FLAGS_clock_error};
 
     // parse transport protocol
     transmode_t trans = TRANS_UNKNOWN;
