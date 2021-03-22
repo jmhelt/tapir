@@ -47,13 +47,15 @@ def ssh_args(command, remote_user, remote_host):
 
 
 def run_remote_command_sync(command, remote_user, remote_host):
-    print(command)
+    print("{}@{}: {}".format(remote_user, remote_host, command))
+    #print(command)
     return subprocess.run(ssh_args(command, remote_user, remote_host),
                           stdout=subprocess.PIPE, universal_newlines=True).stdout
 
 
 def run_remote_command_async(command, remote_user, remote_host, detach=True):
-    print(command)
+    print("{}@{}: {}".format(remote_user, remote_host, command))
+    #print(command)
     if detach:
         command = '(%s) >& /dev/null & exit' % command
     return subprocess.Popen(ssh_args(command, remote_user, remote_host))
@@ -104,7 +106,7 @@ def set_file_descriptor_limit(limit, remote_user, remote_host):
 
 def kill_remote_process_by_name_cmd(remote_process_name, kill_args):
     cmd = 'pkill%s %s' % (kill_args, remote_process_name)
-    print(cmd)
+    #print(cmd)
     return cmd
 
 

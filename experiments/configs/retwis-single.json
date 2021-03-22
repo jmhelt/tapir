@@ -4,18 +4,26 @@
   "server_names": [
     "us-east-1-0",
     "us-east-1-1",
-    "us-east-1-2"
+    "us-east-1-2",
+    "eu-west-1-0",
+    "eu-west-1-1",
+    "eu-west-1-2"
   ],
   "consistency": "ss",
-  "num_shards": 1,
   "shard_config": "shard.config",
   "replica_config": "replica.config",
   "fault_tolerance": 1,
+  "num_shards": 2,
   "shards": [
     [
       "us-east-1-0",
       "us-east-1-1",
       "us-east-1-2"
+    ],
+    [
+      "eu-west-1-0",
+      "eu-west-1-1",
+      "eu-west-1-2"
     ]
   ],
   "client_total": 1,
@@ -28,6 +36,12 @@
       "us-east-1-1",
       "us-east-1-2",
       "client-0-0"
+    ],
+    "eu-west-1": [
+      "eu-west-1-0",
+      "eu-west-1-1",
+      "eu-west-1-2",
+      "client-1-0"
     ]
   },
   "client_processes_per_client_node": 1,
@@ -210,7 +224,7 @@
   "bin_directory_name": "bin",
   "client_bin_name": "benchmark",
   "client_name_format_str": "%s",
-  "emulab_user": "jhelt",
+  "emulab_user": "root",
   "max_bandwidth": "1gibps",
   "max_file_descriptors": 1000000,
   "max_retries": 1,
