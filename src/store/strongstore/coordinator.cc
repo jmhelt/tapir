@@ -58,9 +58,9 @@ CommitDecision Coordinator::ReceivePrepareOK(uint64_t transaction_id,
     if (pt.CanCommit()) {
         return {pt.GetTimeCommit(), Decision::COMMIT};
     } else if (pt.TryCoord()) {
-        return {Decision::TRY_COORD};
+        return {Timestamp(), Decision::TRY_COORD};
     } else {
-        return {Decision::WAIT};
+        return {Timestamp(), Decision::WAIT};
     }
 }
 
