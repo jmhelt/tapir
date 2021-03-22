@@ -131,7 +131,8 @@ def wait_for_clients_to_terminate(config, client_ssh_threads):
 
 
 def start_clients(config, local_exp_directory, remote_exp_directory, run):
-    assert(config["client_total"] == len(config["clients"]))
+    assert(config["client_total"] == (len(config["clients"])
+                                      * config["client_processes_per_client_node"]))
     client_processes = []
     for i in range(len(config["clients"])):
         client = config["clients"][i]
