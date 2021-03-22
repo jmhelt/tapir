@@ -156,7 +156,7 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
                 else:
                     client_processes.append(subprocess.Popen(
                         appended_client_commands + ' & wait', shell=True))
-                #print(appended_client_commands)
+                # print(appended_client_commands)
                 appended_client_commands = ''
 
         if len(appended_client_commands) > 0:
@@ -170,7 +170,7 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
             else:
                 client_processes.append(subprocess.Popen(
                     appended_client_commands + ' & wait', shell=True))
-            #print(appended_client_commands)
+            # print(appended_client_commands)
 
     return client_processes
 
@@ -317,7 +317,7 @@ def prepare_remote_exp_directories(config, local_exp_directory, executor):
         server_host = get_server_host(config, i)
         futures.append(executor.submit(prepare_remote_server, config, server_host,
                                        local_exp_directory, remote_out_directory))
-        #prepare_remote_server(config, server_host,
+        # prepare_remote_server(config, server_host,
         #                      local_exp_directory, remote_out_directory)
     for client in config['clients']:
         client_host = get_client_host(config, client)
@@ -364,10 +364,8 @@ def setup_delays(config, wan, executor):
 
     for i in range(len(config['server_names'])):
         server_host = get_server_host(config, i)
-        server_ip_to_delay = get_ip_to_delay(config, name_to_ip,
-                                             config['server_names'][i], True)
-        client_ip_to_delay = get_ip_to_delay(config, name_to_ip,
-                                             config['server_names'][i])
+        server_ip_to_delay = get_ip_to_delay(
+            config, name_to_ip, config['server_names'][i], True)
         if wan:
             futures.append(executor.submit(get_iface_add_delays,
                                            server_ip_to_delay, config['max_bandwidth'],
@@ -378,6 +376,7 @@ def setup_delays(config, wan, executor):
 
     for client in config['clients']:
         client_host = get_client_host(config, client)
+        client_ip_to_delay = get_ip_to_delay(config, name_to_ip, client)
         if wan:
             futures.append(executor.submit(get_iface_add_delays,
                                            client_ip_to_delay, config['max_bandwidth'],
