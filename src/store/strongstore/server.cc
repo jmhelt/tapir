@@ -500,11 +500,6 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
     Debug("[shard %i] Received PREPARE_OK callback [%d]", shard_idx_, status);
 
     if (status == REPLY_OK) {
-        PendingRWCommitParticipantReply *reply =
-            pending_rw_commit_p_replies_[transaction_id];
-
-        commit_timestamp.setID(reply->rid.client_id());
-
         // TODO: Handle timeout
         replica_client_->Commit(
             transaction_id, commit_timestamp,
@@ -736,7 +731,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             }
 
             for (uint64_t ro : notify_ros) {
-              reply.mutable_notify_ros()->Add(ro);
+                reply.mutable_notify_ros()->Add(ro);
             }
             break;
         case strongstore::proto::Request::ABORT:
