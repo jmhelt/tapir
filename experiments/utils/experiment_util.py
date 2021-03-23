@@ -157,7 +157,7 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
                 else:
                     client_processes.append(subprocess.Popen(
                         appended_client_commands + ' & wait', shell=True))
-                # print(appended_client_commands)
+                    print(appended_client_commands)
                 appended_client_commands = ''
 
         if len(appended_client_commands) > 0:
@@ -171,7 +171,7 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
             else:
                 client_processes.append(subprocess.Popen(
                     appended_client_commands + ' & wait', shell=True))
-            # print(appended_client_commands)
+                print(appended_client_commands)
 
     return client_processes
 
