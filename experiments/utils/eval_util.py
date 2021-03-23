@@ -448,10 +448,11 @@ def calculate_op_statistics(config, stats, total_recorded_time, op_type, latenci
         if op_type == 'combined':
             stats['combined']['ops'] = len(latencies)
             stats['combined']['time'] = total_recorded_time
-        if (not 'server_emulate_wan' in config or config['server_emulate_wan']) and len(norm_latencies) > 0:
-            stats['%s_norm' % op_type] = calculate_statistics_for_data(
-                norm_latencies)
-            stats['%s_norm' % op_type]['samples'] = len(norm_latencies)
+        # TODO: fix
+        #if (not 'server_emulate_wan' in config or config['server_emulate_wan']) and len(norm_latencies) > 0:
+        #    stats['%s_norm' % op_type] = calculate_statistics_for_data(
+        #        norm_latencies)
+        #    stats['%s_norm' % op_type]['samples'] = len(norm_latencies)
 
 
 def calculate_all_op_statistics(config, stats, region_op_latencies, region_op_times, region_op_latency_counts, region_op_tputs):
