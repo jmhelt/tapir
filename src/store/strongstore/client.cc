@@ -164,20 +164,20 @@ void Client::Put(const std::string &key, const std::string &value,
 int Client::ChooseCoordinator() {
     ASSERT(participants_.size() != 0);
 
-    // Choose closest coordinator
-    uint64_t min_latency = static_cast<uint64_t>(-1);
-    int min_p = -1;
+    // Choose farthest coordinator
+    uint64_t max_lat = 0;
+    int max_p = -1;
     for (int p : participants_) {
         uint64_t lat = sclient[p]->GetLatencyToLeader();
-        if (lat < min_latency) {
-            min_latency = lat;
-            min_p = p;
+        if (lat >= max_lat) {
+            max_lat = lat;
+            max_p = p;
         }
     }
 
-    Debug("Chosen coordinator: %d", min_p);
+    Debug("Chosen coordinator: %d", max_p);
 
-    return min_p;
+    return max_p;
 }
 
 Timestamp Client::ChooseNonBlockTimestamp() {
