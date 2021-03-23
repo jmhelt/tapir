@@ -191,7 +191,6 @@ def get_name_to_ip_map(config, remote_user, remote_host):
 
     return name_to_ip
 
-
 def get_ip_to_delay(config, name_to_ip, server_name, delay_to_clients=False):
     ip_to_delay = {}
     region = None
@@ -207,16 +206,11 @@ def get_ip_to_delay(config, name_to_ip, server_name, delay_to_clients=False):
                 if name in config['server_names']:
                     ip_to_delay[name_to_ip[name]] = delay
     if delay_to_clients:
-        for i in range(len(config['clients'])):
-            client_name = config['clients'][i]
-            other_region = None
-            for reg, servers in config['server_regions'].items():
-                if config['server_names'][i] in servers:
-                    other_region = reg
-                    break
-            if other_region == None:
-                raise Exception
-            if region != other_region:
-                ip_to_delay[name_to_ip[client_name]
-                            ] = config['region_rtt_latencies'][region][other_region]
+        for reg, delay in config['region_rtt_latencies'][region].items():
+            if reg != region and reg in config['server_regions']:
+                for name in config['server_regions'][reg]:
+                    if name in config['clients']:
+                        ip_to_delay[name_to_ip[name]] = delay
+
     return ip_to_delay
+
