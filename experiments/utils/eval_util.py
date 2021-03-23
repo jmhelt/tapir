@@ -256,6 +256,31 @@ def calculate_statistics_for_run(config, local_out_directory, run):
                                     else:
                                         op_latency_counts[cid]['combined'] = 1
 
+                                if 'client_combine_ro_ops' in config:
+                                    if opCols[x] in config['client_combine_ro_ops']:
+                                        rorw = 'ro'
+                                    else:
+                                        rorw = 'rw'
+
+                                    if rorw in op_latencies[cid]:
+                                        op_latencies[cid][rorw].append(
+                                            opLat)
+                                    else:
+                                        op_latencies[cid][rorw] = [
+                                            opLat]
+
+                                    if rorw in op_times[cid]:
+                                        op_times[cid][rorw].append(
+                                            opTime)
+                                    else:
+                                        op_times[cid][rorw] = [
+                                            opTime]
+
+                                    if rorw in op_latency_counts[cid]:
+                                        op_latency_counts[cid][rorw] += 1
+                                    else:
+                                        op_latency_counts[cid][rorw] = 1
+
                                 if opCols[x] in op_latency_counts[cid]:
                                     op_latency_counts[cid][opCols[x]] += 1
                                 else:
@@ -449,7 +474,7 @@ def calculate_op_statistics(config, stats, total_recorded_time, op_type, latenci
             stats['combined']['ops'] = len(latencies)
             stats['combined']['time'] = total_recorded_time
         # TODO: fix
-        #if (not 'server_emulate_wan' in config or config['server_emulate_wan']) and len(norm_latencies) > 0:
+        # if (not 'server_emulate_wan' in config or config['server_emulate_wan']) and len(norm_latencies) > 0:
         #    stats['%s_norm' % op_type] = calculate_statistics_for_data(
         #        norm_latencies)
         #    stats['%s_norm' % op_type]['samples'] = len(norm_latencies)
@@ -747,7 +772,7 @@ def generate_plots(config, base_out_directory, out_dirs):
                                                     config['cdf_plots']['height'],
                                                     config['cdf_plots']['font'], series, title)
             print(plot_script_file)
-            #subprocesses.append(subprocess.Popen(['gnuplot', plot_script_file]))
+            # subprocesses.append(subprocess.Popen(['gnuplot', plot_script_file]))
             subprocess.call(['gnuplot', plot_script_file])
     # End generate all aggregate cdf plots
     ###
@@ -813,7 +838,7 @@ def generate_plots(config, base_out_directory, out_dirs):
             generate_gnuplot_script_agg(
                 plot, plot_script_file, plot_out_file, csv_files)
             subprocess.call(['gnuplot', plot_script_file])
-            #subprocesses.append(subprocess.Popen(['gnuplot', plot_script_file]))
+            # subprocesses.append(subprocess.Popen(['gnuplot', plot_script_file]))
 
     # End generate specific plots
     ###
