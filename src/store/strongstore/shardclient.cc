@@ -40,12 +40,14 @@ using namespace proto;
 
 ShardClient::ShardClient(const transport::Configuration &config,
                          Transport *transport, uint64_t client_id, int shard)
-    : config_{config},
+    : PingInitiator(this, transport, 1),  // TODO: Assumes replica 0 is leader.
+      config_{config},
       transport_{transport},
       client_id_{client_id},
       shard_idx_{shard} {
     transport_->Register(this, config_, -1, -1);
 
+    // TODO: Remove hardcoding
     replica_ = 0;
     _Latency_Init(&opLat, "op_lat_server");
 }
@@ -55,7 +57,10 @@ ShardClient::~ShardClient() { Latency_Dump(&opLat); }
 void ShardClient::ReceiveMessage(const TransportAddress &remote,
                                  const std::string &type,
                                  const std::string &data, void *meta_data) {
-    Latency_End(&opLat);
+    if (type != ping_.GetTypeName()) {
+        Latency_End(&opLat);
+    }
+
     if (type == get_reply_.GetTypeName()) {
         get_reply_.ParseFromString(data);
         HandleGetReply(get_reply_);
@@ -74,9 +79,25 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == ro_commit_reply_.GetTypeName()) {
         ro_commit_reply_.ParseFromString(data);
         HandleROCommitReply(ro_commit_reply_);
+    } else if (type == ping_.GetTypeName()) {
+        ping_.ParseFromString(data);
+        HandlePingResponse(ping_);
     } else {
         Panic("Received unexpected message type: %s", type.c_str());
     }
+}
+
+bool ShardClient::SendPing(size_t replica, const PingMessage &ping) {
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, ping);
+    return true;
+}
+
+uint64_t ShardClient::GetLatencyToLeader() {
+    uint64_t l = Done() && GetOrderedEstimates().size() > 0
+                     ? GetOrderedEstimates()[0]
+                     : 0;
+
+    return l;
 }
 
 /* Sends BEGIN to a single shard indexed by i. */

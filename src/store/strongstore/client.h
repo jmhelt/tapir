@@ -135,7 +135,7 @@ class Client : public ::Client {
     uint64_t t_id;
 
     // Number of shards in SpanStore.
-    uint64_t nshards;
+    uint64_t nshards_;
 
     // List of participants in the ongoing transaction.
     std::set<int> participants_;
@@ -163,6 +163,8 @@ class Client : public ::Client {
     Consistency consistency_;
 
     bool debug_stats_;
+    bool ping_replicas_;
+    bool first_;
 };
 
 }  // namespace strongstore
