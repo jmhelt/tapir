@@ -1,6 +1,9 @@
 {
   "experiment_independent_vars": [
     [
+      "consistency"
+    ],
+    [
       "client_key_selector",
       "client_zipf_coefficient"
     ]
@@ -18,7 +21,9 @@
     "ap-northeast-1-1",
     "ap-northeast-1-2"
   ],
-  "consistency": "ss",
+  "consistency": [
+    "ss"
+  ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
   "fault_tolerance": 1,
