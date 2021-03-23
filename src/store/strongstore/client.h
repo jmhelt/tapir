@@ -157,7 +157,7 @@ class Client : public ::Client {
     std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
     std::unordered_map<std::string, uint32_t> statInts;
 
-    Latency_t opLat;
+    Latency_t op_lat_;
     Latency_t commit_lat_;
 
     Consistency consistency_;
