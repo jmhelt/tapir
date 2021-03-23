@@ -66,17 +66,16 @@ Client::Client(Consistency consistency, transport::Configuration &config,
     }
 
     Debug("SpanStore client [%lu] created!", client_id_);
-    _Latency_Init(&opLat, "op_lat");
 
     if (debug_stats_) {
+        _Latency_Init(&op_lat_, "op_lat");
         _Latency_Init(&commit_lat_, "commit_lat");
     }
 }
 
 Client::~Client() {
-    Latency_Dump(&opLat);
-
     if (debug_stats_) {
+        Latency_Dump(&op_lat_);
         Latency_Dump(&commit_lat_);
     }
 
@@ -96,6 +95,9 @@ Client::~Client() {
  */
 void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
                    uint32_t timeout) {
+    if (debug_stats_) {
+        Latency_Start(&op_lat_);
+    }
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
         if (ping_replicas_ && first_) {
             for (uint64_t i = 0; i < nshards_; i++) {
@@ -120,7 +122,6 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
 void Client::Get(const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
     transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
-        Latency_Start(&opLat);
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
         int i = (*part)(key, nshards_, -1, participants_);
@@ -132,10 +133,8 @@ void Client::Get(const std::string &key, get_callback gcb,
 
         // Send the GET operation to appropriate shard.
         auto gcbLat = [this, gcb](int status, const std::string &key,
-                                  const std::string &val, Timestamp ts) {
-            Latency_End(&opLat);
-            gcb(status, key, val, ts);
-        };
+                                  const std::string &val,
+                                  Timestamp ts) { gcb(status, key, val, ts); };
         bclient[i]->Get(key, gcbLat, gtcb, timeout);
     });
 }
@@ -145,7 +144,6 @@ void Client::Put(const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
     transport_->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
-        Latency_Start(&opLat);
         Debug("PUT [%lu : %s]", t_id, key.c_str());
         // Contact the appropriate shard to set the value.
         int i = (*part)(key, nshards_, -1, participants_);
@@ -157,7 +155,6 @@ void Client::Put(const std::string &key, const std::string &value,
 
         auto pcbLat = [this, pcb](int status1, const std::string &key1,
                                   const std::string &val1) {
-            Latency_End(&opLat);
             pcb(status1, key1, val1);
         };
         bclient[i]->Put(key, value, pcbLat, ptcb, timeout);
@@ -291,6 +288,7 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
 void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
     if (debug_stats_) {
+        Latency_End(&op_lat_);
         Latency_Start(&commit_lat_);
     }
     uint64_t reqId = lastReqId++;
