@@ -37,6 +37,7 @@
 #include "lib/message.h"
 #include "lib/transport.h"
 #include "store/common/frontend/txnclient.h"
+#include "store/common/pinginitiator.h"
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
@@ -55,7 +56,10 @@ enum Mode {
     MODE_MVTSO
 };
 
-class ShardClient : public TxnClient, public TransportReceiver {
+class ShardClient : public TxnClient,
+                    public TransportReceiver,
+                    public PingInitiator,
+                    public PingTransport {
    public:
     /* Constructor needs path to shard config. */
     ShardClient(const transport::Configuration &config, Transport *transport,
@@ -97,6 +101,11 @@ class ShardClient : public TxnClient, public TransportReceiver {
     void PrepareAbort(uint64_t transaction_id, int participant_shard,
                       prepare_callback pcb, prepare_timeout_callback ptcb,
                       uint32_t timeout);
+
+    // Override PingInitiator
+    virtual bool SendPing(size_t replica, const PingMessage &ping);
+
+    uint64_t GetLatencyToLeader();
 
     // Unimplemented
     virtual void Put(uint64_t id, const std::string &key,
@@ -179,6 +188,7 @@ class ShardClient : public TxnClient, public TransportReceiver {
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    PingMessage ping_;
 };
 
 }  // namespace strongstore

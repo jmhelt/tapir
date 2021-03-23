@@ -46,7 +46,8 @@ Server::Server(Consistency consistency,
                const transport::Configuration &replica_config,
                uint64_t server_id, int shard_idx, int replica_idx,
                Transport *transport, const TrueTime &tt, bool debug_stats)
-    : shard_config_{shard_config},
+    : PingServer(transport),
+      shard_config_{shard_config},
       replica_config_{replica_config},
       transport_{transport},
       tt_{tt},
@@ -72,21 +73,6 @@ Server::Server(Consistency consistency,
         _Latency_Init(&prepare_lat_, "prepare_lat");
         _Latency_Init(&commit_lat_, "commit_lat");
     }
-
-    RegisterHandler(
-        &get_, static_cast<MessageServer::MessageHandler>(&Server::HandleGet));
-    RegisterHandler(&rw_commit_c_, static_cast<MessageServer::MessageHandler>(
-                                       &Server::HandleRWCommitCoordinator));
-    RegisterHandler(&rw_commit_p_, static_cast<MessageServer::MessageHandler>(
-                                       &Server::HandleRWCommitParticipant));
-
-    RegisterHandler(&prepare_ok_, static_cast<MessageServer::MessageHandler>(
-                                      &Server::HandlePrepareOK));
-    RegisterHandler(&prepare_abort_, static_cast<MessageServer::MessageHandler>(
-                                         &Server::HandlePrepareAbort));
-
-    RegisterHandler(&ro_commit_, static_cast<MessageServer::MessageHandler>(
-                                     &Server::HandleROCommit));
 }
 
 Server::~Server() {
@@ -104,10 +90,36 @@ Server::~Server() {
     }
 }
 
-void Server::HandleGet(const TransportAddress &remote,
-                       google::protobuf::Message *m) {
-    proto::Get &msg = *dynamic_cast<proto::Get *>(m);
+void Server::ReceiveMessage(const TransportAddress &remote,
+                            const std::string &type, const std::string &data,
+                            void *meta_data) {
+    if (type == get_.GetTypeName()) {
+        get_.ParseFromString(data);
+        HandleGet(remote, get_);
+    } else if (type == rw_commit_c_.GetTypeName()) {
+        rw_commit_c_.ParseFromString(data);
+        HandleRWCommitCoordinator(remote, rw_commit_c_);
+    } else if (type == rw_commit_p_.GetTypeName()) {
+        rw_commit_p_.ParseFromString(data);
+        HandleRWCommitParticipant(remote, rw_commit_p_);
+    } else if (type == prepare_ok_.GetTypeName()) {
+        prepare_ok_.ParseFromString(data);
+        HandlePrepareOK(remote, prepare_ok_);
+    } else if (type == prepare_abort_.GetTypeName()) {
+        prepare_abort_.ParseFromString(data);
+        HandlePrepareAbort(remote, prepare_abort_);
+    } else if (type == ro_commit_.GetTypeName()) {
+        ro_commit_.ParseFromString(data);
+        HandleROCommit(remote, ro_commit_);
+    } else if (type == ping_.GetTypeName()) {
+        ping_.ParseFromString(data);
+        HandlePingMessage(this, remote, ping_);
+    } else {
+        Panic("Received unexpected message type: %s", type.c_str());
+    }
+}
 
+void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
     Debug("Received GET request: %s", msg.key().c_str());
 
     std::pair<Timestamp, std::string> value;
@@ -179,9 +191,7 @@ void Server::SendROCommitReply(PendingROCommitReply *reply) {
 }
 
 void Server::HandleROCommit(const TransportAddress &remote,
-                            google::protobuf::Message *m) {
-    proto::ROCommit &msg = *dynamic_cast<proto::ROCommit *>(m);
-
+                            proto::ROCommit &msg) {
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
     uint64_t transaction_id = msg.transaction_id();
@@ -228,10 +238,7 @@ void Server::HandleROCommit(const TransportAddress &remote,
 }
 
 void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
-                                       google::protobuf::Message *m) {
-    proto::RWCommitCoordinator &msg =
-        *dynamic_cast<proto::RWCommitCoordinator *>(m);
-
+                                       proto::RWCommitCoordinator &msg) {
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
 
@@ -429,10 +436,7 @@ void Server::SendRWCommmitParticipantReplyFail(const TransportAddress &remote,
 }
 
 void Server::HandleRWCommitParticipant(const TransportAddress &remote,
-                                       google::protobuf::Message *m) {
-    proto::RWCommitParticipant &msg =
-        *dynamic_cast<proto::RWCommitParticipant *>(m);
-
+                                       proto::RWCommitParticipant &msg) {
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
 
@@ -543,9 +547,7 @@ void Server::AbortParticipantCallback(
 }
 
 void Server::HandlePrepareOK(const TransportAddress &remote,
-                             google::protobuf::Message *m) {
-    proto::PrepareOK &msg = *dynamic_cast<proto::PrepareOK *>(m);
-
+                             proto::PrepareOK &msg) {
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
 
@@ -632,9 +634,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 }
 
 void Server::HandlePrepareAbort(const TransportAddress &remote,
-                                google::protobuf::Message *m) {
+                                proto::PrepareAbort &msg) {
     Debug("Received Prepare ABORT");
-    proto::PrepareAbort &msg = *dynamic_cast<proto::PrepareAbort *>(m);
 
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();

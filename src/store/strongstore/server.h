@@ -40,7 +40,7 @@
 #include "lib/transport.h"
 #include "replication/vr/client.h"
 #include "replication/vr/replica.h"
-#include "store/common/backend/messageserver.h"
+#include "store/common/backend/pingserver.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
 #include "store/strongstore/coordinator.h"
@@ -89,7 +89,10 @@ struct hash<strongstore::RequestID> {
 
 namespace strongstore {
 
-class Server : public replication::AppReplica, public MessageServer {
+class Server : public TransportReceiver,
+               public ::Server,
+               public replication::AppReplica,
+               public PingServer {
    public:
     Server(Consistency consistency,
            const transport::Configuration &shard_config,
@@ -98,14 +101,24 @@ class Server : public replication::AppReplica, public MessageServer {
            bool debug_stats);
     virtual ~Server();
 
+    // Override TransportReceiver
+    virtual void ReceiveMessage(const TransportAddress &remote,
+                                const std::string &type,
+                                const std::string &data,
+                                void *meta_data) override;
+
+    // Override AppReplica
     virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
                               string &response) override;
     virtual void ReplicaUpcall(opnum_t opnum, const string &op,
                                string &response) override;
 
     virtual void UnloggedUpcall(const string &op, string &response) override;
+
+    // Override Server
     void Load(const string &key, const string &value,
               const Timestamp timestamp) override;
+    virtual inline Stats &GetStats() override { return stats; };
 
    private:
     class PendingRWCommitCoordinatorReply {
@@ -147,14 +160,12 @@ class Server : public replication::AppReplica, public MessageServer {
         std::unordered_set<std::string> keys;
     };
 
-    void HandleGet(const TransportAddress &remote,
-                   google::protobuf::Message *msg);
+    void HandleGet(const TransportAddress &remote, proto::Get &msg);
 
-    void HandleROCommit(const TransportAddress &remote,
-                        google::protobuf::Message *m);
+    void HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg);
 
     void HandleRWCommitCoordinator(const TransportAddress &remote,
-                                   google::protobuf::Message *msg);
+                                   proto::RWCommitCoordinator &msg);
 
     void SendROCommitReply(PendingROCommitReply *reply);
 
@@ -176,12 +187,11 @@ class Server : public replication::AppReplica, public MessageServer {
     void SendPrepareOKRepliesFail(PendingPrepareOKReply *reply);
 
     void HandleRWCommitParticipant(const TransportAddress &remote,
-                                   google::protobuf::Message *m);
+                                   proto::RWCommitParticipant &msg);
 
-    void HandlePrepareOK(const TransportAddress &remote,
-                         google::protobuf::Message *m);
+    void HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &msg);
     void HandlePrepareAbort(const TransportAddress &remote,
-                            google::protobuf::Message *m);
+                            proto::PrepareAbort &msg);
 
     void PrepareCallback(uint64_t transaction_id, int status,
                          Timestamp timestamp);
@@ -237,6 +247,9 @@ class Server : public replication::AppReplica, public MessageServer {
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    PingMessage ping_;
+
+    Stats stats;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;

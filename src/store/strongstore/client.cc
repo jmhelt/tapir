@@ -45,18 +45,20 @@ Client::Client(Consistency consistency, transport::Configuration &config,
     : min_read_timestamp_{},
       config_{config},
       client_id_{client_id},
-      nshards(nShards),
+      nshards_(nShards),
       transport_{transport},
       part(part),
       tt_{tt},
       consistency_{consistency},
-      debug_stats_{debug_stats} {
+      debug_stats_{debug_stats},
+      ping_replicas_{true},
+      first_{true} {
     t_id = client_id_ << 26;
 
     Debug("Initializing StrongStore client with id [%lu]", client_id_);
 
     /* Start a client for each shard. */
-    for (uint64_t i = 0; i < nshards; i++) {
+    for (uint64_t i = 0; i < nshards_; i++) {
         ShardClient *shardclient =
             new ShardClient(config_, transport_, client_id_, i);
         bclient.push_back(new BufferClient(shardclient));
@@ -95,12 +97,19 @@ Client::~Client() {
 void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
                    uint32_t timeout) {
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
+        if (ping_replicas_ && first_) {
+            for (uint64_t i = 0; i < nshards_; i++) {
+                sclient[i]->StartPings();
+            }
+            first_ = false;
+        }
+
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants_.clear();
 
         Timestamp start_time{tt_.GetTime(), client_id_};
-        for (uint64_t i = 0; i < nshards; i++) {
+        for (uint64_t i = 0; i < nshards_; i++) {
             bclient[i]->Begin(t_id, start_time);
         }
         bcb(t_id);
@@ -114,7 +123,7 @@ void Client::Get(const std::string &key, get_callback gcb,
         Latency_Start(&opLat);
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
-        int i = (*part)(key, nshards, -1, participants_);
+        int i = (*part)(key, nshards_, -1, participants_);
 
         // If needed, add this shard to set of participants
         if (participants_.find(i) == participants_.end()) {
@@ -139,7 +148,7 @@ void Client::Put(const std::string &key, const std::string &value,
         Latency_Start(&opLat);
         Debug("PUT [%lu : %s]", t_id, key.c_str());
         // Contact the appropriate shard to set the value.
-        int i = (*part)(key, nshards, -1, participants_);
+        int i = (*part)(key, nshards_, -1, participants_);
 
         // If needed, add this shard to set of participants
         if (participants_.find(i) == participants_.end()) {
@@ -157,8 +166,21 @@ void Client::Put(const std::string &key, const std::string &value,
 
 int Client::ChooseCoordinator() {
     ASSERT(participants_.size() != 0);
-    // TODO: Choose coordinator
-    return *participants_.begin();
+
+    // Choose closest coordinator
+    uint64_t min_latency = static_cast<uint64_t>(-1);
+    int min_p = -1;
+    for (int p : participants_) {
+        uint64_t lat = sclient[p]->GetLatencyToLeader();
+        if (lat < min_latency) {
+            min_latency = lat;
+            min_p = p;
+        }
+    }
+
+    Debug("Chosen coordinator: %d", min_p);
+
+    return min_p;
 }
 
 Timestamp Client::ChooseNonBlockTimestamp() {
@@ -301,7 +323,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
 
     for (auto &key : keys) {
-        int i = (*part)(key, nshards, -1, participants_);
+        int i = (*part)(key, nshards_, -1, participants_);
         auto search = participants_.find(i);
         if (search == participants_.end()) {
             bclient[i]->Begin(t_id, commit_timestamp);
