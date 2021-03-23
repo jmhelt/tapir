@@ -162,7 +162,74 @@
     }
   },
   "server_emulate_wan": true,
-  "plots": [],
+  "plots": [
+    {
+      "name": "lat-skew-combined",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner"
+      ],
+      "x_var_is_config": true,
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "client_zipf_coefficient"
+      ],
+      "y_var": [
+        "aggregate",
+        "combined",
+        "p50"
+      ],
+      "y_label": "p50 Latency (ms)",
+      "x_label": "Zipf Coefficient"
+    },
+    {
+      "name": "lat-skew-ro",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner"
+      ],
+      "x_var_is_config": true,
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "client_zipf_coefficient"
+      ],
+      "y_var": [
+        "aggregate",
+        "ro",
+        "p50"
+      ],
+      "y_label": "p50 Latency (ms)",
+      "x_label": "Zipf Coefficient"
+    },
+    {
+      "name": "lat-skew-rw",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner"
+      ],
+      "x_var_is_config": true,
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "client_zipf_coefficient"
+      ],
+      "y_var": [
+        "aggregate",
+        "rw",
+        "p50"
+      ],
+      "y_label": "p50 Latency (ms)",
+      "x_label": "Zipf Coefficient"
+    }
+  ],
   "cdf_plots": {
     "font": "DejaVu Sans,12",
     "height": 600,
@@ -216,6 +283,9 @@
   "make_clean": false,
   "network_config_file_name": "shard.config",
   "remote_bin_directory_nfs_enabled": false,
+  "client_combine_ro_ops": [
+    "get_timeline"
+  ],
   "client_combine_stats_blacklist": [],
   "client_stats_blacklist": [],
   "client_cdf_plot_blacklist": [],
