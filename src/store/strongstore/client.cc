@@ -341,7 +341,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     req->outstandingPrepares = sharded_keys.size();
     req->prepareStatus = REPLY_OK;
 
-    stats.IncrementList("txn_groups", participants_.size());
+    stats.IncrementList("txn_groups", sharded_keys.size());
 
     ASSERT(sharded_keys.size() > 0);
 
