@@ -110,7 +110,7 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
         t_id++;
         participants_.clear();
 
-        Timestamp start_time{tt_.GetTime(), client_id_};
+        Timestamp start_time{tt_.Now().latest(), client_id_};
         for (uint64_t i = 0; i < nshards_; i++) {
             bclient[i]->Begin(t_id, start_time);
         }
@@ -181,7 +181,7 @@ int Client::ChooseCoordinator() {
 }
 
 Timestamp Client::ChooseNonBlockTimestamp() {
-    return {tt_.GetTime() + 10000, client_id_};
+    return {tt_.Now().earliest() + 10000, client_id_};
 }
 
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {
@@ -316,7 +316,6 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
     t_id++;
-    participants_.clear();
 
     Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
 
@@ -325,13 +324,6 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     for (auto &key : keys) {
         int i = (*part)(key, nshards_, -1, participants_);
         sharded_keys[i].push_back(key);
-        // auto search = participants_.find(i);
-        // if (search == participants_.end()) {
-        //     bclient[i]->Begin(t_id, commit_timestamp);
-        //     participants_.insert(i);
-        // }
-
-        // bclient[i]->AddReadSet(key, commit_timestamp);
     }
 
     if (debug_stats_) {
@@ -351,12 +343,12 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
 
     stats.IncrementList("txn_groups", participants_.size());
 
-    ASSERT(participants_.size() > 0);
+    ASSERT(sharded_keys.size() > 0);
 
-    for (auto p : participants_) {
+    for (auto &s : sharded_keys) {
         // TODO: Handle timeout
-        bclient[p]->ROCommit(
-            t_id, sharded_keys[p], commit_timestamp,
+        bclient[s.first]->ROCommit(
+            t_id, s.second, commit_timestamp,
             std::bind(&Client::ROCommitCallback, this, req->id,
                       std::placeholders::_1),
             []() {}, timeout);

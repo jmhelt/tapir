@@ -88,6 +88,13 @@ Server::~Server() {
     }
 }
 
+// Assume GetStats called once before exiting protgram
+Stats &Server::GetStats() {
+    Stats &s = store_.GetStats();
+    stats_.Merge(s);
+    return stats_;
+}
+
 void Server::ReceiveMessage(const TransportAddress &remote,
                             const std::string &type, const std::string &data,
                             void *meta_data) {
