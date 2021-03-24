@@ -79,11 +79,13 @@
   "benchmark_name": "retwis",
   "client_key_selector": [
     "uniform",
+    "zipf",
     "zipf"
   ],
   "client_zipf_coefficient": [
     0.0,
-    0.25
+    0.25,
+    0.75
   ],
   "rw_num_ops_txn": 1,
   "server_preload_keys": true,
