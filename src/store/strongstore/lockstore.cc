@@ -38,7 +38,8 @@ using namespace std;
 
 namespace strongstore {
 
-LockStore::LockStore() : store{} {}
+LockStore::LockStore(Consistency consistency)
+    : store_{}, locks_{}, prepared_{}, consistency_{consistency} {}
 LockStore::~LockStore() {}
 
 int LockStore::Get(uint64_t transaction_id, const string &key,
@@ -46,11 +47,11 @@ int LockStore::Get(uint64_t transaction_id, const string &key,
     Debug("[%lu] GET %s", transaction_id, BytesToHex(key, 16).c_str());
 
     // grab the lock (ok, if we already have it)
-    if (!locks.lockForRead(key, transaction_id)) {
+    if (!locks_.lockForRead(key, transaction_id)) {
         return REPLY_FAIL;
     }
 
-    if (!store.get(key, value)) {
+    if (!store_.get(key, value)) {
         Debug("[%lu] Couldn't find key %s", transaction_id,
               BytesToHex(key, 16).c_str());
         // couldn't find the key
@@ -66,17 +67,28 @@ int LockStore::Get(uint64_t transaction_id, const string &key,
 
 int LockStore::ROBegin(uint64_t transaction_id,
                        const std::unordered_set<std::string> &keys,
+                       const Timestamp &commit_timestamp,
                        uint64_t &n_conflicting_prepared) {
     n_conflicting_prepared = 0;
 
     for (auto &p : prepared_) {
-        const Transaction &transaction = p.second.transaction();
+        PreparedTransaction &pt = p.second;
+
+        if (consistency_ == Consistency::RSS &&
+            commit_timestamp < pt.nonblock_timestamp()) {
+            Debug("Not waiting for prepared transaction: %lu < %lu",
+                  commit_timestamp.getTimestamp(),
+                  pt.nonblock_timestamp().getTimestamp());
+            continue;
+        }
+
+        const Transaction &transaction = pt.transaction();
 
         for (auto &w : transaction.getWriteSet()) {
             if (keys.count(w.first) != 0) {
                 Debug("%lu conflicts with %lu %lu", transaction_id,
-                      p.second.transaction_id(), p.first);
-                p.second.add_waiting_ro(transaction_id);
+                      pt.transaction_id(), p.first);
+                pt.add_waiting_ro(transaction_id);
                 n_conflicting_prepared += 1;
                 break;
             }
@@ -95,7 +107,7 @@ int LockStore::ROGet(uint64_t transaction_id, const string &key,
                      pair<Timestamp, string> &value) {
     Debug("[%lu] RO GET %s", transaction_id, BytesToHex(key, 16).c_str());
 
-    if (!store.get(key, timestamp, value)) {
+    if (!store_.get(key, timestamp, value)) {
         Debug("[%lu] Couldn't find key %s", transaction_id,
               BytesToHex(key, 16).c_str());
         // couldn't find the key
@@ -155,7 +167,7 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
     const Transaction &transaction = prepared.transaction();
 
     for (auto &write : transaction.getWriteSet()) {
-        store.put(write.first, write.second, timestamp);
+        store_.put(write.first, write.second, timestamp);
     }
 
     notify_ros = std::move(prepared.waiting_ros());
@@ -176,18 +188,18 @@ void LockStore::Abort(uint64_t transaction_id) {
 
 void LockStore::Load(const string &key, const string &value,
                      const Timestamp &timestamp) {
-    store.put(key, value, timestamp);
+    store_.put(key, value, timestamp);
 }
 
 /* Used on commit and abort for second phase of 2PL. */
 void LockStore::dropLocks(uint64_t transaction_id,
                           const Transaction &transaction) {
     for (auto &write : transaction.getWriteSet()) {
-        locks.releaseForWrite(write.first, transaction_id);
+        locks_.releaseForWrite(write.first, transaction_id);
     }
 
     for (auto &read : transaction.getReadSet()) {
-        locks.releaseForRead(read.first, transaction_id);
+        locks_.releaseForRead(read.first, transaction_id);
     }
 }
 
@@ -198,12 +210,12 @@ bool LockStore::getLocks(uint64_t transaction_id,
     bool ret = true;
     // if we don't have read locks, get read locks
     for (auto &read : transaction.getReadSet()) {
-        if (!locks.lockForRead(read.first, transaction_id)) {
+        if (!locks_.lockForRead(read.first, transaction_id)) {
             ret = false;
         }
     }
     for (auto &write : transaction.getWriteSet()) {
-        if (!locks.lockForWrite(write.first, transaction_id)) {
+        if (!locks_.lockForWrite(write.first, transaction_id)) {
             ret = false;
         }
     }

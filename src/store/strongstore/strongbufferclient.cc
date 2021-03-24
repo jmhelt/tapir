@@ -72,8 +72,12 @@ void BufferClient::AddReadSet(const std::string &key,
     this->readSet.insert(std::make_pair(key, std::make_tuple("", timestamp)));
 }
 
-void BufferClient::ROCommit(commit_callback ccb, commit_timeout_callback ctcb,
+void BufferClient::ROCommit(uint64_t transaction_id,
+                            const std::vector<std::string> &keys,
+                            const Timestamp &commit_timestamp,
+                            commit_callback ccb, commit_timeout_callback ctcb,
                             uint32_t timeout) {
-    shard_client_->ROCommit(tid, txn, ccb, ctcb, timeout);
+    shard_client_->ROCommit(transaction_id, keys, commit_timestamp, ccb, ctcb,
+                            timeout);
 }
 };  // namespace strongstore

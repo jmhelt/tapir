@@ -58,8 +58,9 @@ class BufferClient : public ::BufferClient {
 
     void AddReadSet(const std::string &key, const Timestamp &timestamp);
 
-    void ROCommit(commit_callback ccb, commit_timeout_callback ctcb,
-                  uint32_t timeout);
+    void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
+                  const Timestamp &commit_timestamp, commit_callback ccb,
+                  commit_timeout_callback ctcb, uint32_t timeout);
 
    private:
     // Underlying single shard transaction client implementation.

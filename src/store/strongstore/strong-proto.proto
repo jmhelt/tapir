@@ -79,6 +79,7 @@ message ROCommit {
     required uint64 transaction_id = 2;
     required TimestampMessage commit_timestamp = 3;
     repeated string keys = 4;
+    optional TimestampMessage min_timestamp = 5;
 }
 
 message ReadReply {

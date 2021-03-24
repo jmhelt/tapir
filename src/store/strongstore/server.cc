@@ -47,6 +47,7 @@ Server::Server(Consistency consistency,
                uint64_t server_id, int shard_idx, int replica_idx,
                Transport *transport, const TrueTime &tt, bool debug_stats)
     : PingServer(transport),
+      store_{consistency},
       shard_config_{shard_config},
       replica_config_{replica_config},
       transport_{transport},
@@ -59,7 +60,6 @@ Server::Server(Consistency consistency,
       consistency_{consistency},
       debug_stats_{debug_stats} {
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
-    store_ = new strongstore::LockStore();
 
     for (int i = 0; i < shard_config_.n; i++) {
         shard_clients_.push_back(
@@ -76,8 +76,6 @@ Server::Server(Consistency consistency,
 }
 
 Server::~Server() {
-    delete store_;
-
     for (auto s : shard_clients_) {
         delete s;
     }
@@ -123,7 +121,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
     Debug("Received GET request: %s", msg.key().c_str());
 
     std::pair<Timestamp, std::string> value;
-    store_->Get(msg.transaction_id(), msg.key(), value);
+    store_.Get(msg.transaction_id(), msg.key(), value);
 
     get_reply_.mutable_rid()->CopyFrom(msg.rid());
     get_reply_.set_key(msg.key());
@@ -175,7 +173,7 @@ void Server::SendROCommitReply(PendingROCommitReply *reply) {
     std::pair<Timestamp, std::string> value;
 
     for (auto &k : reply->keys) {
-        status = store_->ROGet(transaction_id, k, commit_timestamp, value);
+        status = store_.ROGet(transaction_id, k, commit_timestamp, value);
         ASSERT(status == REPLY_OK);
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
         rreply->set_val(value.second.c_str());
@@ -201,15 +199,16 @@ void Server::HandleROCommit(const TransportAddress &remote,
     std::unordered_set<std::string> keys;
     keys.insert(msg.keys().begin(), msg.keys().end());
 
-    std::unordered_set<uint64_t> conflicting_prepares;
+    Timestamp commit_timestamp{msg.commit_timestamp()};
 
     uint64_t n_conflicting_prepared = 0;
-    if (store_->ROBegin(transaction_id, keys, n_conflicting_prepared)) {
+    if (store_.ROBegin(transaction_id, keys, commit_timestamp,
+                       n_conflicting_prepared)) {
         Debug("Waiting for prepared transactions");
         PendingROCommitReply *reply =
             new PendingROCommitReply(client_id, client_req_id, remote.clone());
         reply->transaction_id = transaction_id;
-        reply->commit_timestamp = msg.commit_timestamp();
+        reply->commit_timestamp = std::move(commit_timestamp);
         reply->n_waiting_prepared = n_conflicting_prepared;
         reply->keys = std::move(keys);
         pending_ro_commit_repies_[transaction_id] = reply;
@@ -226,8 +225,8 @@ void Server::HandleROCommit(const TransportAddress &remote,
     std::pair<Timestamp, std::string> value;
 
     for (auto &k : keys) {
-        status = store_->ROGet(msg.transaction_id(), k,
-                               Timestamp(msg.commit_timestamp()), value);
+        status = store_.ROGet(msg.transaction_id(), k,
+                              Timestamp(msg.commit_timestamp()), value);
         ASSERT(status == REPLY_OK);
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
         rreply->set_val(value.second.c_str());
@@ -256,10 +255,10 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
         Debug("Trying fast path commit");
         int status = REPLY_FAIL;
         if (consistency_ == Consistency::SS) {
-            status = store_->Prepare(transaction_id, transaction);
+            status = store_.Prepare(transaction_id, transaction);
         } else if (consistency_ == Consistency::RSS) {
-            status = store_->Prepare(transaction_id, transaction,
-                                     nonblock_timestamp);
+            status =
+                store_.Prepare(transaction_id, transaction, nonblock_timestamp);
         } else {
             NOT_REACHABLE();
         }
@@ -285,7 +284,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Fast path commit failed: %lu", transaction_id);
-            store_->Abort(transaction_id);
+            store_.Abort(transaction_id);
             coordinator.Abort(transaction_id);
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
@@ -447,7 +446,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
 
     Transaction transaction{msg.transaction()};
 
-    if (!store_->Prepare(transaction_id, transaction)) {
+    if (!store_.Prepare(transaction_id, transaction)) {
         PendingRWCommitParticipantReply *pending_reply =
             new PendingRWCommitParticipantReply(client_id, client_req_id,
                                                 remote.clone());
@@ -465,7 +464,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
     } else {
         Debug("Prepare failed");
-        store_->Abort(transaction_id);
+        store_.Abort(transaction_id);
         // TODO: Handle timeout
         shard_clients_[coordinator_shard]->PrepareAbort(
             transaction_id, shard_idx_,
@@ -581,10 +580,10 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Debug("Received Prepare OK from all participants");
         int status = REPLY_FAIL;
         if (consistency_ == Consistency::SS) {
-            status = store_->Prepare(transaction_id, transaction);
+            status = store_.Prepare(transaction_id, transaction);
         } else if (consistency_ == Consistency::RSS) {
-            status = store_->Prepare(transaction_id, transaction,
-                                     coord_reply->nonblock_timestamp);
+            status = store_.Prepare(transaction_id, transaction,
+                                    coord_reply->nonblock_timestamp);
         } else {
             NOT_REACHABLE();
         }
@@ -606,7 +605,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Coordinator prepare failed: %lu", transaction_id);
-            store_->Abort(transaction_id);
+            store_.Abort(transaction_id);
             coordinator.Abort(transaction_id);
 
             // Reply to client
@@ -710,8 +709,8 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
     switch (request.op()) {
         case strongstore::proto::Request::PREPARE:
-            store_->Prepare(request.txnid(),
-                            Transaction(request.prepare().txn()));
+            store_.Prepare(request.txnid(),
+                           Transaction(request.prepare().txn()));
             break;
         case strongstore::proto::Request::COMMIT:
             if (debug_stats_) {
@@ -719,11 +718,11 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             }
             Debug("Received COMMIT");
             if (request.commit().has_transaction()) {  // Coordinator commit
-                store_->Prepare(request.txnid(),
-                                Transaction(request.commit().transaction()));
+                store_.Prepare(request.txnid(),
+                               Transaction(request.commit().transaction()));
             }
             commit_timestamp = {request.commit().commit_timestamp()};
-            if (store_->Commit(request.txnid(), commit_timestamp, notify_ros)) {
+            if (store_.Commit(request.txnid(), commit_timestamp, notify_ros)) {
                 max_write_timestamp_ =
                     std::max(max_write_timestamp_, commit_timestamp);
             }
@@ -737,7 +736,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");
-            store_->Abort(request.txnid());
+            store_.Abort(request.txnid());
             break;
         default:
             Panic("Unrecognized operation.");
@@ -752,7 +751,7 @@ void Server::UnloggedUpcall(const string &op, string &response) {
 
 void Server::Load(const string &key, const string &value,
                   const Timestamp timestamp) {
-    store_->Load(key, value, timestamp);
+    store_.Load(key, value, timestamp);
 }
 
 }  // namespace strongstore
