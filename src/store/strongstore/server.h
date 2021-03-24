@@ -100,26 +100,25 @@ class Server : public TransportReceiver,
            const transport::Configuration &replica_config, uint64_t server_id,
            int groupIdx, int idx, Transport *transport, const TrueTime &tt,
            bool debug_stats);
-    virtual ~Server();
+    ~Server();
 
     // Override TransportReceiver
-    virtual void ReceiveMessage(const TransportAddress &remote,
-                                const std::string &type,
-                                const std::string &data,
-                                void *meta_data) override;
+    void ReceiveMessage(const TransportAddress &remote, const std::string &type,
+                        const std::string &data, void *meta_data) override;
 
     // Override AppReplica
-    virtual void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
-                              string &response) override;
-    virtual void ReplicaUpcall(opnum_t opnum, const string &op,
-                               string &response) override;
+    void LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
+                      string &response) override;
+    void ReplicaUpcall(opnum_t opnum, const string &op,
+                       string &response) override;
 
-    virtual void UnloggedUpcall(const string &op, string &response) override;
+    void UnloggedUpcall(const string &op, string &response) override;
 
     // Override Server
     void Load(const string &key, const string &value,
               const Timestamp timestamp) override;
-    virtual inline Stats &GetStats() override { return stats; };
+
+    Stats &GetStats() override;
 
    private:
     class PendingRWCommitCoordinatorReply {
@@ -252,7 +251,7 @@ class Server : public TransportReceiver,
     proto::ROCommitReply ro_commit_reply_;
     PingMessage ping_;
 
-    Stats stats;
+    Stats stats_;
 
     Latency_t prepare_lat_;
     Latency_t commit_lat_;

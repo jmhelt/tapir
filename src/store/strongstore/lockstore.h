@@ -41,6 +41,7 @@
 #include "lib/message.h"
 #include "store/common/backend/lockserver.h"
 #include "store/common/backend/versionstore.h"
+#include "store/common/stats.h"
 #include "store/common/transaction.h"
 #include "store/strongstore/common.h"
 
@@ -74,6 +75,8 @@ class LockStore {
 
     void Load(const std::string &key, const std::string &value,
               const Timestamp &timestamp);
+
+    Stats &GetStats() { return stats_; };
 
    private:
     class PreparedTransaction {
@@ -124,6 +127,8 @@ class LockStore {
     LockServer locks_;
 
     std::map<uint64_t, PreparedTransaction> prepared_;
+
+    Stats stats_;
 
     Consistency consistency_;
 

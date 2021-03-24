@@ -39,7 +39,7 @@ using namespace std;
 namespace strongstore {
 
 LockStore::LockStore(Consistency consistency)
-    : store_{}, locks_{}, prepared_{}, consistency_{consistency} {}
+    : store_{}, locks_{}, prepared_{}, stats_{}, consistency_{consistency} {}
 LockStore::~LockStore() {}
 
 int LockStore::Get(uint64_t transaction_id, const string &key,
@@ -95,6 +95,7 @@ int LockStore::ROBegin(uint64_t transaction_id,
         }
     }
 
+    stats_.IncrementList("n_conflicting_prepared", n_conflicting_prepared);
     if (n_conflicting_prepared == 0) {
         return REPLY_OK;
     } else {
