@@ -34,7 +34,7 @@ message RWCommitCoordinator {
 message RWCommitCoordinatorReply {
     required RequestIDMessage rid = 1;
     required int32 status = 2;
-    required TimestampMessage commit_timestamp = 3;
+    optional TimestampMessage commit_timestamp = 3;
 }
 
 message RWCommitParticipant {
@@ -60,7 +60,7 @@ message PrepareOK {
 message PrepareOKReply {
     required RequestIDMessage rid = 1;
     required int32 status = 2;
-    required TimestampMessage commit_timestamp = 3;
+    optional TimestampMessage commit_timestamp = 3;
 }
 
 message PrepareAbort {
