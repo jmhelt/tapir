@@ -34,6 +34,8 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/configuration.h"
@@ -44,6 +46,7 @@
 #include "store/common/frontend/client.h"
 #include "store/common/partitioner.h"
 #include "store/common/truetime.h"
+#include "store/strongstore/common.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
 #include "store/strongstore/strongbufferclient.h"

@@ -43,6 +43,7 @@
 #include "store/common/backend/pingserver.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
+#include "store/strongstore/common.h"
 #include "store/strongstore/coordinator.h"
 #include "store/strongstore/lockstore.h"
 #include "store/strongstore/occstore.h"
@@ -213,6 +214,8 @@ class Server : public TransportReceiver,
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
     bool NotifyPendingRO(PendingROCommitReply *reply);
 
+    LockStore store_;
+
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
 
@@ -257,7 +260,6 @@ class Server : public TransportReceiver,
     Timestamp max_write_timestamp_;
     int shard_idx_;
     int replica_idx_;
-    LockStore *store_;
     Consistency consistency_;
     bool debug_stats_;
 };

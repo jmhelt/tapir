@@ -40,15 +40,15 @@
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "store/common/backend/lockserver.h"
-#include "store/common/backend/txnstore.h"
 #include "store/common/backend/versionstore.h"
 #include "store/common/transaction.h"
+#include "store/strongstore/common.h"
 
 namespace strongstore {
 
 class LockStore {
    public:
-    LockStore();
+    LockStore(Consistency consistency);
     ~LockStore();
 
     int Get(uint64_t transaction_id, const std::string &key,
@@ -56,6 +56,7 @@ class LockStore {
 
     int ROBegin(uint64_t transaction_id,
                 const std::unordered_set<std::string> &keys,
+                const Timestamp &commit_timestamp,
                 uint64_t &n_conflicting_prepared);
 
     int ROGet(uint64_t transaction_id, const std::string &key,
@@ -117,12 +118,14 @@ class LockStore {
     };
 
     // Data store.
-    VersionedKVStore<Timestamp, std::string> store;
+    VersionedKVStore<Timestamp, std::string> store_;
 
     // Locks manager.
-    LockServer locks;
+    LockServer locks_;
 
     std::map<uint64_t, PreparedTransaction> prepared_;
+
+    Consistency consistency_;
 
     void dropLocks(uint64_t transaction_id, const Transaction &txn);
     bool getLocks(uint64_t transaction_id, const Transaction &txn);

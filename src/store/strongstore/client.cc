@@ -320,20 +320,24 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
 
     Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
 
+    std::unordered_map<int, std::vector<std::string>> sharded_keys;
+
     for (auto &key : keys) {
         int i = (*part)(key, nshards_, -1, participants_);
-        auto search = participants_.find(i);
-        if (search == participants_.end()) {
-            bclient[i]->Begin(t_id, commit_timestamp);
-            participants_.insert(i);
-        }
+        sharded_keys[i].push_back(key);
+        // auto search = participants_.find(i);
+        // if (search == participants_.end()) {
+        //     bclient[i]->Begin(t_id, commit_timestamp);
+        //     participants_.insert(i);
+        // }
 
-        bclient[i]->AddReadSet(key, commit_timestamp);
+        // bclient[i]->AddReadSet(key, commit_timestamp);
     }
 
     if (debug_stats_) {
         Latency_Start(&commit_lat_);
     }
+
     uint64_t reqId = lastReqId++;
     PendingRequest *req = new PendingRequest(reqId, t_id);
     pendingReqs[reqId] = req;
@@ -342,7 +346,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     req->maxRepliedTs = 0;
     req->callbackInvoked = false;
     req->timeout = timeout;
-    req->outstandingPrepares = participants_.size();
+    req->outstandingPrepares = sharded_keys.size();
     req->prepareStatus = REPLY_OK;
 
     stats.IncrementList("txn_groups", participants_.size());
@@ -352,6 +356,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     for (auto p : participants_) {
         // TODO: Handle timeout
         bclient[p]->ROCommit(
+            t_id, sharded_keys[p], commit_timestamp,
             std::bind(&Client::ROCommitCallback, this, req->id,
                       std::placeholders::_1),
             []() {}, timeout);
@@ -369,12 +374,14 @@ void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status) {
             reqId);
         return;
     }
+
     PendingRequest *req = itr->second;
     --req->outstandingPrepares;
     if (req->outstandingPrepares == 0) {
         commit_callback ccb = req->ccb;
         pendingReqs.erase(reqId);
         delete req;
+
         if (debug_stats_) {
             Latency_End(&commit_lat_);
         }
