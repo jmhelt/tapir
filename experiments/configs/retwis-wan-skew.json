@@ -22,7 +22,7 @@
     "ap-northeast-1-2"
   ],
   "consistency": [
-    "ss"
+    "rss"
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",

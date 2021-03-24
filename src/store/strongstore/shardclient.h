@@ -45,8 +45,6 @@
 
 namespace strongstore {
 
-enum Consistency { SS, RSS };
-
 enum Mode {
     MODE_UNKNOWN,
     MODE_OCC,
@@ -78,9 +76,9 @@ class ShardClient : public TxnClient,
                      const Timestamp &timestamp, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) override;
 
-    void ROCommit(uint64_t transaction_id, const Transaction &transaction,
-                  commit_callback ccb, commit_timeout_callback ctcb,
-                  uint32_t timeout);
+    void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
+                  const Timestamp &commit_timestamp, commit_callback ccb,
+                  commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitCoordinator(uint64_t transaction_id,
                              const Transaction &transaction, int n_participants,
