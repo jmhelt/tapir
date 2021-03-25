@@ -36,6 +36,9 @@ GFLAGS_LDFLAGS := -lgflags
 CFLAGS += $(GFLAGS_CFLAGS)
 LDFLAGS += $(GFLAGS_LDFLAGS)
 
+# JSON parsing library
+JSON_DIR := ./third_party/json
+CFLAGS += -I$(JSON_DIR)/single_include
 
 # Google test framework. This doesn't use pkgconfig
 GTEST_DIR := ./third_party/googletest/googletest
