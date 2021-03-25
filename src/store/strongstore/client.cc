@@ -187,6 +187,12 @@ void Client::CalculateCoordinatorChoices() {
         Debug("shards: %s, min_coord: %d", c.first.to_string().c_str(),
               c.second);
     }
+
+    Debug("Printing min_lats_:");
+    for (auto &c : min_lats_) {
+        Debug("shards: %s, min_lat: %lu", c.first.to_string().c_str(),
+              c.second);
+    }
 }
 
 int Client::ChooseCoordinator() {
