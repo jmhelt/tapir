@@ -17,6 +17,7 @@ class NetworkConfiguration {
                          std::istream &file);
     ~NetworkConfiguration();
 
+    const std::string &GetRegion(const std::string &host) const;
     const std::string &GetRegion(int shard_idx, int replica_idx) const;
 
     uint64_t GetOneWayLatency(const std::string &src_region,
