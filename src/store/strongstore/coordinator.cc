@@ -49,7 +49,7 @@ CommitDecision Coordinator::ReceivePrepareOK(uint64_t transaction_id,
                                              Timestamp &prepare_timestamp) {
     if (aborted_transactions_.find(transaction_id) !=
         aborted_transactions_.end()) {
-        return {Decision::ABORT, {}};
+        return {Timestamp(), Decision::ABORT};
     }
 
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
