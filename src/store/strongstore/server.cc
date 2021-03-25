@@ -641,13 +641,13 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
 
 void Server::HandlePrepareAbort(const TransportAddress &remote,
                                 proto::PrepareAbort &msg) {
-    Debug("Received Prepare ABORT");
-
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
     uint64_t transaction_id = msg.transaction_id();
 
     coordinator.Abort(transaction_id);
+
+    Debug("Received Prepare ABORT: %lu", transaction_id);
 
     // Reply to client
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
