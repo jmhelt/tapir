@@ -1,5 +1,6 @@
 import collections
 import ipaddress
+import json
 
 from lib.experiment_codebase import *
 from utils.experiment_util import *
@@ -11,7 +12,6 @@ class RssCodebase(ExperimentCodebase):
                        remote_exp_directory):
 
         client = config["clients"][i]
-        name, _ = os.path.splitext(config['network_config_file_name'])
         if 'run_locally' in config and config['run_locally']:
             path_to_client_bin = os.path.join(config['src_directory'],
                                               config['bin_directory_name'], config['client_bin_name'])
@@ -20,6 +20,8 @@ class RssCodebase(ExperimentCodebase):
                 local_exp_directory, config["replica_config"])
             shard_config_path = os.path.join(
                 local_exp_directory, config["shard_config"])
+            network_config_path = os.path.join(
+                local_exp_directory, config["network_config"])
             stats_file = os.path.join(exp_directory,
                                       config['out_directory_name'], client,
                                       '%s-%d-stats-%d.json' % (client, k, run))
@@ -32,6 +34,8 @@ class RssCodebase(ExperimentCodebase):
                 remote_exp_directory, config["replica_config"])
             shard_config_path = os.path.join(
                 remote_exp_directory, config["shard_config"])
+            network_config_path = os.path.join(
+                remote_exp_directory, config["network_config"])
             stats_file = os.path.join(exp_directory,
                                       config['out_directory_name'],
                                       '%s-%d-stats-%d.json' % (client, k, run))
@@ -47,6 +51,7 @@ class RssCodebase(ExperimentCodebase):
             '--client_id', client_id,
             '--replica_config_path', replica_config_path,
             '--shard_config_path', shard_config_path,
+            '--net_config_path', network_config_path,
             '--num_shards', config['num_shards'],
             '--benchmark', config['benchmark_name'],
             '--exp_duration', config['client_experiment_length'],
@@ -149,7 +154,6 @@ class RssCodebase(ExperimentCodebase):
 
     def get_replica_cmd(self, config, shard_idx, replica_idx, run, local_exp_directory,
                         remote_exp_directory):
-        name, ext = os.path.splitext(config['network_config_file_name'])
         if 'run_locally' in config and config['run_locally']:
             path_to_server_bin = os.path.join(config['src_directory'],
                                               config['bin_directory_name'], config['server_bin_name'])
@@ -372,7 +376,6 @@ class RssCodebase(ExperimentCodebase):
             local_exp_directory, config["replica_config"])
         shard_config_path = os.path.join(
             local_exp_directory, config["shard_config"])
-        print(shard_config_path)
         with open(replica_config_path, "w") as rcf, open(shard_config_path, "w") as scf:
             print("f {}".format(fault_tolerance), file=rcf)
             print("f {}".format(fault_tolerance), file=scf)
@@ -390,6 +393,23 @@ class RssCodebase(ExperimentCodebase):
                     print("replica {}:{}".format(replica, port+1), file=scf)
                     server_ports[replica] += 2
             shard_idx += 1
+
+        # Write network config
+        if "run_locally" in config and config["run_locally"]:
+            network_data = {
+                'server_regions': {'localhost': ['localhost']},
+                'region_rtt_latencies': {'localhost': {'localhost': 0}}
+            }
+        else:
+            network_data = {
+                'server_regions': config['server_regions'],
+                'region_rtt_latencies': config['region_rtt_latencies']
+            }
+
+        network_config_path = os.path.join(
+            local_exp_directory, config["network_config"])
+        with open(network_config_path, 'w', encoding='utf-8') as f:
+            json.dump(network_data, f, ensure_ascii=False, indent=4)
 
         return local_exp_directory
 
