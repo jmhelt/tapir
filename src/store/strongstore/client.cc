@@ -157,20 +157,24 @@ void Client::CalculateCoordinatorChoices() {
             const std::string &c_leader_region =
                 net_config_.GetRegion(coord, 0);
 
+            // Find max prepare lat
             uint64_t lat = 0;
             for (std::size_t i = 0; i < MAX_SHARDS; i++) {
+                uint64_t l = 0;
                 if (i == coord) {
-                    lat += commit_lats[i];
+                    l = net_config_.GetOneWayLatency(client_region_,
+                                                     c_leader_region);
                 } else if (shards.test(i)) {
-                    lat += prepare_lats[i];
-
-                    // Add participant to coord lat
                     const std::string &p_leader_region =
                         net_config_.GetRegion(i, 0);
-                    lat += net_config_.GetOneWayLatency(p_leader_region,
-                                                        c_leader_region);
+                    l = prepare_lats[i] + net_config_.GetOneWayLatency(
+                                              p_leader_region, c_leader_region);
                 }
+
+                lat = std::max(lat, l);
             }
+
+            lat += commit_lats[coord];
 
             if (lat < min_lat) {
                 min_lat = lat;
