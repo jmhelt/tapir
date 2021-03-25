@@ -17,11 +17,9 @@ NetworkConfiguration::NetworkConfiguration(
 
 NetworkConfiguration::~NetworkConfiguration() {}
 
-const std::string &NetworkConfiguration::GetRegion(int shard_idx,
-                                                   int replica_idx) const {
-    Debug("GetRegion: %d %d", shard_idx, replica_idx);
-    const std::string &host =
-        tport_config_.replica(shard_idx, replica_idx).host;
+const std::string &NetworkConfiguration::GetRegion(
+    const std::string &host) const {
+    Debug("GetRegion: %s", host.c_str());
 
     for (auto &kv : net_config_json_["server_regions"].items()) {
         const std::string &region = kv.key();
@@ -37,6 +35,15 @@ const std::string &NetworkConfiguration::GetRegion(int shard_idx,
 
     NOT_REACHABLE();
     return INVALID_REGION;
+}
+
+const std::string &NetworkConfiguration::GetRegion(int shard_idx,
+                                                   int replica_idx) const {
+    Debug("GetRegion: %d %d", shard_idx, replica_idx);
+    const std::string &host =
+        tport_config_.replica(shard_idx, replica_idx).host;
+
+    return GetRegion(host);
 }
 
 uint64_t NetworkConfiguration::GetOneWayLatency(

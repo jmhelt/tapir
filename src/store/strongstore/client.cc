@@ -42,6 +42,7 @@ using namespace std;
 namespace strongstore {
 
 Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
+               const std::string &client_region,
                transport::Configuration &config, uint64_t client_id,
                int nShards, int closestReplica, Transport *transport,
                Partitioner *part, TrueTime &tt, bool debug_stats)
@@ -49,6 +50,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       min_lats_{},
       min_read_timestamp_{},
       net_config_{net_config},
+      client_region_{client_region},
       config_{config},
       client_id_{client_id},
       nshards_(nShards),

@@ -13,6 +13,7 @@ class RssCodebase(ExperimentCodebase):
 
         client = config["clients"][i]
         if 'run_locally' in config and config['run_locally']:
+            client_host = 'localhost'
             path_to_client_bin = os.path.join(config['src_directory'],
                                               config['bin_directory_name'], config['client_bin_name'])
             exp_directory = local_exp_directory
@@ -26,6 +27,7 @@ class RssCodebase(ExperimentCodebase):
                                       config['out_directory_name'], client,
                                       '%s-%d-stats-%d.json' % (client, k, run))
         else:
+            client_host = client
             path_to_client_bin = os.path.join(
                 config['base_remote_bin_directory_nfs'],
                 config['bin_directory_name'], config['client_bin_name'])
@@ -49,6 +51,7 @@ class RssCodebase(ExperimentCodebase):
         client_command = ' '.join([str(x) for x in [
             path_to_client_bin,
             '--client_id', client_id,
+            '--client_host', client_host,
             '--replica_config_path', replica_config_path,
             '--shard_config_path', shard_config_path,
             '--net_config_path', network_config_path,
