@@ -71,7 +71,8 @@ class LockStore {
     bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
                 std::unordered_set<uint64_t> &notify_ros);
 
-    void Abort(uint64_t transaction_id);
+    void Abort(uint64_t transaction_id,
+               std::unordered_set<uint64_t> &notify_ros);
 
     void Load(const std::string &key, const std::string &value,
               const Timestamp &timestamp);
