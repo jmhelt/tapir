@@ -44,8 +44,7 @@ class RssCodebase(ExperimentCodebase):
 
         client_threads = config["client_threads_per_process"] if "client_threads_per_process" in config else 1
 
-        client_id = i * len(config["clients"]) * \
-            config["client_processes_per_client_node"] + k
+        client_id = i * config["client_processes_per_client_node"] + k
 
         truetime_error = config["truetime_error"] if "truetime_error" in config else 0
         client_command = ' '.join([str(x) for x in [
