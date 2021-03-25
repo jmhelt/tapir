@@ -58,9 +58,9 @@ namespace strongstore {
 class Client : public ::Client {
    public:
     Client(Consistency consistency, const NetworkConfiguration &net_config,
-           transport::Configuration &config, uint64_t id, int nshards,
-           int closestReplic, Transport *transport, Partitioner *part,
-           TrueTime &tt, bool debug_stats);
+           const std::string &client_region, transport::Configuration &config,
+           uint64_t id, int nshards, int closestReplic, Transport *transport,
+           Partitioner *part, TrueTime &tt, bool debug_stats);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -140,11 +140,11 @@ class Client : public ::Client {
     Timestamp min_read_timestamp_;
 
     const strongstore::NetworkConfiguration &net_config_;
+    const std::string client_region_;
 
     transport::Configuration &config_;
     // Unique ID for this client.
     uint64_t client_id_;
-    std::string client_region_ = "localhost";
 
     // Ongoing transaction ID.
     uint64_t t_id;

@@ -58,6 +58,7 @@ enum transmode_t {
  * System settings.
  */
 DEFINE_uint64(client_id, 0, "unique identifier for client");
+DEFINE_string(client_host, "", "client host string");
 DEFINE_string(replica_config_path, "",
               "path to replication configuration file");
 DEFINE_string(shard_config_path, "", "path to shard configuration file");
@@ -590,10 +591,12 @@ int main(int argc, char **argv) {
             case PROTO_STRONG: {
                 strongstore::NetworkConfiguration net_config{shard_config,
                                                              net_config_stream};
+                const std::string &client_region =
+                    net_config.GetRegion(FLAGS_client_host);
                 client = new strongstore::Client(
-                    consistency, net_config, shard_config, clientId,
-                    FLAGS_num_shards, FLAGS_closest_replica, tport, part, tt,
-                    FLAGS_debug_stats);
+                    consistency, net_config, client_region, shard_config,
+                    clientId, FLAGS_num_shards, FLAGS_closest_replica, tport,
+                    part, tt, FLAGS_debug_stats);
                 break;
             }
             default:
