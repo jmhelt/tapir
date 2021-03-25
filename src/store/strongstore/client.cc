@@ -31,6 +31,9 @@
 
 #include "store/strongstore/client.h"
 
+#include <cmath>
+
+#include "lib/configuration.h"
 #include "lib/latency.h"
 #include "store/common/common.h"
 
@@ -38,11 +41,14 @@ using namespace std;
 
 namespace strongstore {
 
-Client::Client(Consistency consistency, transport::Configuration &config,
-               uint64_t client_id, int nShards, int closestReplica,
-               Transport *transport, Partitioner *part, TrueTime &tt,
-               bool debug_stats)
-    : min_read_timestamp_{},
+Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
+               transport::Configuration &config, uint64_t client_id,
+               int nShards, int closestReplica, Transport *transport,
+               Partitioner *part, TrueTime &tt, bool debug_stats)
+    : coord_choices_{},
+      min_lats_{},
+      min_read_timestamp_{},
+      net_config_{net_config},
       config_{config},
       client_id_{client_id},
       nshards_(nShards),
@@ -71,6 +77,8 @@ Client::Client(Consistency consistency, transport::Configuration &config,
         _Latency_Init(&op_lat_, "op_lat");
         _Latency_Init(&commit_lat_, "commit_lat");
     }
+
+    CalculateCoordinatorChoices();
 }
 
 Client::~Client() {
@@ -86,6 +94,126 @@ Client::~Client() {
     for (auto s : sclient) {
         delete s;
     }
+}
+
+void Client::CalculateCoordinatorChoices() {
+    if (static_cast<std::size_t>(config_.n) > MAX_SHARDS) {
+        Panic(
+            "CalculateCoordinatorChoices doesn't support more than %lu shards.",
+            MAX_SHARDS);
+    }
+
+    std::vector<uint64_t> prepare_lats{};
+    prepare_lats.reserve(config_.g);
+    std::vector<uint64_t> commit_lats{};
+    commit_lats.reserve(config_.g);
+
+    for (int i = 0; i < config_.g; i++) {
+        Debug("Shard: %d", i);
+        const std::string &leader_region = net_config_.GetRegion(i, 0);
+        uint64_t min_q_lat = net_config_.GetMinQuorumLatency(i, 0);
+
+        // Calculate prepare lat (including client to participant)
+        uint64_t prepare_lat =
+            net_config_.GetOneWayLatency(client_region_, leader_region);
+        prepare_lat += min_q_lat;
+        prepare_lats[i] = prepare_lat;
+        Debug("prepare_lat: %lu", prepare_lat);
+
+        // Calculate commit lat (including coordinator to client)
+        uint64_t commit_lat = min_q_lat;
+        commit_lat +=
+            net_config_.GetOneWayLatency(leader_region, client_region_);
+        commit_lats[i] = commit_lat;
+        Debug("commit_lat: %lu", commit_lat);
+    }
+
+    uint8_t s_max = static_cast<uint8_t>(std::pow(2.0, config_.g));
+    Debug("s_max: %u", s_max);
+
+    for (uint8_t s = 1; s < s_max; s++) {
+        std::bitset<MAX_SHARDS> shards{s};
+
+        uint64_t min_lat = static_cast<uint64_t>(-1);
+        int min_coord = -1;
+        for (std::size_t coord_idx = 1; coord_idx <= shards.count();
+             coord_idx++) {
+            // Find coord
+            std::size_t coord = -1;
+            std::size_t n_test = 0;
+            for (std::size_t i = 0; i < MAX_SHARDS; i++) {
+                if (shards.test(i)) {
+                    n_test++;
+                }
+
+                if (n_test == coord_idx) {
+                    coord = i;
+                    break;
+                }
+            }
+
+            const std::string &c_leader_region =
+                net_config_.GetRegion(coord, 0);
+
+            uint64_t lat = 0;
+            for (std::size_t i = 0; i < MAX_SHARDS; i++) {
+                if (i == coord) {
+                    lat += commit_lats[i];
+                } else if (shards.test(i)) {
+                    lat += prepare_lats[i];
+
+                    // Add participant to coord lat
+                    const std::string &p_leader_region =
+                        net_config_.GetRegion(i, 0);
+                    lat += net_config_.GetOneWayLatency(p_leader_region,
+                                                        c_leader_region);
+                }
+            }
+
+            if (lat < min_lat) {
+                min_lat = lat;
+                min_coord = static_cast<int>(coord);
+            }
+        }
+
+        coord_choices_.insert({shards, min_coord});
+        min_lats_.insert({shards, min_lat});
+    }
+
+    Debug("Printing coord_choices_:");
+    for (auto &c : coord_choices_) {
+        Debug("shards: %s, min_coord: %d", c.first.to_string().c_str(),
+              c.second);
+    }
+}
+
+int Client::ChooseCoordinator() {
+    ASSERT(participants_.size() != 0);
+
+    std::bitset<MAX_SHARDS> shards;
+
+    for (int p : participants_) {
+        shards.set(p);
+    }
+
+    ASSERT(coord_choices_.find(shards) != coord_choices_.end());
+
+    return coord_choices_[shards];
+}
+
+Timestamp Client::ChooseNonBlockTimestamp() {
+    ASSERT(participants_.size() != 0);
+
+    std::bitset<MAX_SHARDS> shards;
+
+    for (int p : participants_) {
+        shards.set(p);
+    }
+
+    ASSERT(min_lats_.find(shards) != min_lats_.end());
+
+    uint64_t lat = min_lats_[shards];
+    return {tt_.Now().earliest() + (lat * 1000), client_id_};
 }
 
 /* Begins a transaction. All subsequent operations before a commit() or
@@ -159,29 +287,6 @@ void Client::Put(const std::string &key, const std::string &value,
         };
         bclient[i]->Put(key, value, pcbLat, ptcb, timeout);
     });
-}
-
-int Client::ChooseCoordinator() {
-    ASSERT(participants_.size() != 0);
-
-    // Choose farthest coordinator
-    uint64_t max_lat = 0;
-    int max_p = -1;
-    for (int p : participants_) {
-        uint64_t lat = sclient[p]->GetLatencyToLeader();
-        if (lat >= max_lat) {
-            max_lat = lat;
-            max_p = p;
-        }
-    }
-
-    Debug("Chosen coordinator: %d", max_p);
-
-    return max_p;
-}
-
-Timestamp Client::ChooseNonBlockTimestamp() {
-    return {tt_.Now().earliest() + 10000, client_id_};
 }
 
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {

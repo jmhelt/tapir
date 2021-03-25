@@ -31,6 +31,7 @@
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
 
+#include <bitset>
 #include <set>
 #include <string>
 #include <thread>
@@ -47,6 +48,7 @@
 #include "store/common/partitioner.h"
 #include "store/common/truetime.h"
 #include "store/strongstore/common.h"
+#include "store/strongstore/networkconfig.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
 #include "store/strongstore/strongbufferclient.h"
@@ -55,9 +57,10 @@ namespace strongstore {
 
 class Client : public ::Client {
    public:
-    Client(Consistency consistency, transport::Configuration &config,
-           uint64_t id, int nshards, int closestReplic, Transport *transport,
-           Partitioner *part, TrueTime &tt, bool debug_stats);
+    Client(Consistency consistency, const NetworkConfiguration &net_config,
+           transport::Configuration &config, uint64_t id, int nshards,
+           int closestReplic, Transport *transport, Partitioner *part,
+           TrueTime &tt, bool debug_stats);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -89,6 +92,8 @@ class Client : public ::Client {
                   uint32_t timeout) override;
 
    private:
+    const static std::size_t MAX_SHARDS = 8;
+
     struct PendingRequest {
         PendingRequest(uint64_t id, uint64_t txnId)
             : nonblock_timestamp{},
@@ -123,16 +128,23 @@ class Client : public ::Client {
     void ROCommitCallback(uint64_t reqId, transaction_status_t status);
 
     // choose coordinator from participants
+    void CalculateCoordinatorChoices();
     int ChooseCoordinator();
 
     // Choose nonblock time
     Timestamp ChooseNonBlockTimestamp();
 
+    std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
+    std::unordered_map<std::bitset<MAX_SHARDS>, uint64_t> min_lats_;
+
     Timestamp min_read_timestamp_;
+
+    const strongstore::NetworkConfiguration &net_config_;
 
     transport::Configuration &config_;
     // Unique ID for this client.
     uint64_t client_id_;
+    std::string client_region_ = "localhost";
 
     // Ongoing transaction ID.
     uint64_t t_id;

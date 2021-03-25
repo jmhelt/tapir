@@ -30,6 +30,7 @@
 #include "store/common/stats.h"
 #include "store/common/truetime.h"
 #include "store/strongstore/client.h"
+#include "store/strongstore/networkconfig.h"
 #include "store/tapirstore/client.h"
 #include "store/weakstore/client.h"
 
@@ -62,6 +63,7 @@ DEFINE_string(replica_config_path, "",
 DEFINE_string(shard_config_path, "", "path to shard configuration file");
 DEFINE_uint64(num_shards, 1, "number of shards in the system");
 DEFINE_bool(ping_replicas, false, "determine latency to replicas via pings");
+DEFINE_string(net_config_path, "", "path to network configuration file");
 
 DEFINE_bool(tapir_sync_commit, true,
             "wait until commit phase completes before"
@@ -553,6 +555,13 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    std::ifstream net_config_stream(FLAGS_net_config_path);
+    if (net_config_stream.fail()) {
+        std::cerr << "Unable to read configuration file: "
+                  << FLAGS_net_config_path << std::endl;
+        return -1;
+    }
+
     if (FLAGS_num_clients > (1 << 6)) {
         std::cerr << "Only support up to " << (1 << 6)
                   << " clients in one process." << std::endl;
@@ -579,9 +588,12 @@ int main(int argc, char **argv) {
             //     break;
             // }
             case PROTO_STRONG: {
+                strongstore::NetworkConfiguration net_config{shard_config,
+                                                             net_config_stream};
                 client = new strongstore::Client(
-                    consistency, shard_config, clientId, FLAGS_num_shards,
-                    FLAGS_closest_replica, tport, part, tt, FLAGS_debug_stats);
+                    consistency, net_config, shard_config, clientId,
+                    FLAGS_num_shards, FLAGS_closest_replica, tport, part, tt,
+                    FLAGS_debug_stats);
                 break;
             }
             default:

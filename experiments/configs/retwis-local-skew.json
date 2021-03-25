@@ -26,6 +26,7 @@
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
+  "network_config": "network.json",
   "fault_tolerance": 1,
   "num_shards": 1,
   "shards": [
@@ -272,7 +273,6 @@
     "store/server"
   ],
   "make_clean": false,
-  "network_config_file_name": "shard.config",
   "remote_bin_directory_nfs_enabled": false,
   "client_combine_ro_ops": [
     "get_timeline"
