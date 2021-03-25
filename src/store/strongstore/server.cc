@@ -254,6 +254,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
+    std::unordered_set<uint64_t> notify_ros;
+
     Debug("Coordinator for transaction: %lu", transaction_id);
 
     Decision d = coordinator.StartTransaction(client_id, transaction_id,
@@ -291,10 +293,11 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Fast path commit failed: %lu", transaction_id);
-            store_.Abort(transaction_id);
+            store_.Abort(transaction_id, notify_ros);
             coordinator.Abort(transaction_id);
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
+            NotifyPendingROs(notify_ros);
         }
     } else if (d == Decision::ABORT) {
         Debug("Abort: %lu", transaction_id);
@@ -413,7 +416,6 @@ void Server::CommitCoordinatorCallback(
     }
 
     // Reply to waiting RO transactions
-    std::unordered_set<uint64_t> ros{};
     NotifyPendingROs(notify_ros);
 }
 
@@ -449,6 +451,8 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     uint64_t transaction_id = msg.transaction_id();
     int coordinator_shard = msg.coordinator_shard();
 
+    std::unordered_set<uint64_t> notify_ros;
+
     Debug("Participant for transaction: %lu", transaction_id);
 
     Transaction transaction{msg.transaction()};
@@ -471,7 +475,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
     } else {
         Debug("Prepare failed");
-        store_.Abort(transaction_id);
+        store_.Abort(transaction_id, notify_ros);
         // TODO: Handle timeout
         shard_clients_[coordinator_shard]->PrepareAbort(
             transaction_id, shard_idx_,
@@ -481,6 +485,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
 
         // Reply to client
         SendRWCommmitParticipantReplyFail(remote, client_id, client_req_id);
+        NotifyPendingROs(notify_ros);
     }
 }
 
@@ -561,6 +566,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
     int participant_shard = msg.participant_shard();
     Timestamp prepare_timestamp{msg.prepare_timestamp()};
 
+    std::unordered_set<uint64_t> notify_ros;
+
     PendingPrepareOKReply *reply = nullptr;
     auto search = pending_prepare_ok_replies_.find(transaction_id);
     if (search == pending_prepare_ok_replies_.end()) {
@@ -612,7 +619,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
             Debug("Coordinator prepare failed: %lu", transaction_id);
-            store_.Abort(transaction_id);
+            store_.Abort(transaction_id, notify_ros);
             coordinator.Abort(transaction_id);
 
             // Reply to client
@@ -627,6 +634,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             SendPrepareOKRepliesFail(reply);
             delete reply;
             pending_prepare_ok_replies_.erase(transaction_id);
+
+            NotifyPendingROs(notify_ros);
         }
     } else if (cd.d == Decision::ABORT) {
         Debug("Aborted: %lu", transaction_id);
@@ -743,7 +752,11 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             break;
         case strongstore::proto::Request::ABORT:
             Debug("Received ABORT");
-            store_.Abort(request.txnid());
+            store_.Abort(request.txnid(), notify_ros);
+
+            for (uint64_t ro : notify_ros) {
+                reply.mutable_notify_ros()->Add(ro);
+            }
             break;
         default:
             Panic("Unrecognized operation.");

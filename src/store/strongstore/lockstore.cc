@@ -181,9 +181,18 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
     return !transaction.getWriteSet().empty();
 }
 
-void LockStore::Abort(uint64_t transaction_id) {
+void LockStore::Abort(uint64_t transaction_id,
+                      std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] ABORT", transaction_id);
-    dropLocks(transaction_id, prepared_[transaction_id].transaction());
+    ASSERT(prepared_.find(transaction_id) != prepared_.end());
+
+    const PreparedTransaction &prepared = prepared_[transaction_id];
+
+    notify_ros = std::move(prepared.waiting_ros());
+
+    // Drop locks.
+    dropLocks(transaction_id, prepared.transaction());
+
     prepared_.erase(transaction_id);
 }
 
