@@ -68,7 +68,10 @@ uint64_t NetworkConfiguration::GetMinQuorumLatency(int shard_idx,
     std::vector<uint64_t> lats;
     for (int i = 0; i < n; i++) {
         const std::string &replica_region = GetRegion(shard_idx, i);
-        lats.push_back(GetOneWayLatency(leader_region, replica_region) * 2);
+        uint64_t rtt = net_config_json_["region_rtt_latencies"][leader_region]
+                                       [replica_region]
+                                           .get<uint64_t>();
+        lats.push_back(rtt);
     }
 
     std::sort(lats.begin(), lats.end());
