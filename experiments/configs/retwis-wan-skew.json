@@ -22,13 +22,14 @@
     "ap-northeast-1-2"
   ],
   "consistency": [
+    "ss",
     "rss"
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 3,
+  "num_shards": 2,
   "shards": [
     [
       "us-east-1-0",
@@ -39,20 +40,13 @@
       "eu-west-1-1",
       "ap-northeast-1-1",
       "us-east-1-1"
-    ],
-    [
-      "ap-northeast-1-2",
-      "us-east-1-2",
-      "eu-west-1-2"
     ]
   ],
-  "client_total": 24,
-  "client_processes_per_client_node": 8,
+  "client_total": 32,
+  "client_processes_per_client_node": 32,
   "client_threads_per_process": 1,
   "clients": [
-    "client-0-0",
-    "client-1-0",
-    "client-2-0"
+    "client-0-0"
   ],
   "server_regions": {
     "us-east-1": [
@@ -79,13 +73,9 @@
   "client_num_keys": 100000,
   "benchmark_name": "retwis",
   "client_key_selector": [
-    "uniform",
-    "zipf",
     "zipf"
   ],
   "client_zipf_coefficient": [
-    0.0,
-    0.25,
     0.75
   ],
   "rw_num_ops_txn": 1,
@@ -107,8 +97,8 @@
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
-  "client_debug_output": false,
-  "server_debug_output": false,
+  "client_debug_output": true,
+  "server_debug_output": true,
   "client_debug_stats": false,
   "server_debug_stats": false,
   "client_experiment_length": 30,
@@ -178,7 +168,8 @@
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
-        "Spanner"
+        "Spanner",
+        "Spanner-RSS"
       ],
       "x_var_is_config": true,
       "x_indep_vars_idx": 1,
@@ -200,7 +191,8 @@
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
-        "Spanner"
+        "Spanner",
+        "Spanner-RSS"
       ],
       "x_var_is_config": true,
       "x_indep_vars_idx": 1,
@@ -222,7 +214,8 @@
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
-        "Spanner"
+        "Spanner",
+        "Spanner-RSS"
       ],
       "x_var_is_config": true,
       "x_indep_vars_idx": 1,
