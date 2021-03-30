@@ -379,26 +379,21 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     pendingReqs.erase(reqId);
     delete req;
 
-    if (consistency_ == Consistency::SS) {
-        if (debug_stats_) {
-            Latency_End(&commit_lat_);
-        }
-        ccb(tstatus);
-    } else if (consistency_ == Consistency::RSS) {
-        uint64_t ms = tt_.TimeToWaitUntilMS(nonblock_timestamp.getTimestamp());
+    uint64_t ms = 0;
+    if (tstatus == COMMITTED && consistency_ == Consistency::RSS) {
+        ms = tt_.TimeToWaitUntilMS(nonblock_timestamp.getTimestamp());
         Debug("Waiting for nonblock time: %lu", ms);
         min_read_timestamp_ = std::max(min_read_timestamp_, respTs);
         Debug("min_read_timestamp_: %lu.%lu",
               min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
-        transport_->Timer(ms, [this, ccb, tstatus] {
-            if (debug_stats_) {
-                Latency_End(&commit_lat_);
-            }
-            ccb(tstatus);
-        });
-    } else {
-        NOT_REACHABLE();
     }
+
+    transport_->Timer(ms, [this, ccb, tstatus] {
+        if (debug_stats_) {
+            Latency_End(&commit_lat_);
+        }
+        ccb(tstatus);
+    });
 }
 
 /* Attempts to commit the ongoing transaction. */
