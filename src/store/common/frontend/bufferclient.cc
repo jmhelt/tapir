@@ -145,5 +145,5 @@ void BufferClient::Commit(const Timestamp &ts, commit_callback ccb,
 
 void BufferClient::Abort(abort_callback acb, abort_timeout_callback atcb,
                          uint32_t timeout) {
-    txnclient->Abort(tid, Transaction(), acb, atcb, timeout);
+    txnclient->Abort(tid, txn, acb, atcb, timeout);
 }

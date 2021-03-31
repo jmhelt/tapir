@@ -9,12 +9,16 @@
 #ifndef _TIMESTAMP_H_
 #define _TIMESTAMP_H_
 
+#include <string>
+
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "store/common/common-proto.pb.h"
 
 class Timestamp {
    public:
+    const static Timestamp MAX;
+
     Timestamp() : timestamp(0), id(0){};
     Timestamp(uint64_t t) : timestamp(t), id(0){};
     Timestamp(uint64_t t, uint64_t i) : timestamp(t), id(i){};

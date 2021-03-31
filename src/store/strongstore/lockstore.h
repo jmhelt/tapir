@@ -34,16 +34,16 @@
 #ifndef _STRONG_LOCK_STORE_H_
 #define _STRONG_LOCK_STORE_H_
 
-#include <map>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/message.h"
-#include "store/common/backend/lockserver.h"
 #include "store/common/backend/versionstore.h"
 #include "store/common/stats.h"
 #include "store/common/transaction.h"
 #include "store/strongstore/common.h"
+#include "store/strongstore/waitdie.h"
 
 namespace strongstore {
 
@@ -52,8 +52,8 @@ class LockStore {
     LockStore(Consistency consistency);
     ~LockStore();
 
-    int Get(uint64_t transaction_id, const std::string &key,
-            std::pair<Timestamp, std::string> &value);
+    int Get(uint64_t transaction_id, const Timestamp &start_timestamp,
+            const std::string &key, std::pair<Timestamp, std::string> &value);
 
     int ROBegin(uint64_t transaction_id,
                 const std::unordered_set<std::string> &keys,
@@ -68,11 +68,17 @@ class LockStore {
     int Prepare(uint64_t transaction_id, const Transaction &transaction,
                 const Timestamp &nonblock_timestamp);
 
+    int ContinuePrepare(uint64_t transaction_id);
+
     bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
+                std::unordered_set<uint64_t> &notify_rws,
                 std::unordered_set<uint64_t> &notify_ros);
 
     void Abort(uint64_t transaction_id,
+               std::unordered_set<uint64_t> &notify_rws,
                std::unordered_set<uint64_t> &notify_ros);
+    void ReleaseLocks(uint64_t transaction_id, const Transaction &transaction,
+                      std::unordered_set<uint64_t> &notify_rws);
 
     void Load(const std::string &key, const std::string &value,
               const Timestamp &timestamp);
@@ -125,16 +131,18 @@ class LockStore {
     VersionedKVStore<Timestamp, std::string> store_;
 
     // Locks manager.
-    LockServer locks_;
+    WaitDie locks_;
 
-    std::map<uint64_t, PreparedTransaction> prepared_;
+    std::unordered_map<uint64_t, PreparedTransaction> prepared_;
+    std::unordered_map<uint64_t, PreparedTransaction> waiting_;
 
     Stats stats_;
 
     Consistency consistency_;
 
-    void dropLocks(uint64_t transaction_id, const Transaction &txn);
-    bool getLocks(uint64_t transaction_id, const Transaction &txn);
+    int getLocks(uint64_t transaction_id, const Transaction &txn);
+    void dropLocks(uint64_t transaction_id, const Transaction &txn,
+                   std::unordered_set<uint64_t> &notify_rws);
 };
 
 }  // namespace strongstore

@@ -42,9 +42,10 @@ void ReplicaClient::Prepare(uint64_t transaction_id,
     pendingPrepare->pcb = pcb;
     pendingPrepare->ptcb = ptcb;
 
-    client->Invoke(request_str, bind(&ReplicaClient::PrepareCallback, this,
-                                     pendingPrepare->reqId, placeholders::_1,
-                                     placeholders::_2));
+    client->Invoke(
+        request_str,
+        bind(&ReplicaClient::PrepareCallback, this, pendingPrepare->reqId,
+             std::placeholders::_1, std::placeholders::_2));
 }
 
 /* Callback from a shard replica on prepare operation completion. */
@@ -98,9 +99,10 @@ void ReplicaClient::CoordinatorCommit(uint64_t transaction_id,
     pendingCommit->ccb = ccb;
     pendingCommit->ctcb = ctcb;
 
-    client->Invoke(request_str, bind(&ReplicaClient::CommitCallback, this,
-                                     pendingCommit->reqId, placeholders::_1,
-                                     placeholders::_2));
+    client->Invoke(
+        request_str,
+        bind(&ReplicaClient::CommitCallback, this, pendingCommit->reqId,
+             std::placeholders::_1, std::placeholders::_2));
 }
 
 void ReplicaClient::Commit(uint64_t transaction_id, Timestamp &commit_timestamp,
@@ -123,9 +125,10 @@ void ReplicaClient::Commit(uint64_t transaction_id, Timestamp &commit_timestamp,
     pendingCommit->ccb = ccb;
     pendingCommit->ctcb = ctcb;
 
-    client->Invoke(request_str, bind(&ReplicaClient::CommitCallback, this,
-                                     pendingCommit->reqId, placeholders::_1,
-                                     placeholders::_2));
+    client->Invoke(
+        request_str,
+        bind(&ReplicaClient::CommitCallback, this, pendingCommit->reqId,
+             std::placeholders::_1, std::placeholders::_2));
 }
 
 /* Callback from a shard replica on commit operation completion. */
@@ -139,6 +142,9 @@ bool ReplicaClient::CommitCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received COMMIT callback [%d]", shard_idx_,
           reply.status());
 
+    std::unordered_set<uint64_t> notify_rws{reply.notify_rws().begin(),
+                                            reply.notify_rws().end()};
+
     std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
                                             reply.notify_ros().end()};
 
@@ -148,7 +154,7 @@ bool ReplicaClient::CommitCallback(uint64_t reqId, const string &request_str,
     commit_callback ccb = pendingCommit->ccb;
     this->pendingCommits.erase(itr);
     delete pendingCommit;
-    ccb(COMMITTED, notify_ros);
+    ccb(COMMITTED, notify_rws, notify_ros);
 
     return true;
 }
@@ -171,8 +177,8 @@ void ReplicaClient::Abort(uint64_t transaction_id, abort_callback acb,
     pendingAbort->atcb = atcb;
 
     client->Invoke(request_str, bind(&ReplicaClient::AbortCallback, this,
-                                     pendingAbort->reqId, placeholders::_1,
-                                     placeholders::_2));
+                                     pendingAbort->reqId, std::placeholders::_1,
+                                     std::placeholders::_2));
 }
 
 /* Callback from a shard replica on abort operation completion. */
@@ -186,6 +192,9 @@ bool ReplicaClient::AbortCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
           reply.status());
 
+    std::unordered_set<uint64_t> notify_rws{reply.notify_rws().begin(),
+                                            reply.notify_rws().end()};
+
     std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
                                             reply.notify_ros().end()};
 
@@ -195,7 +204,7 @@ bool ReplicaClient::AbortCallback(uint64_t reqId, const string &request_str,
     abort_callback acb = pendingAbort->acb;
     this->pendingAborts.erase(itr);
     delete pendingAbort;
-    acb(notify_ros);
+    acb(notify_rws, notify_ros);
 
     return true;
 }

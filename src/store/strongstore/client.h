@@ -110,6 +110,8 @@ class Client : public ::Client {
 
         commit_callback ccb;
         commit_timeout_callback ctcb;
+        abort_callback acb;
+        abort_timeout_callback atcb;
         Timestamp nonblock_timestamp;
         uint64_t id;
         uint64_t txnId;
@@ -124,6 +126,8 @@ class Client : public ::Client {
     // local Prepare function
     void Prepare(PendingRequest *req, uint32_t timeout);
     void PrepareCallback(uint64_t reqId, int status, Timestamp respTs);
+
+    void AbortCallback(uint64_t reqId);
 
     void ROCommitCallback(uint64_t reqId, transaction_status_t status);
 

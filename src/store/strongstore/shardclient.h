@@ -100,6 +100,9 @@ class ShardClient : public TxnClient,
                       prepare_callback pcb, prepare_timeout_callback ptcb,
                       uint32_t timeout);
 
+    virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
+                       abort_timeout_callback atcb, uint32_t timeout) override;
+
     // Override PingInitiator
     virtual bool SendPing(size_t replica, const PingMessage &ping);
 
@@ -113,8 +116,6 @@ class ShardClient : public TxnClient,
                         const Timestamp &timestamp, commit_callback ccb,
                         commit_timeout_callback ctcb,
                         uint32_t timeout) override;
-    virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
-                       abort_timeout_callback atcb, uint32_t timeout) override;
     virtual void Prepare(uint64_t id, const Transaction &txn,
                          const Timestamp &timestamp, prepare_callback pcb,
                          prepare_timeout_callback ptcb,
@@ -145,18 +146,7 @@ class ShardClient : public TxnClient,
     void HandlePrepareOKReply(const proto::PrepareOKReply &reply);
     void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
     void HandleROCommitReply(const proto::ROCommitReply &reply);
-
-    /* Timeout for Get requests, which only go to one replica. */
-    void GetTimeout(uint64_t reqId);
-
-    /* Callbacks for hearing back from a shard for an operation. */
-    bool GetCallback(uint64_t reqId, const std::string &, const std::string &);
-    bool PrepareCallback(uint64_t reqId, const std::string &,
-                         const std::string &);
-    bool CommitCallback(uint64_t reqId, const std::string &,
-                        const std::string &);
-    bool AbortCallback(uint64_t reqId, const std::string &,
-                       const std::string &);
+    void HandleAbortReply(const proto::AbortReply &reply);
 
     const transport::Configuration &config_;
     Transport *transport_;  // Transport layer.
@@ -179,6 +169,7 @@ class ShardClient : public TxnClient,
     proto::PrepareOK prepare_ok_;
     proto::PrepareAbort prepare_abort_;
     proto::ROCommit ro_commit_;
+    proto::Abort abort_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
@@ -186,6 +177,7 @@ class ShardClient : public TxnClient,
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    proto::AbortReply abort_reply_;
     PingMessage ping_;
 };
 
