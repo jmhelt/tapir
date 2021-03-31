@@ -12,8 +12,8 @@ void SyncClient::Begin(uint32_t timeout) {
     promise.GetReply();
 }
 
-void SyncClient::Get(const std::string &key, std::string &value,
-                     uint32_t timeout) {
+int SyncClient::Get(const std::string &key, std::string &value,
+                    uint32_t timeout) {
     Promise promise(timeout);
     client->Get(key,
                 std::bind(&SyncClient::GetCallback, this, &promise,
@@ -23,6 +23,8 @@ void SyncClient::Get(const std::string &key, std::string &value,
                           std::placeholders::_1, std::placeholders::_2),
                 timeout);
     value = promise.GetValue();
+
+    return promise.GetReply();
 }
 
 void SyncClient::Get(const std::string &key, uint32_t timeout) {

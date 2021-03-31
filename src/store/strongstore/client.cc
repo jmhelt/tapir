@@ -275,7 +275,8 @@ void Client::Get(const std::string &key, get_callback gcb,
         auto gcbLat = [this, gcb](int status, const std::string &key,
                                   const std::string &val,
                                   Timestamp ts) { gcb(status, key, val, ts); };
-        bclient[i]->Get(key, gcbLat, gtcb, timeout);
+        bclient[i]->Get(key, bclient[i]->start_timestamp(), gcbLat, gtcb,
+                        timeout);
     });
 }
 
@@ -421,6 +422,41 @@ void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
 void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     Panic("Unimplemented ABORT");
+
+    // TODO: Implemet this
+    uint64_t reqId = lastReqId++;
+    PendingRequest *req = new PendingRequest(reqId, t_id);
+    pendingReqs[reqId] = req;
+    req->acb = acb;
+    req->atcb = atcb;
+    req->outstandingPrepares = participants_.size();
+    req->timeout = timeout;
+
+    for (int p : participants_) {
+        bclient[p]->Abort(
+            std::bind(&Client::AbortCallback, this, req->id), []() {}, timeout);
+    }
+}
+
+void Client::AbortCallback(uint64_t reqId) {
+    Debug("[%lu] Abort callback", t_id);
+
+    auto itr = this->pendingReqs.find(reqId);
+    if (itr == this->pendingReqs.end()) {
+        Debug("AbortCallback for terminated request id %lu", reqId);
+        return;
+    }
+
+    PendingRequest *req = itr->second;
+    --req->outstandingPrepares;
+    if (req->outstandingPrepares == 0) {
+        abort_callback acb = req->acb;
+        pendingReqs.erase(reqId);
+        delete req;
+
+        Debug("[%lu] Abort finished", t_id);
+        acb();
+    }
 }
 
 /* Commits RO transaction. */

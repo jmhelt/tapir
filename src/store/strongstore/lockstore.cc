@@ -39,30 +39,38 @@ using namespace std;
 namespace strongstore {
 
 LockStore::LockStore(Consistency consistency)
-    : store_{}, locks_{}, prepared_{}, stats_{}, consistency_{consistency} {}
+    : store_{},
+      locks_{},
+      prepared_{},
+      waiting_{},
+      stats_{},
+      consistency_{consistency} {}
 LockStore::~LockStore() {}
 
-int LockStore::Get(uint64_t transaction_id, const string &key,
-                   pair<Timestamp, string> &value) {
+int LockStore::Get(uint64_t transaction_id, const Timestamp &start_timestamp,
+                   const string &key, std::pair<Timestamp, string> &value) {
     Debug("[%lu] GET %s", transaction_id, BytesToHex(key, 16).c_str());
 
+    std::unordered_set<uint64_t> notify_rws;
+
     // grab the lock (ok, if we already have it)
-    if (!locks_.lockForRead(key, transaction_id)) {
-        return REPLY_FAIL;
+    int status = locks_.LockForRead(key, transaction_id, start_timestamp);
+    if (status == REPLY_OK) {
+        if (!store_.get(key, value)) {
+            Debug("[%lu] Couldn't find key %s", transaction_id,
+                  BytesToHex(key, 16).c_str());
+
+            locks_.ReleaseForRead(key, transaction_id, notify_rws);
+            // couldn't find the key
+            status = REPLY_FAIL;
+        } else {
+            Debug("[%lu] GET for key %s; return ts %lu.%lu.", transaction_id,
+                  BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
+                  value.first.getID());
+        }
     }
 
-    if (!store_.get(key, value)) {
-        Debug("[%lu] Couldn't find key %s", transaction_id,
-              BytesToHex(key, 16).c_str());
-        // couldn't find the key
-        return REPLY_FAIL;
-    }
-
-    Debug("[%lu] GET for key %s; return ts %lu.%lu.", transaction_id,
-          BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
-          value.first.getID());
-
-    return REPLY_OK;
+    return status;
 }
 
 int LockStore::ROBegin(uint64_t transaction_id,
@@ -122,13 +130,15 @@ int LockStore::ROGet(uint64_t transaction_id, const string &key,
     return REPLY_OK;
 }
 
+int LockStore::ContinuePrepare(uint64_t transaction_id) { return REPLY_OK; }
+
 int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
                        const Timestamp &nonblock_timestamp) {
     int status = Prepare(transaction_id, transaction);
     if (status == REPLY_OK) {
-        Debug("nonblock_timestamp: %lu.%lu", nonblock_timestamp.getTimestamp(),
-              nonblock_timestamp.getID());
         prepared_[transaction_id].set_nonblock_timestamp(nonblock_timestamp);
+    } else if (status == REPLY_WAIT) {
+        waiting_[transaction_id].set_nonblock_timestamp(nonblock_timestamp);
     }
 
     return status;
@@ -147,18 +157,22 @@ int LockStore::Prepare(uint64_t transaction_id,
         return REPLY_OK;
     }
 
-    if (getLocks(transaction_id, transaction)) {
+    int status = getLocks(transaction_id, transaction);
+
+    if (status == REPLY_OK) {
+        Debug("[%lu] PREPARED TO COMMIT", transaction_id);
         prepared_.emplace(transaction_id,
                           PreparedTransaction{transaction_id, transaction});
-        Debug("[%lu] PREPARED TO COMMIT", transaction_id);
-        return REPLY_OK;
-    } else {
-        Debug("[%lu] Could not acquire write locks", transaction_id);
-        return REPLY_FAIL;
+    } else if (status == REPLY_WAIT) {
+        waiting_.emplace(transaction_id,
+                         PreparedTransaction{transaction_id, transaction});
     }
+
+    return status;
 }
 
 bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
+                       std::unordered_set<uint64_t> &notify_rws,
                        std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] COMMIT", transaction_id);
     ASSERT(prepared_.find(transaction_id) != prepared_.end());
@@ -174,7 +188,7 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
     notify_ros = std::move(prepared.waiting_ros());
 
     // Drop locks.
-    dropLocks(transaction_id, transaction);
+    dropLocks(transaction_id, transaction, notify_rws);
 
     prepared_.erase(transaction_id);
 
@@ -182,6 +196,7 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
 }
 
 void LockStore::Abort(uint64_t transaction_id,
+                      std::unordered_set<uint64_t> &notify_rws,
                       std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] ABORT", transaction_id);
     auto search = prepared_.find(transaction_id);
@@ -191,10 +206,20 @@ void LockStore::Abort(uint64_t transaction_id,
         notify_ros = std::move(prepared.waiting_ros());
 
         // Drop locks.
-        dropLocks(transaction_id, prepared.transaction());
+        dropLocks(transaction_id, prepared.transaction(), notify_rws);
 
         prepared_.erase(search);
     }
+}
+
+void LockStore::ReleaseLocks(uint64_t transaction_id,
+                             const Transaction &transaction,
+                             std::unordered_set<uint64_t> &notify_rws) {
+    Debug("[%lu] ReleaseLocks", transaction_id);
+    ASSERT(prepared_.find(transaction_id) == prepared_.end());
+
+    // Drop locks.
+    dropLocks(transaction_id, transaction, notify_rws);
 }
 
 void LockStore::Load(const string &key, const string &value,
@@ -204,32 +229,50 @@ void LockStore::Load(const string &key, const string &value,
 
 /* Used on commit and abort for second phase of 2PL. */
 void LockStore::dropLocks(uint64_t transaction_id,
-                          const Transaction &transaction) {
+                          const Transaction &transaction,
+                          std::unordered_set<uint64_t> &notify_rws) {
     for (auto &write : transaction.getWriteSet()) {
-        locks_.releaseForWrite(write.first, transaction_id);
+        Debug("[%lu] ReleaseForWrite: %s", transaction_id, write.first.c_str());
+        locks_.ReleaseForWrite(write.first, transaction_id, notify_rws);
     }
 
     for (auto &read : transaction.getReadSet()) {
-        locks_.releaseForRead(read.first, transaction_id);
+        Debug("[%lu] ReleaseForRead: %s", transaction_id, read.first.c_str());
+        locks_.ReleaseForRead(read.first, transaction_id, notify_rws);
     }
 }
 
-bool LockStore::getLocks(uint64_t transaction_id,
-                         const Transaction &transaction) {
-    Debug("start_time: %lu.%lu", transaction.get_start_time().getTimestamp(),
-          transaction.get_start_time().getID());
-    bool ret = true;
-    // if we don't have read locks, get read locks
+int LockStore::getLocks(uint64_t transaction_id,
+                        const Transaction &transaction) {
+    const Timestamp &start_timestamp = transaction.get_start_time();
+    Debug("start_time: %lu.%lu", start_timestamp.getTimestamp(),
+          start_timestamp.getID());
+    int ret = REPLY_OK;
+    int status = REPLY_OK;
+    // get read locks
     for (auto &read : transaction.getReadSet()) {
-        if (!locks_.lockForRead(read.first, transaction_id)) {
-            ret = false;
+        status =
+            locks_.LockForRead(read.first, transaction_id, start_timestamp);
+        Debug("[%lu] LockForRead returned status %d", transaction_id, status);
+        if (ret == REPLY_OK && status == REPLY_WAIT) {
+            ret = REPLY_WAIT;
+        } else if (status == REPLY_FAIL) {
+            ret = REPLY_FAIL;
         }
     }
+
+    // get write locks
     for (auto &write : transaction.getWriteSet()) {
-        if (!locks_.lockForWrite(write.first, transaction_id)) {
-            ret = false;
+        status =
+            locks_.LockForWrite(write.first, transaction_id, start_timestamp);
+        Debug("[%lu] LockForWrite returned status %d", transaction_id, status);
+        if (ret == REPLY_OK && status == REPLY_WAIT) {
+            ret = REPLY_WAIT;
+        } else if (status == REPLY_FAIL) {
+            ret = REPLY_FAIL;
         }
     }
+
     return ret;
 }
 

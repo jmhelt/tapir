@@ -46,6 +46,8 @@ class BufferClient : public ::BufferClient {
 
     void Begin(uint64_t tid, const Timestamp &start_time);
 
+    const Timestamp &start_timestamp() const { return txn.get_start_time(); }
+
     void RWCommitCoordinator(uint64_t transaction_id, int n_participants,
                              Timestamp &nonblock_timestamp,
                              prepare_callback pcb,

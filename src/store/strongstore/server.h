@@ -189,6 +189,8 @@ class Server : public TransportReceiver,
     void HandleRWCommitParticipant(const TransportAddress &remote,
                                    proto::RWCommitParticipant &msg);
 
+    void HandleAbort(const TransportAddress &remote, proto::Abort &msg);
+
     void HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &msg);
     void HandlePrepareAbort(const TransportAddress &remote,
                             proto::PrepareAbort &msg);
@@ -202,13 +204,18 @@ class Server : public TransportReceiver,
 
     void CommitCoordinatorCallback(
         uint64_t transaction_id, transaction_status_t status,
+        const std::unordered_set<uint64_t> &notify_rws,
         const std::unordered_set<uint64_t> &notify_ros);
     void CommitParticipantCallback(
         uint64_t transaction_id, transaction_status_t status,
+        const std::unordered_set<uint64_t> &notify_rws,
         const std::unordered_set<uint64_t> &notify_ros);
     void AbortParticipantCallback(
-        uint64_t transaction_id,
+        uint64_t transaction_id, const std::unordered_set<uint64_t> &notify_rws,
         const std::unordered_set<uint64_t> &notify_ros);
+
+    void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
+    void ContinueCoordinatorPrepare(uint64_t transaction_id);
 
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
     bool NotifyPendingRO(PendingROCommitReply *reply);
@@ -242,6 +249,7 @@ class Server : public TransportReceiver,
     proto::PrepareOK prepare_ok_;
     proto::PrepareAbort prepare_abort_;
     proto::ROCommit ro_commit_;
+    proto::Abort abort_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;
@@ -249,6 +257,7 @@ class Server : public TransportReceiver,
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    proto::AbortReply abort_reply_;
     PingMessage ping_;
 
     Stats stats_;

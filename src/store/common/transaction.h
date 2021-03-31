@@ -23,7 +23,8 @@
 #define REPLY_ABSTAIN 3
 #define REPLY_TIMEOUT 4
 #define REPLY_NETWORK_FAILURE 5
-#define REPLY_MAX 6
+#define REPLY_WAIT 6
+#define REPLY_MAX 7
 
 class Transaction {
    private:
