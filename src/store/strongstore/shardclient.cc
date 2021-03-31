@@ -79,6 +79,9 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == ro_commit_reply_.GetTypeName()) {
         ro_commit_reply_.ParseFromString(data);
         HandleROCommitReply(ro_commit_reply_);
+    } else if (type == abort_reply_.GetTypeName()) {
+        abort_reply_.ParseFromString(data);
+        HandleAbortReply(abort_reply_);
     } else if (type == ping_.GetTypeName()) {
         ping_.ParseFromString(data);
         HandlePingResponse(ping_);
@@ -101,8 +104,8 @@ uint64_t ShardClient::GetLatencyToLeader() {
 }
 
 /* Sends BEGIN to a single shard indexed by i. */
-void ShardClient::Begin(uint64_t id) {
-    Debug("[shard %i] BEGIN: %lu", shard_idx_, id);
+void ShardClient::Begin(uint64_t transaction_id) {
+    Debug("[shard %i] BEGIN: %lu", shard_idx_, transaction_id);
 }
 
 /* Returns the value corresponding to the supplied key. */
@@ -159,6 +162,7 @@ void ShardClient::Get(uint64_t transaction_id, const std::string &key,
 
 void ShardClient::HandleGetReply(const proto::GetReply &reply) {
     uint64_t req_id = reply.rid().client_req_id();
+    int status = reply.status();
 
     auto itr = pendingGets.find(req_id);
     if (itr == pendingGets.end()) {
@@ -172,12 +176,20 @@ void ShardClient::HandleGetReply(const proto::GetReply &reply) {
     pendingGets.erase(itr);
     delete req;
 
-    Debug("[shard %i] Received GET reply [%s]", shard_idx_, key.c_str());
+    Debug("[shard %i] Received GET reply: %s %d", shard_idx_, key.c_str(),
+          status);
 
-    gcb(REPLY_OK, key, reply.val(), Timestamp());
+    std::string val;
+    Timestamp ts;
+    if (status == REPLY_OK) {
+        val = reply.val();
+        ts = Timestamp(reply.timestamp());
+    }
+
+    gcb(status, key, val, ts);
 }
 
-void ShardClient::Put(uint64_t id, const std::string &key,
+void ShardClient::Put(uint64_t transaction_id, const std::string &key,
                       const std::string &value, put_callback pcb,
                       put_timeout_callback ptcb, uint32_t timeout) {
     Panic("Unimplemented PUT");
@@ -412,141 +424,58 @@ void ShardClient::HandlePrepareAbortReply(
     pcb(reply.status(), Timestamp());
 }
 
-void ShardClient::Prepare(uint64_t id, const Transaction &txn,
+void ShardClient::Abort(uint64_t transaction_id, const Transaction &transaction,
+                        abort_callback acb, abort_timeout_callback atcb,
+                        uint32_t timeout) {
+    Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
+
+    uint64_t reqId = lastReqId++;
+    PendingAbort *pendingAbort = new PendingAbort(reqId);
+    pendingAborts[reqId] = pendingAbort;
+    pendingAbort->acb = acb;
+    pendingAbort->atcb = atcb;
+
+    // TODO: Setup timeout
+    abort_.Clear();
+    abort_.mutable_rid()->set_client_id(client_id_);
+    abort_.mutable_rid()->set_client_req_id(reqId);
+    abort_.set_transaction_id(transaction_id);
+    transaction.serialize(abort_.mutable_transaction());
+
+    Latency_Start(&opLat);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
+}
+
+void ShardClient::HandleAbortReply(const proto::AbortReply &reply) {
+    Debug("[shard %i] Received HandleAbortReply", shard_idx_);
+    uint64_t req_id = reply.rid().client_req_id();
+
+    auto itr = pendingAborts.find(req_id);
+    if (itr == pendingAborts.end()) {
+        Debug("[%d][%lu] PrepareAbortReply for stale request.", shard_idx_,
+              req_id);
+        return;  // stale request
+    }
+
+    PendingAbort *req = itr->second;
+    abort_callback acb = req->acb;
+    pendingAborts.erase(itr);
+    delete req;
+
+    acb();
+}
+
+void ShardClient::Prepare(uint64_t transaction_id, const Transaction &txn,
                           const Timestamp &timestamp, prepare_callback pcb,
                           prepare_timeout_callback ptcb, uint32_t timeout) {
     Panic("Unimplemented PREPARE");
 }
 
-void ShardClient::Commit(uint64_t id, const Transaction &txn,
+void ShardClient::Commit(uint64_t transaction_id, const Transaction &txn,
                          const Timestamp &timestamp, commit_callback ccb,
                          commit_timeout_callback ctcb, uint32_t timeout) {
     Debug("Unimplemented COMMIT");
-}
-
-void ShardClient::Abort(uint64_t id, const Transaction &txn, abort_callback acb,
-                        abort_timeout_callback atcb, uint32_t timeout) {
-    Debug("Unimplemented ABORT");
-}
-
-void ShardClient::GetTimeout(uint64_t reqId) {
-    Warning("[shard %i] GET[%lu] timeout.", shard_idx_, reqId);
-    auto itr = this->pendingGets.find(reqId);
-    if (itr != this->pendingGets.end()) {
-        PendingGet *pendingGet = itr->second;
-        get_timeout_callback gtcb = pendingGet->gtcb;
-        std::string key = pendingGet->key;
-        this->pendingGets.erase(itr);
-        delete pendingGet;
-        gtcb(REPLY_TIMEOUT, key);
-    }
-}
-
-/* Callback from a shard replica on get operation completion. */
-bool ShardClient::GetCallback(uint64_t reqId, const string &request_str,
-                              const string &reply_str) {
-    Latency_End(&opLat);
-    /* Replies back from a shard. */
-    Reply reply;
-    reply.ParseFromString(reply_str);
-
-    auto itr = this->pendingGets.find(reqId);
-    if (itr != this->pendingGets.end()) {
-        PendingGet *pendingGet = itr->second;
-        get_callback gcb = pendingGet->gcb;
-        std::string key = pendingGet->key;
-        this->pendingGets.erase(itr);
-        delete pendingGet;
-        Debug("[shard %lu:%i] GET callback [%d] %lx %lu", client_id_,
-              shard_idx_, reply.status(), *((const uint64_t *)key.c_str()),
-              reply.timestamp());
-        if (reply.has_timestamp()) {
-            gcb(reply.status(), key, reply.value(),
-                Timestamp(reply.timestamp()));
-        } else {
-            gcb(reply.status(), key, reply.value(), Timestamp());
-        }
-    }
-    return true;
-}
-
-/* Callback from a shard replica on prepare operation completion. */
-bool ShardClient::PrepareCallback(uint64_t reqId, const string &request_str,
-                                  const string &reply_str) {
-    Reply reply;
-
-    reply.ParseFromString(reply_str);
-
-    Debug("[shard %i] Received PREPARE callback [%d]", shard_idx_,
-          reply.status());
-    auto itr = this->pendingPrepares.find(reqId);
-    ASSERT(itr != this->pendingPrepares.end());
-    PendingPrepare *pendingPrepare = itr->second;
-    prepare_callback pcb = pendingPrepare->pcb;
-    this->pendingPrepares.erase(itr);
-    delete pendingPrepare;
-    switch (reply.status()) {
-        case REPLY_OK:
-            if (reply.has_timestamp()) {
-                Debug("[shard %i] COMMIT timestamp [%lu]", shard_idx_,
-                      reply.timestamp());
-                pcb(reply.status(), Timestamp(reply.timestamp()));
-            } else {
-                pcb(reply.status(), Timestamp());
-            }
-            break;
-        case REPLY_FAIL:
-            pcb(reply.status(), Timestamp());
-            break;
-        default:
-            NOT_REACHABLE();
-    }
-
-    return true;
-}
-
-/* Callback from a shard replica on commit operation completion. */
-bool ShardClient::CommitCallback(uint64_t reqId, const string &request_str,
-                                 const string &reply_str) {
-    // COMMITs always succeed.
-    Reply reply;
-    reply.ParseFromString(reply_str);
-    ASSERT(reply.status() == REPLY_OK);
-
-    Debug("[shard %i] Received COMMIT callback [%d]", shard_idx_,
-          reply.status());
-
-    auto itr = this->pendingCommits.find(reqId);
-    ASSERT(itr != pendingCommits.end());
-    PendingCommit *pendingCommit = itr->second;
-    commit_callback ccb = pendingCommit->ccb;
-    this->pendingCommits.erase(itr);
-    delete pendingCommit;
-    ccb(COMMITTED);
-
-    return true;
-}
-
-/* Callback from a shard replica on abort operation completion. */
-bool ShardClient::AbortCallback(uint64_t reqId, const string &request_str,
-                                const string &reply_str) {
-    // ABORTs always succeed.
-    Reply reply;
-    reply.ParseFromString(reply_str);
-    ASSERT(reply.status() == REPLY_OK);
-
-    Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
-          reply.status());
-
-    auto itr = this->pendingAborts.find(reqId);
-    ASSERT(itr != this->pendingAborts.end());
-    PendingAbort *pendingAbort = itr->second;
-    abort_callback acb = pendingAbort->acb;
-    this->pendingAborts.erase(itr);
-    delete pendingAbort;
-    acb();
-
-    return true;
 }
 
 }  // namespace strongstore

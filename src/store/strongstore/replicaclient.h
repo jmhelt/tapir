@@ -21,11 +21,14 @@ class ReplicaClient {
     typedef std::function<void(int, Timestamp)> prepare_timeout_callback;
 
     typedef std::function<void(transaction_status_t,
+                               std::unordered_set<uint64_t> &,
                                std::unordered_set<uint64_t> &)>
         commit_callback;
     typedef std::function<void()> commit_timeout_callback;
 
-    typedef std::function<void(std::unordered_set<uint64_t> &)> abort_callback;
+    typedef std::function<void(std::unordered_set<uint64_t> &,
+                               std::unordered_set<uint64_t> &)>
+        abort_callback;
     typedef std::function<void()> abort_timeout_callback;
 
    public:
