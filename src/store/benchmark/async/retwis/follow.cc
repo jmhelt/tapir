@@ -11,9 +11,13 @@ transaction_status_t Follow::Execute(SyncClient &client) {
     Debug("FOLLOW");
     client.Begin(timeout);
 
+    std::string value;
     for (int i = 0; i < 2; i++) {
-        client.Get(GetKey(0), timeout);
-        client.Put(GetKey(0), GetKey(0), timeout);
+        if (client.Get(GetKey(i), value, timeout)) {
+            client.Abort(timeout);
+            return ABORTED_SYSTEM;
+        }
+        client.Put(GetKey(i), GetKey(i), timeout);
     }
 
     Debug("COMMIT");

@@ -216,6 +216,7 @@ class Server : public TransportReceiver,
 
     void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
     void ContinueCoordinatorPrepare(uint64_t transaction_id);
+    void ContinueParticipantPrepare(uint64_t transaction_id);
 
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
     bool NotifyPendingRO(PendingROCommitReply *reply);
@@ -241,7 +242,7 @@ class Server : public TransportReceiver,
     std::unordered_map<uint64_t, PendingPrepareOKReply *>
         pending_prepare_ok_replies_;
     std::unordered_map<uint64_t, PendingROCommitReply *>
-        pending_ro_commit_repies_;
+        pending_ro_commit_replies_;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;

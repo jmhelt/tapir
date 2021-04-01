@@ -14,9 +14,7 @@ WaitDie::WaitDie() {
 WaitDie::~WaitDie() {}
 
 WaitDie::Lock::Lock()
-    : state_{UNLOCKED},
-      min_holder_timestamp_{Timestamp::MAX},
-      min_waiter_timestamp_{Timestamp::MAX} {};
+    : state_{UNLOCKED}, min_holder_timestamp_{Timestamp::MAX} {};
 
 void WaitDie::Lock::AddReadWaiter(uint64_t requester,
                                   const Timestamp &start_timestamp,
@@ -25,7 +23,7 @@ void WaitDie::Lock::AddReadWaiter(uint64_t requester,
         true, false, requester, start_timestamp, waiting_for);
 
     waiters_.emplace(requester, w);
-    wait_q_.push(requester);
+    wait_q_.push_back(requester);
 }
 
 void WaitDie::Lock::AddWriteWaiter(uint64_t requester,
@@ -35,7 +33,7 @@ void WaitDie::Lock::AddWriteWaiter(uint64_t requester,
         false, true, requester, start_timestamp, waiting_for);
 
     waiters_.emplace(requester, w);
-    wait_q_.push(requester);
+    wait_q_.push_back(requester);
 }
 
 void WaitDie::Lock::AddReadWriteWaiter(uint64_t requester,
@@ -45,26 +43,13 @@ void WaitDie::Lock::AddReadWriteWaiter(uint64_t requester,
         true, true, requester, start_timestamp, waiting_for);
 
     waiters_.emplace(requester, w);
-    wait_q_.push(requester);
+    wait_q_.push_back(requester);
 }
 
 bool WaitDie::Lock::TryReadWait(uint64_t requester,
                                 const Timestamp &start_timestamp) {
     for (uint64_t h : holders_) {
         Debug("[%lu] holders: %lu", requester, h);
-    }
-
-    if (wait_q_.empty()) {
-        Debug("[%lu] wait q empty: %lu <? %lu %d", requester,
-              start_timestamp.getTimestamp(),
-              min_holder_timestamp_.getTimestamp(),
-              start_timestamp < min_holder_timestamp_);
-        if (start_timestamp < min_holder_timestamp_) {
-            AddReadWaiter(requester, start_timestamp, min_holder_timestamp_);
-            return true;
-        } else {
-            return false;
-        }
     }
 
     auto search = waiters_.find(requester);
@@ -85,26 +70,41 @@ bool WaitDie::Lock::TryReadWait(uint64_t requester,
         }
     }
 
-    ASSERT(waiters_.find(wait_q_.back()) != waiters_.end());
-    std::shared_ptr<Waiter> back = waiters_[wait_q_.back()];
+    while (!wait_q_.empty()) {
+        uint64_t back = wait_q_.back();
+        auto search = waiters_.find(back);
+        if (search != waiters_.end()) {
+            std::shared_ptr<Waiter> back = search->second;
 
-    Debug("[%lu] back: %d %lu %lu", requester, back->iswrite(),
-          back->waiting_for().getTimestamp(),
-          back->min_waiter().getTimestamp());
+            Debug("[%lu] back: %d %lu %lu", requester, back->iswrite(),
+                  back->waiting_for().getTimestamp(),
+                  back->min_waiter().getTimestamp());
 
-    if (!back->iswrite() && start_timestamp < back->waiting_for()) {
-        back->add_waiter(requester, start_timestamp);
-        waiters_.emplace(requester, back);
-        return true;
-    } else if (back->iswrite() && start_timestamp < back->min_waiter()) {
-        AddReadWaiter(requester, start_timestamp, back->min_waiter());
+            if (!back->iswrite() && start_timestamp < back->waiting_for()) {
+                back->add_waiter(requester, start_timestamp);
+                waiters_.emplace(requester, back);
+                return true;
+            } else if (back->iswrite() &&
+                       start_timestamp < back->min_waiter()) {
+                AddReadWaiter(requester, start_timestamp, back->min_waiter());
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            wait_q_.pop_back();
+        }
+    }
+
+    Debug("[%lu] wait q empty: %lu <? %lu %d", requester,
+          start_timestamp.getTimestamp(), min_holder_timestamp_.getTimestamp(),
+          start_timestamp < min_holder_timestamp_);
+    if (start_timestamp < min_holder_timestamp_) {
+        AddReadWaiter(requester, start_timestamp, min_holder_timestamp_);
         return true;
     } else {
         return false;
     }
-
-    NOT_REACHABLE();
-    return false;
 }
 
 int WaitDie::Lock::TryAcquireReadLock(uint64_t requester,
@@ -163,14 +163,13 @@ bool WaitDie::Lock::PopWaiter() {
     bool modified = false;
     std::size_t nh = holders_.size();
 
-    Debug("nh: %lu, wait_q_.empty(): %d", nh, wait_q_.empty());
     while (!wait_q_.empty() && nh < 2) {
         uint64_t next = wait_q_.front();
         if (nh == 1 && holders_.count(next) == 0) {
             break;
         }
 
-        wait_q_.pop();
+        wait_q_.pop_front();
 
         auto search = waiters_.find(next);
         if (search != waiters_.end()) {
@@ -183,7 +182,6 @@ bool WaitDie::Lock::PopWaiter() {
 
             min_holder_timestamp_ = w->min_waiter();
 
-            // TODO: Add case for read/write
             bool isread = w->isread();
             bool iswrite = w->iswrite();
             if (iswrite && holders_.count(next) > 0) {
@@ -206,12 +204,9 @@ bool WaitDie::Lock::PopWaiter() {
         nh = holders_.size();
     }
 
-    if (wait_q_.size() == 0) {
-        min_waiter_timestamp_ = Timestamp::MAX;
-    }
-
     if (holders_.size() == 0) {
         state_ = UNLOCKED;
+        min_holder_timestamp_ = Timestamp::MAX;
     }
 
     return modified;
@@ -304,19 +299,6 @@ void WaitDie::Lock::ReleaseWriteLock(uint64_t holder,
 
 bool WaitDie::Lock::TryWriteWait(uint64_t requester,
                                  const Timestamp &start_timestamp) {
-    if (wait_q_.empty()) {
-        Debug("[%lu] wait q empty: %lu <=? %lu %d", requester,
-              start_timestamp.getTimestamp(),
-              min_holder_timestamp_.getTimestamp(),
-              start_timestamp <= min_holder_timestamp_);
-        if (start_timestamp <= min_holder_timestamp_) {
-            AddWriteWaiter(requester, start_timestamp, min_holder_timestamp_);
-            return true;
-        }
-
-        return false;
-    }
-
     bool add_read = false;
     auto search = waiters_.find(requester);
     if (search != waiters_.end()) {  // I already have a waiter
@@ -342,25 +324,42 @@ bool WaitDie::Lock::TryWriteWait(uint64_t requester,
         }
     }
 
-    ASSERT(waiters_.find(wait_q_.back()) != waiters_.end());
-    std::shared_ptr<Waiter> back = waiters_[wait_q_.back()];
+    while (!wait_q_.empty()) {
+        uint64_t back = wait_q_.back();
+        auto search = waiters_.find(back);
+        if (search != waiters_.end()) {
+            std::shared_ptr<Waiter> back = search->second;
 
-    Debug("[%lu] back: %d %lu %lu", requester, back->iswrite(),
-          back->waiting_for().getTimestamp(),
-          back->min_waiter().getTimestamp());
+            Debug("[%lu] back: %d %lu %lu", requester, back->iswrite(),
+                  back->waiting_for().getTimestamp(),
+                  back->min_waiter().getTimestamp());
 
-    const Timestamp &min_waiter = back->min_waiter();
+            const Timestamp &min_waiter = back->min_waiter();
 
-    if (start_timestamp <= min_waiter) {
-        if (add_read) {
-            AddReadWriteWaiter(requester, start_timestamp, min_waiter);
+            if (start_timestamp <= min_waiter) {
+                if (add_read) {
+                    AddReadWriteWaiter(requester, start_timestamp, min_waiter);
+                } else {
+                    AddWriteWaiter(requester, start_timestamp, min_waiter);
+                }
+                return true;
+            } else {
+                return false;
+            }
         } else {
-            AddWriteWaiter(requester, start_timestamp, min_waiter);
+            wait_q_.pop_back();
         }
-        return true;
     }
 
-    return false;
+    Debug("[%lu] wait q empty: %lu <=? %lu %d", requester,
+          start_timestamp.getTimestamp(), min_holder_timestamp_.getTimestamp(),
+          start_timestamp <= min_holder_timestamp_);
+    if (start_timestamp <= min_holder_timestamp_) {
+        AddWriteWaiter(requester, start_timestamp, min_holder_timestamp_);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 int WaitDie::Lock::TryAcquireWriteLock(uint64_t requester,
@@ -401,11 +400,22 @@ int WaitDie::Lock::TryAcquireWriteLock(uint64_t requester,
 }
 
 bool WaitDie::Lock::isWriteNext() {
-    if (wait_q_.size() == 0) {
-        return false;
-    } else {
-        return waiters_[wait_q_.front()]->iswrite();
+    while (!wait_q_.empty()) {
+        auto search = waiters_.find(wait_q_.front());
+        if (search != waiters_.end()) {
+            return search->second->iswrite();
+        } else {
+            wait_q_.pop_front();
+        }
     }
+
+    return false;
+
+    // if (wait_q_.size() == 0) {
+    //     return false;
+    // } else {
+    //     return waiters_[wait_q_.front()]->iswrite();
+    // }
 }
 
 const LockState WaitDie::GetLockState(const std::string &lock) const {
