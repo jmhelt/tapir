@@ -147,6 +147,8 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
 }
 
 void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
+    Debug("[%lu] Continuing coordinator prepare", transaction_id);
+
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     ASSERT(search != pending_rw_commit_c_replies_.end());
 
@@ -360,10 +362,13 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             store_.ReleaseLocks(transaction_id, transaction, notify_rws);
             coordinator.Abort(transaction_id);
 
-            ASSERT(notify_rws.size() == 0);
+            for (uint64_t rw : notify_rws) {
+                Debug("[%lu] notify_rw: %lu", transaction_id, rw);
+            }
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
-            // NotifyPendingROs(notify_ros);
+
+            NotifyPendingRWs(notify_rws);
         }
     } else if (d == Decision::ABORT) {
         Debug("[%lu] Abort", transaction_id);

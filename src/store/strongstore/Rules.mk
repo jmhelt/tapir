@@ -6,11 +6,13 @@ SRCS += $(addprefix $(d), occstore.cc lockstore.cc server.cc \
 
 PROTOS += $(addprefix $(d), strong-proto.proto)
 
+LIB-waitdie := $(o)waitdie.o $(LIB-store-common) $(LIB-message)
+
 OBJS-shard-client := $(LIB-latency) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)shardclient.o
 
 OBJS-replica-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)replicaclient.o
 
-LIB-strong-store := $(o)occstore.o $(o)lockstore.o $(o)waitdie.o $(o)coordinator.o $(OBJS-shard-client) $(OBJS-replica-client)
+LIB-strong-store := $(o)occstore.o $(o)lockstore.o $(LIB-waitdie) $(o)coordinator.o $(OBJS-shard-client) $(OBJS-replica-client)
 
 OBJS-strong-store := $(LIB-udptransport) $(OBJS-vr-replica) \
     $(LIB-message) $(LIB-strong-store) $(LIB-store-common) \
@@ -18,3 +20,4 @@ OBJS-strong-store := $(LIB-udptransport) $(OBJS-vr-replica) \
 
 OBJS-strong-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)networkconfig.o $(o)strongbufferclient.o $(o)shardclient.o $(o)client.o
 
+include $(d)tests/Rules.mk
