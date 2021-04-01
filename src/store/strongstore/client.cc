@@ -303,7 +303,7 @@ void Client::Put(const std::string &key, const std::string &value,
 }
 
 void Client::Prepare(PendingRequest *req, uint32_t timeout) {
-    Debug("PREPARE [%lu]", t_id);
+    Debug("[%lu] PREPARE", t_id);
     ASSERT(participants_.size() > 0);
 
     req->outstandingPrepares = 0;
@@ -421,9 +421,8 @@ void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
 /* Aborts the ongoing transaction. */
 void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
-    Panic("Unimplemented ABORT");
+    Debug("[%lu] ABORT", t_id);
 
-    // TODO: Implemet this
     uint64_t reqId = lastReqId++;
     PendingRequest *req = new PendingRequest(reqId, t_id);
     pendingReqs[reqId] = req;
