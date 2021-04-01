@@ -83,6 +83,7 @@ class Coordinator {
     Coordinator(const TrueTime &tt);
     ~Coordinator();
 
+    bool HasTransaction(uint64_t transaction_id);
     Transaction &GetTransaction(uint64_t transaction_id);
 
     int GetNParticipants(uint64_t transaction_id);

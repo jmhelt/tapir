@@ -12,8 +12,12 @@ transaction_status_t PostTweet::Execute(SyncClient &client) {
     Debug("POST_TWEET");
     client.Begin(timeout);
 
+    std::string value;
     for (int i = 0; i < 3; i++) {
-        client.Get(GetKey(i), timeout);
+        if (client.Get(GetKey(i), value, timeout)) {
+            client.Abort(timeout);
+            return ABORTED_SYSTEM;
+        }
         client.Put(GetKey(i), GetKey(i), timeout);
     }
 

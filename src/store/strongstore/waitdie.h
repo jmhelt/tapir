@@ -3,9 +3,9 @@
 
 #include <sys/time.h>
 
+#include <deque>
 #include <map>
 #include <memory>
-#include <queue>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -99,10 +99,9 @@ class WaitDie {
        private:
         LockState state_;
         std::unordered_set<uint64_t> holders_;
-        std::queue<uint64_t> wait_q_;
+        std::deque<uint64_t> wait_q_;
         std::unordered_map<uint64_t, std::shared_ptr<Waiter>> waiters_;
         Timestamp min_holder_timestamp_;
-        Timestamp min_waiter_timestamp_;
 
         bool isWriteNext();
 

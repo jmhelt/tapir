@@ -68,7 +68,8 @@ class LockStore {
     int Prepare(uint64_t transaction_id, const Transaction &transaction,
                 const Timestamp &nonblock_timestamp);
 
-    int ContinuePrepare(uint64_t transaction_id);
+    int ContinuePrepare(uint64_t transaction_id,
+                        std::unordered_set<uint64_t> &notify_rws);
 
     bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
                 std::unordered_set<uint64_t> &notify_rws,
@@ -84,6 +85,8 @@ class LockStore {
               const Timestamp &timestamp);
 
     Stats &GetStats() { return stats_; };
+
+    const Transaction &GetPreparedTransaction(uint64_t transaction_id) const;
 
    private:
     class PreparedTransaction {
