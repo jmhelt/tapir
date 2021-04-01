@@ -17,12 +17,19 @@
 
 namespace strongstore {
 
-#define LOCK_WAIT_TIMEOUT 5000
+enum LockState {
+    UNLOCKED,
+    LOCKED_FOR_READ,
+    LOCKED_FOR_WRITE,
+    LOCKED_FOR_READ_WRITE
+};
 
 class WaitDie {
    public:
     WaitDie();
     ~WaitDie();
+
+    const LockState GetLockState(const std::string &lock) const;
 
     int LockForRead(const std::string &lock, uint64_t requester,
                     const Timestamp &start_timestamp);
@@ -34,26 +41,24 @@ class WaitDie {
                          std::unordered_set<uint64_t> &notify_rws);
 
    private:
-    enum LockState {
-        UNLOCKED,
-        LOCKED_FOR_READ,
-        LOCKED_FOR_WRITE,
-        LOCKED_FOR_READ_WRITE
-    };
-
     class Waiter {
        public:
         Waiter() : write_{false} {}
-        Waiter(bool w, uint64_t waiter, const Timestamp &start_timestamp,
-               const Timestamp &waiting_for)
+        Waiter(bool r, bool w, uint64_t waiter,
+               const Timestamp &start_timestamp, const Timestamp &waiting_for)
             : waiters_{},
               min_waiter_{Timestamp::MAX},
               waiting_for_{waiting_for},
-              write_{w} {
+              write_{w},
+              read_{r} {
             add_waiter(waiter, start_timestamp);
         }
 
-        bool is_write() const { return write_; }
+        bool isread() const { return read_; }
+        void set_read(bool r) { read_ = r; }
+
+        bool iswrite() const { return write_; }
+        void set_write(bool w) { write_ = w; }
 
         const Timestamp &min_waiter() const { return min_waiter_; }
         const Timestamp &waiting_for() const { return waiting_for_; }
@@ -62,6 +67,9 @@ class WaitDie {
             waiters_.insert(w);
             min_waiter_ = std::min(min_waiter_, ts);
         }
+
+        void remove_waiter(uint64_t w) { waiters_.erase(w); }
+
         const std::unordered_set<uint64_t> &waiters() const { return waiters_; }
 
        private:
@@ -69,6 +77,7 @@ class WaitDie {
         Timestamp min_waiter_;
         Timestamp waiting_for_;
         bool write_;
+        bool read_;
     };
 
     class Lock {
@@ -84,6 +93,8 @@ class WaitDie {
                              std::unordered_set<uint64_t> &notify_rws);
         void ReleaseWriteLock(uint64_t holder,
                               std::unordered_set<uint64_t> &notify_rws);
+
+        const LockState state() const { return state_; }
 
        private:
         LockState state_;
@@ -103,8 +114,11 @@ class WaitDie {
         void AddWriteWaiter(uint64_t requester,
                             const Timestamp &start_timestamp,
                             const Timestamp &waiting_for);
+        void AddReadWriteWaiter(uint64_t requester,
+                                const Timestamp &start_timestamp,
+                                const Timestamp &waiting_for);
 
-        void PopWaiter();
+        bool PopWaiter();
     };
 
     /* Global store which keep key -> (timestamp, value) list. */
