@@ -113,6 +113,10 @@ int WaitDie::Lock::TryAcquireReadLock(uint64_t requester,
 
         Debug("[%lu] adding myself as reader: %lu", requester, holders_.size());
 
+        for (uint64_t h : holders_) {
+            Debug("[%lu] holders: %lu", requester, h);
+        }
+
         return REPLY_OK;
     }
 
@@ -140,9 +144,16 @@ void WaitDie::Lock::PopWaiter() {
         min_waiter_timestamp_ = Timestamp::MAX;
     }
 
+    // TODO: Fix if waiter is removed
+    // TODO: Fix for multiple waiters
     ASSERT(waiters_.find(h) != waiters_.end());
 
     std::shared_ptr<Waiter> w = waiters_[h];
+
+    for (uint64_t v : w->waiters()) {
+        Debug("Waiter: %lu", v);
+    }
+    Debug("Waiter ts: %lu", w->min_waiter().getTimestamp());
 
     min_holder_timestamp_ = w->min_waiter();
 
@@ -161,12 +172,52 @@ void WaitDie::Lock::PopWaiter() {
 
 void WaitDie::Lock::ReleaseReadLock(uint64_t holder,
                                     std::unordered_set<uint64_t> &notify_rws) {
+    for (uint64_t h : holders_) {
+        Debug("[%lu] holders before: %lu", holder, h);
+    }
+
     if (state_ == LOCKED_FOR_READ_WRITE) {
+        Debug("[%lu] downgrade to w lock", holder);
         state_ = LOCKED_FOR_WRITE;
         return;
     }
 
     holders_.erase(holder);
+
+    for (uint64_t h : holders_) {
+        Debug("[%lu] holders after: %lu", holder, h);
+    }
+
+    std::size_t h = holders_.size();
+    if (h == 0 ||  // no holders
+        (h == 1 && !wait_q_.empty() && holders_.count(wait_q_.front()) > 1)) {
+        // if (!holders_.empty()) {
+        //     return;
+        // }
+
+        PopWaiter();
+
+        notify_rws.insert(holders_.begin(), holders_.end());
+    }
+}
+
+void WaitDie::Lock::ReleaseWriteLock(uint64_t holder,
+                                     std::unordered_set<uint64_t> &notify_rws) {
+    for (uint64_t h : holders_) {
+        Debug("[%lu] holders before: %lu", holder, h);
+    }
+
+    if (state_ == LOCKED_FOR_READ_WRITE) {
+        Debug("[%lu] downgrade to r lock", holder);
+        state_ = LOCKED_FOR_READ;
+        return;
+    }
+
+    holders_.erase(holder);
+
+    for (uint64_t h : holders_) {
+        Debug("[%lu] holders after: %lu", holder, h);
+    }
     if (!holders_.empty()) {
         return;
     }
@@ -176,28 +227,14 @@ void WaitDie::Lock::ReleaseReadLock(uint64_t holder,
     notify_rws.insert(holders_.begin(), holders_.end());
 }
 
-void WaitDie::Lock::ReleaseWriteLock(uint64_t holder,
-                                     std::unordered_set<uint64_t> &notify_rws) {
-    if (state_ == LOCKED_FOR_READ_WRITE) {
-        state_ = LOCKED_FOR_READ;
-        return;
-    }
-
-    holders_.erase(holder);
-
-    PopWaiter();
-
-    notify_rws.insert(holders_.begin(), holders_.end());
-}
-
 bool WaitDie::Lock::TryWriteWait(uint64_t requester,
                                  const Timestamp &start_timestamp) {
     if (wait_q_.empty()) {
-        Debug("[%lu] wait q empty: %lu <? %lu %d", requester,
+        Debug("[%lu] wait q empty: %lu <=? %lu %d", requester,
               start_timestamp.getTimestamp(),
               min_holder_timestamp_.getTimestamp(),
-              start_timestamp < min_holder_timestamp_);
-        if (start_timestamp < min_holder_timestamp_) {
+              start_timestamp <= min_holder_timestamp_);
+        if (start_timestamp <= min_holder_timestamp_) {
             AddWriteWaiter(requester, start_timestamp, min_holder_timestamp_);
             return true;
         }
@@ -214,7 +251,7 @@ bool WaitDie::Lock::TryWriteWait(uint64_t requester,
 
     const Timestamp &min_waiter = back->min_waiter();
 
-    if (start_timestamp < min_waiter) {
+    if (start_timestamp <= min_waiter) {
         AddWriteWaiter(requester, start_timestamp, min_waiter);
         return true;
     }
@@ -249,7 +286,7 @@ int WaitDie::Lock::TryAcquireWriteLock(uint64_t requester,
     }
 
     // Try wait
-    if (TryReadWait(requester, start_timestamp)) {
+    if (TryWriteWait(requester, start_timestamp)) {
         Debug("[%lu] Waiting on lock", requester);
         return REPLY_WAIT;
     }
