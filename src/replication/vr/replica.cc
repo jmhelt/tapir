@@ -531,8 +531,8 @@ void VRReplica::HandlePrepare(const TransportAddress &remote,
     }
 
     ASSERT(msg.batchstart() <= msg.opnum());
-    ASSERT_EQ(msg.opnum() - msg.batchstart() + 1,
-              (unsigned int)msg.request_size());
+    ASSERT((msg.opnum() - msg.batchstart() + 1) ==
+           (unsigned int)msg.request_size());
 
     viewChangeTimeout->Reset();
 

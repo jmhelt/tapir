@@ -14,7 +14,6 @@ transaction_status_t AddUser::Execute(SyncClient &client) {
     std::string value;
     if (client.Get(GetKey(0), value, timeout)) {
         client.Abort(timeout);
-        // TODO: Send abort
         return ABORTED_SYSTEM;
     }
 

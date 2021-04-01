@@ -130,7 +130,30 @@ int LockStore::ROGet(uint64_t transaction_id, const string &key,
     return REPLY_OK;
 }
 
-int LockStore::ContinuePrepare(uint64_t transaction_id) { return REPLY_OK; }
+int LockStore::ContinuePrepare(uint64_t transaction_id,
+                               std::unordered_set<uint64_t> &notify_rws) {
+    Debug("[%lu] Continue PREPARE", transaction_id);
+
+    auto search = waiting_.find(transaction_id);
+    ASSERT(search != waiting_.end());
+
+    const Transaction &transaction = search->second.transaction();
+
+    int status = getLocks(transaction_id, transaction);
+
+    if (status == REPLY_OK) {
+        Debug("[%lu] PREPARED TO COMMIT", transaction_id);
+        prepared_.emplace(
+            transaction_id,
+            PreparedTransaction{transaction_id, std::move(transaction)});
+        waiting_.erase(search);
+    } else if (status == REPLY_FAIL) {
+        dropLocks(transaction_id, transaction, notify_rws);
+        waiting_.erase(search);
+    }
+
+    return status;
+}
 
 int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
                        const Timestamp &nonblock_timestamp) {
@@ -220,6 +243,16 @@ void LockStore::ReleaseLocks(uint64_t transaction_id,
 
     // Drop locks.
     dropLocks(transaction_id, transaction, notify_rws);
+}
+
+const Transaction &LockStore::GetPreparedTransaction(
+    uint64_t transaction_id) const {
+    Debug("[%lu] GetPreparedTransaction", transaction_id);
+
+    auto search = prepared_.find(transaction_id);
+    ASSERT(search != prepared_.end());
+
+    return search->second.transaction();
 }
 
 void LockStore::Load(const string &key, const string &value,

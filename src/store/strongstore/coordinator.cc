@@ -8,6 +8,11 @@ Coordinator::Coordinator(const TrueTime &tt)
 
 Coordinator::~Coordinator() {}
 
+bool Coordinator::HasTransaction(uint64_t transaction_id) {
+    return prepared_transactions_.find(transaction_id) !=
+           prepared_transactions_.end();
+}
+
 Transaction &Coordinator::GetTransaction(uint64_t transaction_id) {
     auto search = prepared_transactions_.find(transaction_id);
     ASSERT(search != prepared_transactions_.end());
