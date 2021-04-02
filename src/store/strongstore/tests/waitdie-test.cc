@@ -230,6 +230,108 @@ TEST(WaitDie, MergeReadWriteWaiter) {
     ASSERT_EQ(notify_rws.size(), 0);
 }
 
+TEST(WaitDie, MultiReadWaiter) {
+    WaitDie wd;
+
+    std::unordered_set<uint64_t> notify_rws;
+
+    int status = wd.LockForWrite("lock", 1, Timestamp(3));
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 2, Timestamp(2));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 3, Timestamp(1));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    wd.ReleaseForWrite("lock", 1, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(notify_rws.size(), 2);
+    ASSERT_EQ(notify_rws.count(2), 1);
+    ASSERT_EQ(notify_rws.count(3), 1);
+    notify_rws.clear();
+
+    wd.ReleaseForRead("lock", 2, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForRead("lock", 3, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+}
+
+TEST(WaitDie, MultiReadWaiterRelease1) {
+    WaitDie wd;
+
+    std::unordered_set<uint64_t> notify_rws;
+
+    int status = wd.LockForWrite("lock", 1, Timestamp(3));
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 2, Timestamp(2));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 3, Timestamp(1));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    wd.ReleaseForRead("lock", 2, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForRead("lock", 3, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForWrite("lock", 1, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+}
+
+TEST(WaitDie, MultiReadWaiterRelease2) {
+    WaitDie wd;
+
+    std::unordered_set<uint64_t> notify_rws;
+
+    int status = wd.LockForWrite("lock", 1, Timestamp(3));
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 2, Timestamp(2));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    status = wd.LockForRead("lock", 3, Timestamp(1));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    wd.ReleaseForRead("lock", 3, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForRead("lock", 2, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForWrite("lock", 1, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+}
+
 TEST(WaitDie, MergeMultiReadWriteWaiter) {
     WaitDie wd;
 

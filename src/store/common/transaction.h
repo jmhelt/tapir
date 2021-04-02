@@ -24,7 +24,8 @@
 #define REPLY_TIMEOUT 4
 #define REPLY_NETWORK_FAILURE 5
 #define REPLY_WAIT 6
-#define REPLY_MAX 7
+#define REPLY_PREPARED 7
+#define REPLY_MAX 8
 
 class Transaction {
    private:

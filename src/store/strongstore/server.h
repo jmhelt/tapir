@@ -159,6 +159,15 @@ class Server : public TransportReceiver,
         uint64_t n_waiting_prepared;
         std::unordered_set<std::string> keys;
     };
+    class PendingGetReply {
+       public:
+        PendingGetReply(uint64_t client_id, uint64_t client_req_id,
+                        TransportAddress *remote)
+            : rid{client_id, client_req_id, remote} {}
+        RequestID rid;
+        std::string key;
+        Timestamp timestamp;
+    };
 
     void HandleGet(const TransportAddress &remote, proto::Get &msg);
 
@@ -215,6 +224,7 @@ class Server : public TransportReceiver,
         const std::unordered_set<uint64_t> &notify_ros);
 
     void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
+    void ContinueGet(uint64_t transaction_id);
     void ContinueCoordinatorPrepare(uint64_t transaction_id);
     void ContinueParticipantPrepare(uint64_t transaction_id);
 
@@ -243,6 +253,7 @@ class Server : public TransportReceiver,
         pending_prepare_ok_replies_;
     std::unordered_map<uint64_t, PendingROCommitReply *>
         pending_ro_commit_replies_;
+    std::unordered_map<uint64_t, PendingGetReply *> pending_get_replies_;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;

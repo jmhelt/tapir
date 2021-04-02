@@ -71,12 +71,13 @@ bool WaitDie::Lock::TryReadWait(uint64_t requester,
     }
 
     while (!wait_q_.empty()) {
-        uint64_t back = wait_q_.back();
-        auto search = waiters_.find(back);
+        uint64_t b = wait_q_.back();
+        auto search = waiters_.find(b);
         if (search != waiters_.end()) {
             std::shared_ptr<Waiter> back = search->second;
 
-            Debug("[%lu] back: %d %lu %lu", requester, back->iswrite(),
+            Debug("[%lu] back: %d %lu %lu %lu", requester, back->iswrite(),
+                  start_timestamp.getTimestamp(),
                   back->waiting_for().getTimestamp(),
                   back->min_waiter().getTimestamp());
 
@@ -223,10 +224,14 @@ void WaitDie::Lock::ReleaseReadLock(uint64_t holder,
     if (search != waiters_.end()) {
         std::shared_ptr<Waiter> w = search->second;
 
+        Debug("[%lu] Cleaning up waiter: %d %d %lu", holder, w->isread(),
+              w->iswrite(), w->waiters().size());
+
         if (w->iswrite()) {
             w->set_read(false);
         } else if (w->waiters().size() > 1) {
             w->remove_waiter(holder);
+            waiters_.erase(search);
         } else {
             waiters_.erase(search);
         }
@@ -267,6 +272,9 @@ void WaitDie::Lock::ReleaseWriteLock(uint64_t holder,
     auto search = waiters_.find(holder);
     if (search != waiters_.end()) {
         std::shared_ptr<Waiter> w = search->second;
+
+        Debug("[%lu] Cleaning up waiter: %d %d %lu", holder, w->isread(),
+              w->iswrite(), w->waiters().size());
 
         if (w->isread()) {
             w->set_write(false);
@@ -325,8 +333,8 @@ bool WaitDie::Lock::TryWriteWait(uint64_t requester,
     }
 
     while (!wait_q_.empty()) {
-        uint64_t back = wait_q_.back();
-        auto search = waiters_.find(back);
+        uint64_t b = wait_q_.back();
+        auto search = waiters_.find(b);
         if (search != waiters_.end()) {
             std::shared_ptr<Waiter> back = search->second;
 
@@ -410,12 +418,6 @@ bool WaitDie::Lock::isWriteNext() {
     }
 
     return false;
-
-    // if (wait_q_.size() == 0) {
-    //     return false;
-    // } else {
-    //     return waiters_[wait_q_.front()]->iswrite();
-    // }
 }
 
 const LockState WaitDie::GetLockState(const std::string &lock) const {
