@@ -28,7 +28,7 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 3,
+  "num_shards": 2,
   "shards": [
     [
       "us-east-1-0",
@@ -39,27 +39,28 @@
       "us-east-1-1",
       "eu-west-1-1",
       "ap-northeast-1-1"
-    ],
-    [
-      "us-east-1-2",
-      "eu-west-1-2",
-      "ap-northeast-1-2"
     ]
   ],
-  "client_total": 3,
+  "client_total": 6,
   "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0",
     "client-1-0",
-    "client-2-0"
+    "client-2-0",
+    "client-3-0",
+    "client-4-0",
+    "client-5-0"
   ],
   "server_regions": {
     "us-east-1": [
       "us-east-1-0",
       "us-east-1-1",
       "us-east-1-2",
-      "client-0-0"
+      "client-0-0",
+      "client-3-0",
+      "client-4-0",
+      "client-5-0"
     ],
     "eu-west-1": [
       "eu-west-1-0",
@@ -103,14 +104,14 @@
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
-  "client_debug_output": true,
-  "server_debug_output": true,
+  "client_debug_output": false,
+  "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": false,
-  "client_experiment_length": 10,
+  "client_experiment_length": 30,
   "client_rand_sleep": 0,
-  "client_ramp_down": 0,
-  "client_ramp_up": 0,
+  "client_ramp_down": 5,
+  "client_ramp_up": 5,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",

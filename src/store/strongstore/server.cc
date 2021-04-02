@@ -128,22 +128,73 @@ void Server::ReceiveMessage(const TransportAddress &remote,
 }
 
 void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
-    Debug("Received GET request: %s", msg.key().c_str());
+    uint64_t client_id = msg.rid().client_id();
+    uint64_t client_req_id = msg.rid().client_req_id();
+    uint64_t transaction_id = msg.transaction_id();
+
+    const std::string &key = msg.key();
+    const Timestamp timestamp = Timestamp(msg.timestamp());
+
+    Debug("[%lu] Received GET request: %s", transaction_id, key.c_str());
 
     std::pair<Timestamp, std::string> value;
-    int status = store_.Get(msg.transaction_id(), Timestamp(msg.timestamp()),
-                            msg.key(), value);
+    int status = store_.Get(transaction_id, timestamp, key, value);
+    if (status == REPLY_WAIT) {
+        auto reply =
+            new PendingGetReply(client_id, client_req_id, remote.clone());
+        reply->key = key;
+        reply->timestamp = std::move(timestamp);
 
-    get_reply_.mutable_rid()->CopyFrom(msg.rid());
-    get_reply_.set_status(status);
-    get_reply_.set_key(msg.key());
+        pending_get_replies_[msg.transaction_id()] = reply;
+    } else {
+        get_reply_.mutable_rid()->CopyFrom(msg.rid());
+        get_reply_.set_status(status);
+        get_reply_.set_key(msg.key());
 
-    if (status == REPLY_OK) {
-        get_reply_.set_val(value.second);
-        value.first.serialize(get_reply_.mutable_timestamp());
+        if (status == REPLY_OK) {
+            get_reply_.set_val(value.second);
+            value.first.serialize(get_reply_.mutable_timestamp());
+        }
+
+        transport_->SendMessage(this, remote, get_reply_);
     }
+}
 
-    transport_->SendMessage(this, remote, get_reply_);
+void Server::ContinueGet(uint64_t transaction_id) {
+    auto search = pending_get_replies_.find(transaction_id);
+    if (search != pending_get_replies_.end()) {
+        PendingGetReply *reply = search->second;
+
+        const std::string &key = reply->key;
+        const Timestamp &timestamp = reply->timestamp;
+
+        Debug("[%lu] Continuing GET request %s", transaction_id,
+              reply->key.c_str());
+
+        std::pair<Timestamp, std::string> value;
+        int status = store_.Get(transaction_id, timestamp, key, value);
+        if (status == REPLY_OK || status == REPLY_FAIL) {
+            get_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
+            get_reply_.mutable_rid()->set_client_req_id(
+                reply->rid.client_req_id());
+            get_reply_.set_status(status);
+            get_reply_.set_key(key);
+
+            if (status == REPLY_OK) {
+                get_reply_.set_val(value.second);
+                value.first.serialize(get_reply_.mutable_timestamp());
+            }
+
+            const TransportAddress *remote = reply->rid.addr();
+            transport_->SendMessage(this, *remote, get_reply_);
+
+            delete remote;
+            delete reply;
+            pending_get_replies_.erase(search);
+        } else {  // Keep waiting
+            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+        }
+    }
 }
 
 void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
@@ -189,6 +240,8 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
             delete reply;
             pending_rw_commit_c_replies_.erase(search);
 
+        } else if (status == REPLY_PREPARED) {
+            Debug("[%lu] Already prepared", transaction_id);
         } else {  // Keep waiting
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
         }
@@ -239,7 +292,8 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
             delete remote;
             delete reply;
             pending_rw_commit_p_replies_.erase(search);
-
+        } else if (status == REPLY_PREPARED) {
+            Debug("[%lu] Already prepared", transaction_id);
         } else {  // Keep waiting
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
         }
@@ -250,6 +304,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
 void Server::NotifyPendingRWs(const std::unordered_set<uint64_t> &rws) {
     for (uint64_t waiting_rw : rws) {
+        ContinueGet(waiting_rw);
         ContinueCoordinatorPrepare(waiting_rw);
         ContinueParticipantPrepare(waiting_rw);
     }
@@ -729,7 +784,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         reply->rids.insert({client_id, client_req_id, remote.clone()});
     }
 
-    Debug("Received Prepare OK: %lu", transaction_id);
+    Debug("[%lu] Received Prepare OK", transaction_id);
 
     CommitDecision cd = coordinator.ReceivePrepareOK(
         transaction_id, participant_shard, prepare_timestamp);
@@ -737,7 +792,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         PendingRWCommitCoordinatorReply *coord_reply =
             pending_rw_commit_c_replies_[transaction_id];
         Transaction &transaction = coordinator.GetTransaction(transaction_id);
-        Debug("Received Prepare OK from all participants");
+        Debug("[%lu] Received Prepare OK from all participants",
+              transaction_id);
         int status = REPLY_FAIL;
         if (consistency_ == Consistency::SS) {
             status = store_.Prepare(transaction_id, transaction);
@@ -764,7 +820,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                           std::placeholders::_2, std::placeholders::_3),
                 []() {}, COMMIT_TIMEOUT);
         } else {  // Failed to commit
-            Debug("Coordinator prepare failed: %lu", transaction_id);
+            Debug("[%lu] Coordinator prepare failed", transaction_id);
             store_.ReleaseLocks(transaction_id, transaction, notify_rws);
             coordinator.Abort(transaction_id);
 
@@ -785,13 +841,13 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             NotifyPendingRWs(notify_rws);
         }
     } else if (cd.d == Decision::ABORT) {
-        Debug("Aborted: %lu", transaction_id);
+        Debug("[%lu] Aborted", transaction_id);
         // Reply to participants
         SendPrepareOKRepliesFail(reply);
         delete reply;
         pending_prepare_ok_replies_.erase(transaction_id);
     } else {  // Wait for other participants
-        Debug("Waiting for other participants");
+        Debug("[%lu] Waiting for other participants", transaction_id);
     }
 }
 
@@ -801,6 +857,8 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
     uint64_t client_req_id = msg.rid().client_req_id();
     uint64_t transaction_id = msg.transaction_id();
 
+    Debug("[%lu] Received Prepare ABORT", transaction_id);
+
     std::unordered_set<uint64_t> notify_rws;
     if (coordinator.HasTransaction(transaction_id)) {
         store_.ReleaseLocks(transaction_id,
@@ -809,8 +867,6 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
     }
 
     coordinator.Abort(transaction_id);
-
-    Debug("Received Prepare ABORT: %lu", transaction_id);
 
     // Reply to client
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
