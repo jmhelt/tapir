@@ -135,7 +135,9 @@ int LockStore::ContinuePrepare(uint64_t transaction_id,
     Debug("[%lu] Continue PREPARE", transaction_id);
 
     auto search = waiting_.find(transaction_id);
-    ASSERT(search != waiting_.end());
+    if (search == waiting_.end()) {
+        return REPLY_PREPARED;
+    }
 
     const Transaction &transaction = search->second.transaction();
 
