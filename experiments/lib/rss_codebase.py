@@ -181,7 +181,7 @@ class RssCodebase(ExperimentCodebase):
                                       'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
 
         n = 2 * config['fault_tolerance'] + 1
-        server_id = shard_idx * n + replica_idx
+        server_id = config['client_total'] + shard_idx * n + replica_idx
 
         truetime_error = config["truetime_error"] if "truetime_error" in config else 0
         replica_command = ' '.join([str(x) for x in [
