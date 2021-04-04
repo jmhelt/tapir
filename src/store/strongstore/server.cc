@@ -794,15 +794,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Transaction &transaction = coordinator.GetTransaction(transaction_id);
         Debug("[%lu] Received Prepare OK from all participants",
               transaction_id);
-        int status = REPLY_FAIL;
-        if (consistency_ == Consistency::SS) {
-            status = store_.Prepare(transaction_id, transaction);
-        } else if (consistency_ == Consistency::RSS) {
-            status = store_.Prepare(transaction_id, transaction,
+        int status = store_.Prepare(transaction_id, transaction,
                                     coord_reply->nonblock_timestamp);
-        } else {
-            NOT_REACHABLE();
-        }
         if (status == REPLY_OK) {
             Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
                                         client_id};
