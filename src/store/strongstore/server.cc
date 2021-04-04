@@ -710,7 +710,16 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
                                Timestamp commit_timestamp) {
     Debug("[shard %i] Received PREPARE_OK callback [%d]", shard_idx_, status);
 
+    std::unordered_set<uint64_t> notify_rws;
+    std::unordered_set<uint64_t> notify_ros;
+
     if (status == REPLY_OK) {
+        if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
+                          notify_ros)) {
+            max_write_timestamp_ =
+                std::max(max_write_timestamp_, commit_timestamp);
+        }
+
         // TODO: Handle timeout
         replica_client_->Commit(
             transaction_id, commit_timestamp,
@@ -719,8 +728,6 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
                       std::placeholders::_3),
             []() {}, COMMIT_TIMEOUT);
     } else {
-        std::unordered_set<uint64_t> notify_rws;
-        std::unordered_set<uint64_t> notify_ros;
         store_.Abort(transaction_id, notify_rws, notify_ros);
 
         // TODO: Handle timeout
@@ -729,10 +736,10 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
             std::bind(&Server::AbortParticipantCallback, this, transaction_id,
                       std::placeholders::_1, std::placeholders::_2),
             []() {}, ABORT_TIMEOUT);
-
-        NotifyPendingROs(notify_ros);
-        NotifyPendingRWs(notify_rws);
     }
+
+    NotifyPendingROs(notify_ros);
+    NotifyPendingRWs(notify_rws);
 }
 
 void Server::PrepareAbortCallback(uint64_t transaction_id, int status,
