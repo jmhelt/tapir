@@ -826,7 +826,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
                           transaction_id, std::placeholders::_1,
                           std::placeholders::_2, std::placeholders::_3),
                 []() {}, COMMIT_TIMEOUT);
-        } else {  // Failed to commit
+        } else if (status == REPLY_FAIL) {  // Failed to commit
             Debug("[%lu] Coordinator prepare failed", transaction_id);
             store_.ReleaseLocks(transaction_id, transaction, notify_rws);
             coordinator.Abort(transaction_id);
@@ -846,6 +846,10 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             pending_prepare_ok_replies_.erase(transaction_id);
 
             NotifyPendingRWs(notify_rws);
+        } else if (status == REPLY_WAIT) {
+            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+        } else {
+            NOT_REACHABLE();
         }
     } else if (cd.d == Decision::ABORT) {
         Debug("[%lu] Aborted", transaction_id);
