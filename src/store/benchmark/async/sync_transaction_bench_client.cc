@@ -67,7 +67,7 @@ void SyncTransactionBenchClient::SendNext(transaction_status_t *result) {
                     stats.Increment(GetLastOp() + "_backoff", backoff);
                     Debug("Backing off for %lums", backoff);
                 }
-                std::this_thread::sleep_for(std::chrono::microseconds(backoff));
+                std::this_thread::sleep_for(std::chrono::milliseconds(backoff));
             }
         }
     }
