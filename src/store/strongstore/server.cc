@@ -719,12 +719,19 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
                       std::placeholders::_3),
             []() {}, COMMIT_TIMEOUT);
     } else {
+        std::unordered_set<uint64_t> notify_rws;
+        std::unordered_set<uint64_t> notify_ros;
+        store_.Abort(transaction_id, notify_rws, notify_ros);
+
         // TODO: Handle timeout
         replica_client_->Abort(
             transaction_id,
             std::bind(&Server::AbortParticipantCallback, this, transaction_id,
                       std::placeholders::_1, std::placeholders::_2),
             []() {}, ABORT_TIMEOUT);
+
+        NotifyPendingROs(notify_ros);
+        NotifyPendingRWs(notify_rws);
     }
 }
 
