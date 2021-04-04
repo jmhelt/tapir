@@ -200,24 +200,27 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
                        std::unordered_set<uint64_t> &notify_rws,
                        std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] COMMIT", transaction_id);
-    ASSERT(prepared_.find(transaction_id) != prepared_.end());
+    auto search = prepared_.find(transaction_id);
+    if (search != prepared_.end()) {
+        const PreparedTransaction &prepared = prepared_[transaction_id];
 
-    const PreparedTransaction &prepared = prepared_[transaction_id];
+        const Transaction &transaction = prepared.transaction();
 
-    const Transaction &transaction = prepared.transaction();
+        for (auto &write : transaction.getWriteSet()) {
+            store_.put(write.first, write.second, timestamp);
+        }
 
-    for (auto &write : transaction.getWriteSet()) {
-        store_.put(write.first, write.second, timestamp);
+        notify_ros = std::move(prepared.waiting_ros());
+
+        // Drop locks.
+        dropLocks(transaction_id, transaction, notify_rws);
+
+        prepared_.erase(transaction_id);
+
+        return !transaction.getWriteSet().empty();
     }
 
-    notify_ros = std::move(prepared.waiting_ros());
-
-    // Drop locks.
-    dropLocks(transaction_id, transaction, notify_rws);
-
-    prepared_.erase(transaction_id);
-
-    return !transaction.getWriteSet().empty();
+    return false;
 }
 
 void LockStore::Abort(uint64_t transaction_id,
