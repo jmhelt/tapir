@@ -233,11 +233,16 @@ Timestamp Client::ChooseNonBlockTimestamp() {
  *
  * Return a TID for the transaction.
  */
-void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
-                   uint32_t timeout) {
+void Client::Begin(bool is_retry, begin_callback bcb,
+                   begin_timeout_callback btcb, uint32_t timeout) {
     if (debug_stats_) {
         Latency_Start(&op_lat_);
     }
+
+    if (!is_retry) {
+        start_time_ = Timestamp{tt_.Now().latest(), client_id_};
+    }
+
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
         if (ping_replicas_ && first_) {
             for (uint64_t i = 0; i < nshards_; i++) {
@@ -250,9 +255,8 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
         t_id++;
         participants_.clear();
 
-        Timestamp start_time{tt_.Now().latest(), client_id_};
         for (uint64_t i = 0; i < nshards_; i++) {
-            bclient[i]->Begin(t_id, start_time);
+            bclient[i]->Begin(t_id, start_time_);
         }
         bcb(t_id);
     });

@@ -14,7 +14,7 @@ class SyncTransaction {
     SyncTransaction(uint32_t timeout) : timeout(timeout) {}
     virtual ~SyncTransaction() {}
 
-    virtual transaction_status_t Execute(SyncClient &client) = 0;
+    virtual transaction_status_t Execute(SyncClient &client, bool is_retry) = 0;
 
    protected:
     const uint32_t timeout;

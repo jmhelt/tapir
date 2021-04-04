@@ -7,9 +7,9 @@ AddUser::AddUser(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout)
 
 AddUser::~AddUser() {}
 
-transaction_status_t AddUser::Execute(SyncClient &client) {
+transaction_status_t AddUser::Execute(SyncClient &client, bool is_retry) {
     Debug("ADD_USER");
-    client.Begin(timeout);
+    client.Begin(is_retry, timeout);
 
     std::string value;
     if (client.Get(GetKey(0), value, timeout)) {

@@ -8,7 +8,8 @@ GetTimeline::GetTimeline(KeySelector *keySelector, std::mt19937 &rand,
 
 GetTimeline::~GetTimeline() {}
 
-transaction_status_t GetTimeline::Execute(SyncClient &client) {
+transaction_status_t GetTimeline::Execute(SyncClient &client, bool is_retry) {
+    (void)is_retry;
     Debug("GET_TIMELINE %lu", GetNumKeys());
 
     keys_.clear();
