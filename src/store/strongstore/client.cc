@@ -59,7 +59,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       tt_{tt},
       consistency_{consistency},
       debug_stats_{debug_stats},
-      ping_replicas_{true},
+      ping_replicas_{false},
       first_{true} {
     t_id = client_id_ << 26;
 
