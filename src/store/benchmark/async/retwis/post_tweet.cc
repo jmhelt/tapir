@@ -8,9 +8,9 @@ PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand,
 
 PostTweet::~PostTweet() {}
 
-transaction_status_t PostTweet::Execute(SyncClient &client) {
+transaction_status_t PostTweet::Execute(SyncClient &client, bool is_retry) {
     Debug("POST_TWEET");
-    client.Begin(timeout);
+    client.Begin(is_retry, timeout);
 
     std::string value;
     for (int i = 0; i < 3; i++) {

@@ -13,7 +13,8 @@ class AddUser : public RetwisTransaction {
     AddUser(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~AddUser();
 
-    virtual transaction_status_t Execute(SyncClient &client) override;
+    virtual transaction_status_t Execute(SyncClient &client,
+                                         bool is_retry) override;
 };
 
 }  // namespace retwis
