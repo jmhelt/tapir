@@ -27,7 +27,7 @@ class SyncClient {
     virtual ~SyncClient();
 
     // Begin a transaction.
-    void Begin(uint32_t timeout);
+    void Begin(bool is_retry, uint32_t timeout);
 
     // Get the value corresponding to key.
     int Get(const std::string &key, std::string &value, uint32_t timeout);

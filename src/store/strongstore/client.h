@@ -65,8 +65,8 @@ class Client : public ::Client {
 
     // Overriding functions from ::Client
     // Begin a transaction.
-    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb,
-                       uint32_t timeout) override;
+    virtual void Begin(bool is_retry, begin_callback bcb,
+                       begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
     virtual void Get(const std::string &key, get_callback gcb,
@@ -152,6 +152,9 @@ class Client : public ::Client {
 
     // Ongoing transaction ID.
     uint64_t t_id;
+
+    // Ongoing transaction start time
+    Timestamp start_time_;
 
     // Number of shards in SpanStore.
     uint64_t nshards_;

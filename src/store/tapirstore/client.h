@@ -62,8 +62,8 @@ class Client : public ::Client {
     virtual ~Client();
 
     // Begin a transaction.
-    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb,
-                       uint32_t timeout) override;
+    virtual void Begin(bool is_retry, begin_callback bcb,
+                       begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
     virtual void Get(const std::string &key, get_callback gcb,

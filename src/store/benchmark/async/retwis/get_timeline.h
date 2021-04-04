@@ -14,7 +14,8 @@ class GetTimeline : public RetwisTransaction {
     GetTimeline(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
     virtual ~GetTimeline();
 
-    virtual transaction_status_t Execute(SyncClient &client) override;
+    virtual transaction_status_t Execute(SyncClient &client,
+                                         bool is_retry) override;
 
    private:
     std::unordered_set<std::string> keys_;

@@ -78,8 +78,9 @@ Client::~Client() {
  *
  * Return a TID for the transaction.
  */
-void Client::Begin(begin_callback bcb, begin_timeout_callback btcb,
-                   uint32_t timeout) {
+void Client::Begin(bool is_retry, begin_callback bcb,
+                   begin_timeout_callback btcb, uint32_t timeout) {
+    (void)is_retry;
     transport->Timer(0, [this, bcb, btcb, timeout]() {
         if (pingReplicas) {
             if (!first && !startedPings) {
