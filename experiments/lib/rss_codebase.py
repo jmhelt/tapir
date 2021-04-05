@@ -84,6 +84,9 @@ class RssCodebase(ExperimentCodebase):
         if 'client_debug_stats' in config and config['client_debug_stats']:
             client_command += ' --debug_stats'
 
+        if 'nb_time_alpha' in config:
+            client_command += ' --nb_time_alpha %f' % config['nb_time_alpha']
+
         if 'client_message_timeout' in config:
             client_command += ' --message_timeout %d' % config['client_message_timeout']
         if 'client_abort_backoff' in config:

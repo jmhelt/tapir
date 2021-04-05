@@ -60,7 +60,8 @@ class Client : public ::Client {
     Client(Consistency consistency, const NetworkConfiguration &net_config,
            const std::string &client_region, transport::Configuration &config,
            uint64_t id, int nshards, int closestReplic, Transport *transport,
-           Partitioner *part, TrueTime &tt, bool debug_stats);
+           Partitioner *part, TrueTime &tt, bool debug_stats,
+           double nb_time_alpha);
     virtual ~Client();
 
     // Overriding functions from ::Client
@@ -139,7 +140,7 @@ class Client : public ::Client {
     Timestamp ChooseNonBlockTimestamp();
 
     std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
-    std::unordered_map<std::bitset<MAX_SHARDS>, uint64_t> min_lats_;
+    std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;
 
     Timestamp min_read_timestamp_;
 
@@ -187,6 +188,8 @@ class Client : public ::Client {
     bool debug_stats_;
     bool ping_replicas_;
     bool first_;
+
+    double nb_time_alpha_;
 };
 
 }  // namespace strongstore

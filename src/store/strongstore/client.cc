@@ -45,7 +45,8 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
                const std::string &client_region,
                transport::Configuration &config, uint64_t client_id,
                int nShards, int closestReplica, Transport *transport,
-               Partitioner *part, TrueTime &tt, bool debug_stats)
+               Partitioner *part, TrueTime &tt, bool debug_stats,
+               double nb_time_alpha)
     : coord_choices_{},
       min_lats_{},
       min_read_timestamp_{},
@@ -60,7 +61,8 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       consistency_{consistency},
       debug_stats_{debug_stats},
       ping_replicas_{false},
-      first_{true} {
+      first_{true},
+      nb_time_alpha_{nb_time_alpha} {
     t_id = client_id_ << 26;
 
     Debug("Initializing StrongStore client with id [%lu]", client_id_);
@@ -105,38 +107,34 @@ void Client::CalculateCoordinatorChoices() {
             MAX_SHARDS);
     }
 
-    std::vector<uint64_t> prepare_lats{};
+    std::vector<uint16_t> prepare_lats{};
     prepare_lats.reserve(config_.g);
-    std::vector<uint64_t> commit_lats{};
+    std::vector<uint16_t> commit_lats{};
     commit_lats.reserve(config_.g);
 
     for (int i = 0; i < config_.g; i++) {
-        Debug("Shard: %d", i);
         const std::string &leader_region = net_config_.GetRegion(i, 0);
-        uint64_t min_q_lat = net_config_.GetMinQuorumLatency(i, 0);
+        uint16_t min_q_lat = net_config_.GetMinQuorumLatency(i, 0);
 
         // Calculate prepare lat (including client to participant)
-        uint64_t prepare_lat =
+        uint16_t prepare_lat =
             net_config_.GetOneWayLatency(client_region_, leader_region);
         prepare_lat += min_q_lat;
         prepare_lats[i] = prepare_lat;
-        Debug("prepare_lat: %lu", prepare_lat);
 
         // Calculate commit lat (including coordinator to client)
-        uint64_t commit_lat = min_q_lat;
+        uint16_t commit_lat = min_q_lat;
         commit_lat +=
             net_config_.GetOneWayLatency(leader_region, client_region_);
         commit_lats[i] = commit_lat;
-        Debug("commit_lat: %lu", commit_lat);
     }
 
     uint8_t s_max = static_cast<uint8_t>(std::pow(2.0, config_.g));
-    Debug("s_max: %u", s_max);
 
     for (uint8_t s = 1; s < s_max; s++) {
         std::bitset<MAX_SHARDS> shards{s};
 
-        uint64_t min_lat = static_cast<uint64_t>(-1);
+        uint16_t min_lat = static_cast<uint16_t>(-1);
         int min_coord = -1;
         for (std::size_t coord_idx = 1; coord_idx <= shards.count();
              coord_idx++) {
@@ -158,9 +156,9 @@ void Client::CalculateCoordinatorChoices() {
                 net_config_.GetRegion(coord, 0);
 
             // Find max prepare lat
-            uint64_t lat = 0;
+            uint16_t lat = 0;
             for (std::size_t i = 0; i < MAX_SHARDS; i++) {
-                uint64_t l = 0;
+                uint16_t l = 0;
                 if (i == coord) {
                     l = net_config_.GetOneWayLatency(client_region_,
                                                      c_leader_region);
@@ -186,16 +184,15 @@ void Client::CalculateCoordinatorChoices() {
         min_lats_.insert({shards, min_lat});
     }
 
-    Debug("Printing coord_choices_:");
+    Debug("Printing coord_choices:");
     for (auto &c : coord_choices_) {
         Debug("shards: %s, min_coord: %d", c.first.to_string().c_str(),
               c.second);
     }
 
-    Debug("Printing min_lats_:");
+    Debug("Printing min_lats:");
     for (auto &c : min_lats_) {
-        Debug("shards: %s, min_lat: %lu", c.first.to_string().c_str(),
-              c.second);
+        Debug("shards: %s, min_lat: %u", c.first.to_string().c_str(), c.second);
     }
 }
 
@@ -224,8 +221,9 @@ Timestamp Client::ChooseNonBlockTimestamp() {
 
     ASSERT(min_lats_.find(shards) != min_lats_.end());
 
-    uint64_t lat = min_lats_[shards];
-    return {tt_.Now().earliest() + (lat * 1000), client_id_};
+    uint16_t l = min_lats_[shards];
+    uint64_t lat = static_cast<uint64_t>(nb_time_alpha_ * l * 1000);
+    return {tt_.Now().earliest() + lat, client_id_};
 }
 
 /* Begins a transaction. All subsequent operations before a commit() or
