@@ -107,7 +107,7 @@ int LockStore::ROBegin(uint64_t transaction_id,
     if (n_conflicting_prepared == 0) {
         return REPLY_OK;
     } else {
-        return REPLY_FAIL;
+        return REPLY_WAIT;
     }
 }
 
