@@ -29,21 +29,16 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 2,
+  "num_shards": 1,
   "shards": [
     [
       "us-east-1-0",
       "eu-west-1-0",
       "ap-northeast-1-0"
-    ],
-    [
-      "eu-west-1-1",
-      "ap-northeast-1-1",
-      "us-east-1-1"
     ]
   ],
-  "client_total": 32,
-  "client_processes_per_client_node": 32,
+  "client_total": 16,
+  "client_processes_per_client_node": 16,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
@@ -70,18 +65,22 @@
   },
   "server_port": 7087,
   "truetime_error": 10,
-  "client_num_keys": 100000,
+  "client_num_keys": 1000000,
   "benchmark_name": "retwis",
   "client_key_selector": [
+    "uniform",
+    "zipf",
     "zipf"
   ],
   "client_zipf_coefficient": [
+    0.0,
+    0.25,
     0.75
   ],
   "rw_num_ops_txn": 1,
   "server_preload_keys": true,
   "client_abort_backoff": 1,
-  "client_retry_aborted": false,
+  "client_retry_aborted": true,
   "client_max_attempts": -1,
   "client_max_backoff": 2500,
   "client_message_timeout": 60000,
@@ -93,18 +92,18 @@
     "txn_groups",
     "commit_branch"
   ],
-  "experiment_name": "spanner-rss",
+  "experiment_name": "jhelt-QV95426",
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
-  "client_debug_output": true,
-  "server_debug_output": true,
+  "client_debug_output": false,
+  "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": false,
-  "client_experiment_length": 30,
+  "client_experiment_length": 180,
   "client_rand_sleep": 0,
-  "client_ramp_down": 5,
-  "client_ramp_up": 5,
+  "client_ramp_down": 10,
+  "client_ramp_up": 10,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
