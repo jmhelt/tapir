@@ -94,8 +94,9 @@ int LockStore::ROBegin(uint64_t transaction_id,
 
         for (auto &w : transaction.getWriteSet()) {
             if (keys.count(w.first) != 0) {
-                Debug("%lu conflicts with %lu %lu", transaction_id,
-                      pt.transaction_id(), p.first);
+                Debug("%lu conflicts with %lu: %lu >= %lu", transaction_id,
+                      p.first, commit_timestamp.getTimestamp(),
+                      pt.nonblock_timestamp().getTimestamp());
                 pt.add_waiting_ro(transaction_id);
                 n_conflicting_prepared += 1;
                 break;
