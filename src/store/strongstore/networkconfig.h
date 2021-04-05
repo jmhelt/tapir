@@ -20,10 +20,10 @@ class NetworkConfiguration {
     const std::string &GetRegion(const std::string &host) const;
     const std::string &GetRegion(int shard_idx, int replica_idx) const;
 
-    uint64_t GetOneWayLatency(const std::string &src_region,
+    uint16_t GetOneWayLatency(const std::string &src_region,
                               const std::string &dst_region) const;
 
-    uint64_t GetMinQuorumLatency(int shard_idx, int leader_idx) const;
+    uint16_t GetMinQuorumLatency(int shard_idx, int leader_idx) const;
 
    private:
     nlohmann::json net_config_json_;

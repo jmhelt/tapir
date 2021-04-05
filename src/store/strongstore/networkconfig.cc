@@ -46,18 +46,18 @@ const std::string &NetworkConfiguration::GetRegion(int shard_idx,
     return GetRegion(host);
 }
 
-uint64_t NetworkConfiguration::GetOneWayLatency(
+uint16_t NetworkConfiguration::GetOneWayLatency(
     const std::string &src_region, const std::string &dst_region) const {
     Debug("GetOneWayLatency: %s %s", src_region.c_str(), dst_region.c_str());
-    uint64_t rtt =
+    uint16_t rtt =
         net_config_json_["region_rtt_latencies"][src_region][dst_region]
-            .get<uint64_t>();
+            .get<uint16_t>();
 
     Debug("GetOneWayLatency: %lu", rtt / 2);
     return rtt / 2;
 }
 
-uint64_t NetworkConfiguration::GetMinQuorumLatency(int shard_idx,
+uint16_t NetworkConfiguration::GetMinQuorumLatency(int shard_idx,
                                                    int leader_idx) const {
     Debug("GetMinQuorumLatency: %d %d", shard_idx, leader_idx);
     int q = tport_config_.QuorumSize();
@@ -65,12 +65,12 @@ uint64_t NetworkConfiguration::GetMinQuorumLatency(int shard_idx,
 
     const std::string &leader_region = GetRegion(shard_idx, leader_idx);
 
-    std::vector<uint64_t> lats;
+    std::vector<uint16_t> lats;
     for (int i = 0; i < n; i++) {
         const std::string &replica_region = GetRegion(shard_idx, i);
-        uint64_t rtt = net_config_json_["region_rtt_latencies"][leader_region]
+        uint16_t rtt = net_config_json_["region_rtt_latencies"][leader_region]
                                        [replica_region]
-                                           .get<uint64_t>();
+                                           .get<uint16_t>();
         lats.push_back(rtt);
     }
 
