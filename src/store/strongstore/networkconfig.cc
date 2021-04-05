@@ -53,7 +53,7 @@ uint16_t NetworkConfiguration::GetOneWayLatency(
         net_config_json_["region_rtt_latencies"][src_region][dst_region]
             .get<uint16_t>();
 
-    Debug("GetOneWayLatency: %lu", rtt / 2);
+    Debug("GetOneWayLatency: %u", rtt / 2);
     return rtt / 2;
 }
 
@@ -76,7 +76,7 @@ uint16_t NetworkConfiguration::GetMinQuorumLatency(int shard_idx,
 
     std::sort(lats.begin(), lats.end());
 
-    Debug("GetMinQuorumLatency: %lu", lats[q - 1]);
+    Debug("GetMinQuorumLatency: %u", lats[q - 1]);
     return lats[q - 1];
 }
 
