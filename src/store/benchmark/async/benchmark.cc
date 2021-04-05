@@ -142,6 +142,8 @@ DEFINE_string(strong_consistency, strong_consistency_args[0],
               " experiment");
 DEFINE_validator(strong_consistency, &ValidateStrongConsistency);
 
+DEFINE_double(nb_time_alpha, 1.0, "multiple for non-block time estimates.");
+
 const std::string benchmark_args[] = {"retwis"};
 const benchmode_t benchmodes[]{BENCH_RETWIS};
 static bool ValidateBenchmark(const char *flagname, const std::string &value) {
@@ -596,7 +598,7 @@ int main(int argc, char **argv) {
                 client = new strongstore::Client(
                     consistency, net_config, client_region, shard_config,
                     clientId, FLAGS_num_shards, FLAGS_closest_replica, tport,
-                    part, tt, FLAGS_debug_stats);
+                    part, tt, FLAGS_debug_stats, FLAGS_nb_time_alpha);
                 break;
             }
             default:
