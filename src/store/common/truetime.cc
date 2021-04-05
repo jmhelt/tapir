@@ -27,14 +27,12 @@ uint64_t TrueTime::GetTime() const {
 
 TrueTimeInterval TrueTime::Now() const {
     uint64_t time = GetTime();
-    Debug("Now: %lu %lu", time - error_, time + error_);
     return {time - error_, time + error_};
 }
 
 uint64_t TrueTime::TimeToWaitUntilMS(uint64_t ts) const {
     auto now = Now();
     uint64_t earliest = now.earliest();
-    Debug("TimeToWaitUntilMS: %lu ? %lu", ts, earliest);
     if (ts <= earliest) {
         return 0;
     } else {

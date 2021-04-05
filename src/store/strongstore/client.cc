@@ -223,7 +223,9 @@ Timestamp Client::ChooseNonBlockTimestamp() {
 
     uint16_t l = min_lats_[shards];
     uint64_t lat = static_cast<uint64_t>(nb_time_alpha_ * l * 1000);
-    return {tt_.Now().earliest() + lat, client_id_};
+    auto now = tt_.Now();
+    Debug("[%lu] lat: %lu, ts: %lu", t_id, lat, now.earliest() + lat);
+    return {now.earliest() + lat, client_id_};
 }
 
 /* Begins a transaction. All subsequent operations before a commit() or
@@ -333,8 +335,8 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
         } else {
             bclient[p]->RWCommitParticipant(
                 t_id, coordinator_shard, nonblock_timestamp,
-                [this, tId = t_id, reqId = req->id](int status, Timestamp) {
-                    Debug("PREPARE [%lu] callback status %d", tId, status);
+                [this, reqId = req->id](int status, Timestamp) {
+                    Debug("[%lu] PREPARE callback status %d", t_id, status);
 
                     auto itr = pendingReqs.find(reqId);
                     if (itr == pendingReqs.end()) {
