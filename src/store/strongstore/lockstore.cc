@@ -140,15 +140,14 @@ int LockStore::ContinuePrepare(uint64_t transaction_id,
         return REPLY_PREPARED;
     }
 
-    const Transaction &transaction = search->second.transaction();
+    const PreparedTransaction &pt = search->second;
+    const Transaction &transaction = pt.transaction();
 
     int status = getLocks(transaction_id, transaction);
 
     if (status == REPLY_OK) {
         Debug("[%lu] PREPARED TO COMMIT", transaction_id);
-        prepared_.emplace(
-            transaction_id,
-            PreparedTransaction{transaction_id, std::move(transaction)});
+        prepared_.emplace(transaction_id, std::move(pt));
         waiting_.erase(search);
     } else if (status == REPLY_FAIL) {
         dropLocks(transaction_id, transaction, notify_rws);
