@@ -382,8 +382,9 @@ void Server::HandleROCommit(const TransportAddress &remote,
     Timestamp commit_timestamp{msg.commit_timestamp()};
 
     uint64_t n_conflicting_prepared = 0;
-    if (store_.ROBegin(transaction_id, keys, commit_timestamp,
-                       n_conflicting_prepared)) {
+    int status = store_.ROBegin(transaction_id, keys, commit_timestamp,
+                                n_conflicting_prepared);
+    if (status == REPLY_WAIT) {
         Debug("Waiting for prepared transactions");
         PendingROCommitReply *reply =
             new PendingROCommitReply(client_id, client_req_id, remote.clone());
@@ -401,7 +402,6 @@ void Server::HandleROCommit(const TransportAddress &remote,
     ro_commit_reply_.set_transaction_id(transaction_id);
     ro_commit_reply_.clear_values();
 
-    int status = REPLY_FAIL;
     std::pair<Timestamp, std::string> value;
 
     for (auto &k : keys) {
