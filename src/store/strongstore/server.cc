@@ -640,8 +640,10 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     Debug("[%lu] Participant for transaction", transaction_id);
 
     Transaction transaction{msg.transaction()};
+    Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
-    int status = store_.Prepare(transaction_id, transaction);
+    int status =
+        store_.Prepare(transaction_id, transaction, nonblock_timestamp);
 
     if (status == REPLY_OK) {
         PendingRWCommitParticipantReply *pending_reply =
