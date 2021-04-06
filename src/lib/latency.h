@@ -95,6 +95,15 @@ uint64_t Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type);
 void Latency_Pause(Latency_t *l);
 void Latency_Resume(Latency_t *l);
 
+void _Latency_StartRec(Latency_Frame_t *fr);
+uint64_t _Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type);
+void _Latency_Resume(Latency_Frame_t *fr);
+void _Latency_Pause(Latency_Frame_t *fr);
+
+static inline void _Latency_EndRec(Latency_t *l, Latency_Frame_t *fr) {
+    _Latency_EndRecType(l, fr, '=');
+}
+
 void Latency_Sum(Latency_t *dest, Latency_t *summand);
 
 void Latency_Dump(Latency_t *l);

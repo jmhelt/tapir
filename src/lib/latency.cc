@@ -141,6 +141,20 @@ uint64_t Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type) {
     return fr->accum;
 }
 
+void _Latency_StartRec(Latency_Frame_t *fr) {
+    fr->accum = 0;
+
+    _Latency_Resume(fr);
+}
+
+uint64_t _Latency_EndRecType(Latency_t *l, Latency_Frame_t *fr, char type) {
+    _Latency_Pause(fr);
+
+    LatencyAdd(l, type, fr->accum);
+
+    return fr->accum;
+}
+
 void Latency_Pause(Latency_t *l) {
     struct timespec end;
     if (clock_gettime(CLOCK_MONOTONIC, &end) < 0)
@@ -162,6 +176,28 @@ void Latency_Pause(Latency_t *l) {
 void Latency_Resume(Latency_t *l) {
     if (clock_gettime(CLOCK_MONOTONIC, &l->bottom->start) < 0)
         PPanic("Failed to get CLOCK_MONOTONIC");
+}
+
+void _Latency_Resume(Latency_Frame_t *fr) {
+    if (clock_gettime(CLOCK_MONOTONIC, &fr->start) < 0)
+        PPanic("Failed to get CLOCK_MONOTONIC");
+}
+
+void _Latency_Pause(Latency_Frame_t *fr) {
+    struct timespec end;
+    if (clock_gettime(CLOCK_MONOTONIC, &end) < 0)
+        PPanic("Failed to get CLOCK_MONOTONIC");
+
+    uint64_t delta;
+    delta = end.tv_sec - fr->start.tv_sec;
+    delta *= 1000000000ll;
+    if (end.tv_nsec < fr->start.tv_nsec) {
+        delta -= 1000000000ll;
+        delta += (end.tv_nsec + 1000000000ll) - fr->start.tv_nsec;
+    } else {
+        delta += end.tv_nsec - fr->start.tv_nsec;
+    }
+    fr->accum += delta;
 }
 
 void Latency_Sum(Latency_t *dest, Latency_t *summand) {
