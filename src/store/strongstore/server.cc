@@ -318,7 +318,7 @@ void Server::NotifyPendingROs(const std::unordered_set<uint64_t> &ros) {
 
         if (NotifyPendingRO(reply)) {
             if (debug_stats_) {
-                Latency_EndRec(&ro_wait_lat_, &reply->wait_lat);
+                _Latency_EndRec(&ro_wait_lat_, &reply->wait_lat);
             }
             delete reply;
             pending_ro_commit_replies_.erase(search);
@@ -396,7 +396,7 @@ void Server::HandleROCommit(const TransportAddress &remote,
         pending_ro_commit_replies_[transaction_id] = reply;
 
         if (debug_stats_) {
-            Latency_StartRec(&ro_wait_lat_, &reply->wait_lat);
+            _Latency_StartRec(&reply->wait_lat);
         }
 
         return;

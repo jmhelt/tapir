@@ -28,17 +28,12 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 2,
+  "num_shards": 1,
   "shards": [
     [
       "us-east-1-0",
       "eu-west-1-0",
       "ap-northeast-1-0"
-    ],
-    [
-      "us-east-1-1",
-      "eu-west-1-1",
-      "ap-northeast-1-1"
     ]
   ],
   "client_total": 6,
@@ -108,7 +103,7 @@
   "client_debug_output": false,
   "server_debug_output": false,
   "client_debug_stats": false,
-  "server_debug_stats": false,
+  "server_debug_stats": true,
   "client_experiment_length": 10,
   "client_rand_sleep": 0,
   "client_ramp_down": 0,
