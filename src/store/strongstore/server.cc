@@ -70,8 +70,7 @@ Server::Server(Consistency consistency,
         new ReplicaClient(replica_config_, transport_, server_id_, shard_idx_);
 
     if (debug_stats_) {
-        _Latency_Init(&prepare_lat_, "prepare_lat");
-        _Latency_Init(&commit_lat_, "commit_lat");
+        _Latency_Init(&ro_wait_lat_, "ro_wait_lat");
     }
 }
 
@@ -83,8 +82,7 @@ Server::~Server() {
     delete replica_client_;
 
     if (debug_stats_) {
-        Latency_Dump(&prepare_lat_);
-        Latency_Dump(&commit_lat_);
+        Latency_Dump(&ro_wait_lat_);
     }
 }
 
@@ -319,6 +317,9 @@ void Server::NotifyPendingROs(const std::unordered_set<uint64_t> &ros) {
         PendingROCommitReply *reply = search->second;
 
         if (NotifyPendingRO(reply)) {
+            if (debug_stats_) {
+                Latency_EndRec(&ro_wait_lat_, &reply->wait_lat);
+            }
             delete reply;
             pending_ro_commit_replies_.erase(search);
         }
@@ -393,6 +394,10 @@ void Server::HandleROCommit(const TransportAddress &remote,
         reply->n_waiting_prepared = n_conflicting_prepared;
         reply->keys = std::move(keys);
         pending_ro_commit_replies_[transaction_id] = reply;
+
+        if (debug_stats_) {
+            Latency_StartRec(&ro_wait_lat_, &reply->wait_lat);
+        }
 
         return;
     }
@@ -972,9 +977,6 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                            Transaction(request.prepare().txn()));
             break;
         case strongstore::proto::Request::COMMIT:
-            if (debug_stats_) {
-                Latency_Start(&commit_lat_);
-            }
             Debug("Received COMMIT");
             if (request.commit().has_transaction()) {  // Coordinator commit
                 store_.Prepare(request.txnid(),
@@ -985,9 +987,6 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                               notify_ros)) {
                 max_write_timestamp_ =
                     std::max(max_write_timestamp_, commit_timestamp);
-            }
-            if (debug_stats_) {
-                Latency_End(&commit_lat_);
             }
             break;
         case strongstore::proto::Request::ABORT:
