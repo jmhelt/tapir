@@ -158,6 +158,7 @@ class Server : public TransportReceiver,
         Timestamp commit_timestamp;
         uint64_t n_waiting_prepared;
         std::unordered_set<std::string> keys;
+        Latency_Frame_t wait_lat;
     };
     class PendingGetReply {
        public:
@@ -274,8 +275,7 @@ class Server : public TransportReceiver,
 
     Stats stats_;
 
-    Latency_t prepare_lat_;
-    Latency_t commit_lat_;
+    Latency_t ro_wait_lat_;
 
     Timestamp max_write_timestamp_;
     int shard_idx_;
