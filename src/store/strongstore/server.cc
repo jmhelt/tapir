@@ -964,45 +964,58 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     Debug("Received Upcall: %lu %s", opnum, op.c_str());
     Request request;
     Reply reply;
-    int status = REPLY_OK;
-    std::unordered_set<uint64_t> notify_rws;
-    std::unordered_set<uint64_t> notify_ros;
-    Timestamp commit_timestamp;
 
     request.ParseFromString(op);
 
-    switch (request.op()) {
-        case strongstore::proto::Request::PREPARE:
-            store_.Prepare(request.txnid(),
-                           Transaction(request.prepare().txn()));
-            break;
-        case strongstore::proto::Request::COMMIT:
-            Debug("Received COMMIT");
-            if (request.commit().has_transaction()) {  // Coordinator commit
-                store_.Prepare(request.txnid(),
-                               Transaction(request.commit().transaction()));
-            }
-            commit_timestamp = {request.commit().commit_timestamp()};
-            if (store_.Commit(request.txnid(), commit_timestamp, notify_rws,
-                              notify_ros)) {
-                max_write_timestamp_ =
-                    std::max(max_write_timestamp_, commit_timestamp);
-            }
-            break;
-        case strongstore::proto::Request::ABORT:
-            Debug("Received ABORT");
-            store_.Abort(request.txnid(), notify_rws, notify_ros);
-            break;
-        default:
-            Panic("Unrecognized operation.");
-    }
+    int status = REPLY_OK;
+    uint64_t transaction_id = request.txnid();
 
-    for (uint64_t rw : notify_rws) {
-        reply.mutable_notify_rws()->Add(rw);
-    }
+    if (request.op() == strongstore::proto::Request::PREPARE) {
+        store_.Prepare(transaction_id, Transaction(request.prepare().txn()));
+    } else if (request.op() == strongstore::proto::Request::COMMIT) {
+        Debug("[%lu] Received COMMIT", transaction_id);
+        if (request.commit().has_transaction()) {  // Coordinator commit
+            store_.Prepare(transaction_id,
+                           Transaction(request.commit().transaction()));
+        }
 
-    for (uint64_t ro : notify_ros) {
-        reply.mutable_notify_ros()->Add(ro);
+        Timestamp commit_timestamp{request.commit().commit_timestamp()};
+        uint64_t commit_wait_ms = coordinator.CommitWaitMS(commit_timestamp);
+
+        Debug("[%lu] delaying commit by %lu ms", transaction_id,
+              commit_wait_ms);
+        transport_->Timer(
+            commit_wait_ms, [this, transaction_id, commit_timestamp]() {
+                Debug("[%lu] commiting", transaction_id);
+                std::unordered_set<uint64_t> notify_rws;
+                std::unordered_set<uint64_t> notify_ros;
+                if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
+                                  notify_ros)) {
+                    max_write_timestamp_ =
+                        std::max(max_write_timestamp_, commit_timestamp);
+                }
+
+                NotifyPendingRWs(notify_rws);
+
+                // Reply to waiting RO transactions
+                NotifyPendingROs(notify_ros);
+            });
+    } else if (request.op() == strongstore::proto::Request::ABORT) {
+        std::unordered_set<uint64_t> notify_rws;
+        std::unordered_set<uint64_t> notify_ros;
+
+        Debug("Received ABORT");
+        store_.Abort(transaction_id, notify_rws, notify_ros);
+
+        for (uint64_t rw : notify_rws) {
+            reply.mutable_notify_rws()->Add(rw);
+        }
+
+        for (uint64_t ro : notify_ros) {
+            reply.mutable_notify_ros()->Add(ro);
+        }
+    } else {
+        NOT_REACHABLE();
     }
 
     reply.set_status(status);
