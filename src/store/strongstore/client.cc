@@ -468,7 +468,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
                       uint32_t timeout) {
     t_id++;
 
-    Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
+    const Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
 
     std::unordered_map<int, std::vector<std::string>> sharded_keys;
 
@@ -499,14 +499,15 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     for (auto &s : sharded_keys) {
         // TODO: Handle timeout
         bclient[s.first]->ROCommit(
-            t_id, s.second, commit_timestamp,
+            t_id, s.second, commit_timestamp, min_read_timestamp_,
             std::bind(&Client::ROCommitCallback, this, req->id,
-                      std::placeholders::_1),
+                      commit_timestamp, std::placeholders::_1),
             []() {}, timeout);
     }
 }
 
-void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status) {
+void Client::ROCommitCallback(uint64_t reqId, const Timestamp commit_timestamp,
+                              transaction_status_t status) {
     Debug("ROCommit [%lu] callback status %d", t_id, status);
 
     auto itr = this->pendingReqs.find(reqId);
@@ -528,6 +529,9 @@ void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status) {
         if (debug_stats_) {
             Latency_End(&commit_lat_);
         }
+
+        // TODO: Implement full client-side RSS protocol
+        min_read_timestamp_ = std::max(min_read_timestamp_, commit_timestamp);
         Debug("COMMIT [%lu] OK", t_id);
         ccb(COMMITTED);
     }

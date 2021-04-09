@@ -385,11 +385,12 @@ void Server::HandleROCommit(const TransportAddress &remote,
     std::unordered_set<std::string> keys;
     keys.insert(msg.keys().begin(), msg.keys().end());
 
-    Timestamp commit_timestamp{msg.commit_timestamp()};
+    const Timestamp commit_timestamp{msg.commit_timestamp()};
+    const Timestamp min_timestamp{msg.min_timestamp()};
 
     uint64_t n_conflicting_prepared = 0;
     int status = store_.ROBegin(transaction_id, keys, commit_timestamp,
-                                n_conflicting_prepared);
+                                min_timestamp, n_conflicting_prepared);
     if (status == REPLY_WAIT) {
         Debug("Waiting for prepared transactions");
         PendingROCommitReply *reply =
