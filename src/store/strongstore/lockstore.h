@@ -64,11 +64,14 @@ class LockStore {
               const Timestamp &timestamp,
               std::pair<Timestamp, std::string> &value);
 
-    int Prepare(uint64_t transaction_id, const Transaction &transaction);
     int Prepare(uint64_t transaction_id, const Transaction &transaction,
+                const Timestamp &prepare_timestamp);
+    int Prepare(uint64_t transaction_id, const Transaction &transaction,
+                const Timestamp &prepare_timestamp,
                 const Timestamp &nonblock_timestamp);
 
     int ContinuePrepare(uint64_t transaction_id,
+                        const Timestamp &prepare_timestamp,
                         std::unordered_set<uint64_t> &notify_rws);
 
     bool Commit(uint64_t transaction_id, const Timestamp &timestamp,
@@ -94,6 +97,7 @@ class LockStore {
         PreparedTransaction()
             : transaction_{},
               waiting_ros_{},
+              prepare_timestamp_{},
               nonblock_timestamp_{},
               transaction_id_{} {}
 
@@ -101,12 +105,20 @@ class LockStore {
                             const Transaction &transaction)
             : transaction_{transaction},
               waiting_ros_{},
+              prepare_timestamp_{},
               nonblock_timestamp_{},
               transaction_id_{transaction_id} {}
 
         const Transaction &transaction() const { return transaction_; }
 
         const uint64_t transaction_id() const { return transaction_id_; }
+
+        const Timestamp &prepare_timestamp() const {
+            return prepare_timestamp_;
+        }
+        void set_prepare_timestamp(const Timestamp &prepare_timestamp) {
+            prepare_timestamp_ = prepare_timestamp;
+        }
 
         const Timestamp &nonblock_timestamp() const {
             return nonblock_timestamp_;
@@ -126,6 +138,7 @@ class LockStore {
        private:
         Transaction transaction_;
         std::unordered_set<uint64_t> waiting_ros_;
+        Timestamp prepare_timestamp_;
         Timestamp nonblock_timestamp_;
         uint64_t transaction_id_;
     };

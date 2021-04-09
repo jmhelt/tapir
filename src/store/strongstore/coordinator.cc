@@ -49,9 +49,9 @@ Decision Coordinator::StartTransaction(uint64_t client_id,
     }
 }
 
-CommitDecision Coordinator::ReceivePrepareOK(uint64_t transaction_id,
-                                             int shard_idx,
-                                             Timestamp &prepare_timestamp) {
+CommitDecision Coordinator::ReceivePrepareOK(
+    uint64_t transaction_id, int shard_idx,
+    const Timestamp &prepare_timestamp) {
     if (aborted_transactions_.find(transaction_id) !=
         aborted_transactions_.end()) {
         return {Timestamp(), Decision::ABORT};
@@ -78,7 +78,7 @@ void Coordinator::Abort(uint64_t transaction_id) {
     prepared_transactions_.erase(transaction_id);
 }
 
-uint64_t Coordinator::CommitWaitMS(Timestamp &commit_timestamp) {
+uint64_t Coordinator::CommitWaitMS(const Timestamp &commit_timestamp) const {
     return tt_.TimeToWaitUntilMS(commit_timestamp.getTimestamp());
 }
 };  // namespace strongstore
