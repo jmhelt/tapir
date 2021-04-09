@@ -37,7 +37,8 @@ class ReplicaClient {
                   uint64_t client_id, int shard);
     virtual ~ReplicaClient();
 
-    void Prepare(uint64_t id, const Transaction &txn, prepare_callback pcb,
+    void Prepare(uint64_t id, const Transaction &txn,
+                 const Timestamp &prepare_timestamp, prepare_callback pcb,
                  prepare_timeout_callback ptcb, uint32_t timeout);
 
     void CoordinatorCommit(uint64_t transaction_id,
