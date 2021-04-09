@@ -54,7 +54,7 @@ Server::Server(Consistency consistency,
       tt_{tt},
       coordinator{tt_},
       server_id_{server_id},
-      max_write_timestamp_{},
+      min_prepare_timestamp_{},
       shard_idx_{shard_idx},
       replica_idx_{replica_idx},
       consistency_{consistency},
@@ -212,8 +212,8 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 
         int status = store_.ContinuePrepare(transaction_id, notify_rws);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
-                                        client_id};
+            Timestamp prepare_timestamp{
+                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 transaction_id, shard_idx_, prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -263,8 +263,8 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
         if (status == REPLY_OK) {
             const Transaction &transaction =
                 store_.GetPreparedTransaction(transaction_id);
-            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
-                                        client_id};
+            Timestamp prepare_timestamp{
+                min_prepare_timestamp_.getTimestamp() + 1, client_id};
 
             reply->prepare_timestamp = prepare_timestamp;
             // TODO: Handle timeout
@@ -342,7 +342,7 @@ bool Server::NotifyPendingRO(PendingROCommitReply *reply) {
 
 void Server::SendROCommitReply(PendingROCommitReply *reply) {
     uint64_t transaction_id = reply->transaction_id;
-    Timestamp commit_timestamp = Timestamp(reply->commit_timestamp);
+    const Timestamp &commit_timestamp = reply->commit_timestamp;
 
     ro_commit_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
     ro_commit_reply_.mutable_rid()->set_client_req_id(
@@ -360,6 +360,8 @@ void Server::SendROCommitReply(PendingROCommitReply *reply) {
         rreply->set_val(value.second.c_str());
         value.first.serialize(rreply->mutable_timestamp());
     }
+
+    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
 
     const TransportAddress *remote = reply->rid.addr();
     transport_->Timer(0, [this, remote, reply = ro_commit_reply_]() {
@@ -418,6 +420,8 @@ void Server::HandleROCommit(const TransportAddress &remote,
         value.first.serialize(rreply->mutable_timestamp());
     }
 
+    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
+
     transport_->SendMessage(this, remote, ro_commit_reply_);
 }
 
@@ -444,8 +448,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             store_.Prepare(transaction_id, transaction, nonblock_timestamp);
         Debug("[%lu] store prepare returned status %d", transaction_id, status);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
-                                        client_id};
+            Timestamp prepare_timestamp{
+                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 transaction_id, shard_idx_, prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -656,7 +660,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
                                                 remote.clone());
         pending_reply->coordinator_shard = coordinator_shard;
         pending_reply->prepare_timestamp = {
-            max_write_timestamp_.getTimestamp() + 1, client_id};
+            min_prepare_timestamp_.getTimestamp() + 1, client_id};
 
         pending_rw_commit_p_replies_[transaction_id] = pending_reply;
 
@@ -723,8 +727,8 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
     if (status == REPLY_OK) {
         if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
                           notify_ros)) {
-            max_write_timestamp_ =
-                std::max(max_write_timestamp_, commit_timestamp);
+            min_prepare_timestamp_ =
+                std::max(min_prepare_timestamp_, commit_timestamp);
         }
 
         // TODO: Handle timeout
@@ -818,8 +822,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         int status = store_.Prepare(transaction_id, transaction,
                                     coord_reply->nonblock_timestamp);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{max_write_timestamp_.getTimestamp() + 1,
-                                        client_id};
+            Timestamp prepare_timestamp{
+                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
                                               prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -991,8 +995,8 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 std::unordered_set<uint64_t> notify_ros;
                 if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
                                   notify_ros)) {
-                    max_write_timestamp_ =
-                        std::max(max_write_timestamp_, commit_timestamp);
+                    min_prepare_timestamp_ =
+                        std::max(min_prepare_timestamp_, commit_timestamp);
                 }
 
                 NotifyPendingRWs(notify_rws);
