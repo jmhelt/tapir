@@ -76,8 +76,11 @@ int LockStore::Get(uint64_t transaction_id, const Timestamp &start_timestamp,
 int LockStore::ROBegin(uint64_t transaction_id,
                        const std::unordered_set<std::string> &keys,
                        const Timestamp &commit_timestamp,
+                       const Timestamp &min_timestamp,
                        uint64_t &n_conflicting_prepared) {
     n_conflicting_prepared = 0;
+
+    ASSERT(min_timestamp < commit_timestamp);
 
     for (auto &p : prepared_) {
         PreparedTransaction &pt = p.second;
@@ -92,6 +95,7 @@ int LockStore::ROBegin(uint64_t transaction_id,
         }
 
         if (consistency_ == Consistency::RSS &&
+            min_timestamp < pt.prepare_timestamp() &&
             commit_timestamp < pt.nonblock_timestamp()) {
             Debug(
                 "[%lu] Not waiting for prepared transaction (nonblock): %lu < "

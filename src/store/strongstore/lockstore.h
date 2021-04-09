@@ -58,6 +58,7 @@ class LockStore {
     int ROBegin(uint64_t transaction_id,
                 const std::unordered_set<std::string> &keys,
                 const Timestamp &commit_timestamp,
+                const Timestamp &min_timestamp,
                 uint64_t &n_conflicting_prepared);
 
     int ROGet(uint64_t transaction_id, const std::string &key,
