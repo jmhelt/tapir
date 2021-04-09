@@ -82,11 +82,22 @@ int LockStore::ROBegin(uint64_t transaction_id,
     for (auto &p : prepared_) {
         PreparedTransaction &pt = p.second;
 
+        if (commit_timestamp < pt.prepare_timestamp()) {
+            Debug(
+                "[%lu] Not waiting for prepared transaction (prepare): %lu < "
+                "%lu",
+                transaction_id, commit_timestamp.getTimestamp(),
+                pt.prepare_timestamp().getTimestamp());
+            continue;
+        }
+
         if (consistency_ == Consistency::RSS &&
             commit_timestamp < pt.nonblock_timestamp()) {
-            Debug("Not waiting for prepared transaction: %lu < %lu",
-                  commit_timestamp.getTimestamp(),
-                  pt.nonblock_timestamp().getTimestamp());
+            Debug(
+                "[%lu] Not waiting for prepared transaction (nonblock): %lu < "
+                "%lu",
+                transaction_id, commit_timestamp.getTimestamp(),
+                pt.nonblock_timestamp().getTimestamp());
             continue;
         }
 
@@ -132,6 +143,7 @@ int LockStore::ROGet(uint64_t transaction_id, const string &key,
 }
 
 int LockStore::ContinuePrepare(uint64_t transaction_id,
+                               const Timestamp &prepare_timestamp,
                                std::unordered_set<uint64_t> &notify_rws) {
     Debug("[%lu] Continue PREPARE", transaction_id);
 
@@ -140,13 +152,14 @@ int LockStore::ContinuePrepare(uint64_t transaction_id,
         return REPLY_PREPARED;
     }
 
-    const PreparedTransaction &pt = search->second;
+    PreparedTransaction &pt = search->second;
     const Transaction &transaction = pt.transaction();
 
     int status = getLocks(transaction_id, transaction);
 
     if (status == REPLY_OK) {
         Debug("[%lu] PREPARED TO COMMIT", transaction_id);
+        pt.set_prepare_timestamp(prepare_timestamp);
         prepared_.emplace(transaction_id, std::move(pt));
         waiting_.erase(search);
     } else if (status == REPLY_FAIL) {
@@ -158,8 +171,9 @@ int LockStore::ContinuePrepare(uint64_t transaction_id,
 }
 
 int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
+                       const Timestamp &prepare_timestamp,
                        const Timestamp &nonblock_timestamp) {
-    int status = Prepare(transaction_id, transaction);
+    int status = Prepare(transaction_id, transaction, prepare_timestamp);
     if (status == REPLY_OK) {
         prepared_[transaction_id].set_nonblock_timestamp(nonblock_timestamp);
     } else if (status == REPLY_WAIT) {
@@ -169,8 +183,8 @@ int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
     return status;
 }
 
-int LockStore::Prepare(uint64_t transaction_id,
-                       const Transaction &transaction) {
+int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
+                       const Timestamp &prepare_timestamp) {
     Debug("[%lu] START PREPARE", transaction_id);
 
     if (prepared_.size() > 100) {
@@ -184,13 +198,13 @@ int LockStore::Prepare(uint64_t transaction_id,
 
     int status = getLocks(transaction_id, transaction);
 
+    PreparedTransaction pt{transaction_id, transaction};
     if (status == REPLY_OK) {
         Debug("[%lu] PREPARED TO COMMIT", transaction_id);
-        prepared_.emplace(transaction_id,
-                          PreparedTransaction{transaction_id, transaction});
+        pt.set_prepare_timestamp(prepare_timestamp);
+        prepared_[transaction_id] = pt;
     } else if (status == REPLY_WAIT) {
-        waiting_.emplace(transaction_id,
-                         PreparedTransaction{transaction_id, transaction});
+        waiting_[transaction_id] = pt;
     }
 
     return status;

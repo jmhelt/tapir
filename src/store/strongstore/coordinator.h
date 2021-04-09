@@ -52,7 +52,7 @@ class PreparedTransaction {
         commit_timestamp_ = std::max(commit_timestamp_, start_timestamp);
     }
 
-    void PrepareOK(int shard_idx, Timestamp &prepare_timestamp) {
+    void PrepareOK(int shard_idx, const Timestamp &prepare_timestamp) {
         commit_timestamp_ = std::max(commit_timestamp_, prepare_timestamp);
         ok_participants_.insert(shard_idx);
     }
@@ -92,13 +92,13 @@ class Coordinator {
                               int n_participants, Transaction transaction);
 
     CommitDecision ReceivePrepareOK(uint64_t transaction_id, int shard_idx,
-                                    Timestamp &prepare_timestamp);
+                                    const Timestamp &prepare_timestamp);
 
     void Commit(uint64_t transaction_id);
 
     void Abort(uint64_t transaction_id);
 
-    uint64_t CommitWaitMS(Timestamp &commit_timestamp);
+    uint64_t CommitWaitMS(const Timestamp &commit_timestamp) const;
 
    private:
     const TrueTime &tt_;

@@ -24,6 +24,7 @@ ReplicaClient::~ReplicaClient() { delete client; }
 
 void ReplicaClient::Prepare(uint64_t transaction_id,
                             const Transaction &transaction,
+                            const Timestamp &prepare_timestamp,
                             prepare_callback pcb, prepare_timeout_callback ptcb,
                             uint32_t timeout) {
     Debug("[shard %i] Sending PREPARE: %lu", shard_idx_, transaction_id);
@@ -34,6 +35,7 @@ void ReplicaClient::Prepare(uint64_t transaction_id,
     request.set_op(Request::PREPARE);
     request.set_txnid(transaction_id);
     transaction.serialize(request.mutable_prepare()->mutable_txn());
+    prepare_timestamp.serialize(request.mutable_prepare()->mutable_timestamp());
     request.SerializeToString(&request_str);
 
     uint64_t reqId = lastReqId++;

@@ -210,10 +210,11 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
         const Transaction &transaction =
             coordinator.GetTransaction(transaction_id);
 
-        int status = store_.ContinuePrepare(transaction_id, notify_rws);
+        const Timestamp prepare_timestamp{
+            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        int status = store_.ContinuePrepare(transaction_id, prepare_timestamp,
+                                            notify_rws);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{
-                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 transaction_id, shard_idx_, prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -259,17 +260,19 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
         std::unordered_set<uint64_t> notify_rws;
 
-        const int status = store_.ContinuePrepare(transaction_id, notify_rws);
+        const Timestamp prepare_timestamp{
+            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+
+        const int status = store_.ContinuePrepare(
+            transaction_id, prepare_timestamp, notify_rws);
         if (status == REPLY_OK) {
             const Transaction &transaction =
                 store_.GetPreparedTransaction(transaction_id);
-            Timestamp prepare_timestamp{
-                min_prepare_timestamp_.getTimestamp() + 1, client_id};
 
             reply->prepare_timestamp = prepare_timestamp;
             // TODO: Handle timeout
             replica_client_->Prepare(
-                transaction_id, transaction,
+                transaction_id, transaction, prepare_timestamp,
                 std::bind(&Server::PrepareCallback, this, transaction_id,
                           std::placeholders::_1, std::placeholders::_2),
                 [](int, Timestamp) {}, PREPARE_TIMEOUT);
@@ -444,12 +447,12 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                                               n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("[%lu] Trying fast path commit", transaction_id);
-        int status =
-            store_.Prepare(transaction_id, transaction, nonblock_timestamp);
+        const Timestamp prepare_timestamp{
+            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        int status = store_.Prepare(transaction_id, transaction,
+                                    prepare_timestamp, nonblock_timestamp);
         Debug("[%lu] store prepare returned status %d", transaction_id, status);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{
-                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             CommitDecision cd = coordinator.ReceivePrepareOK(
                 transaction_id, shard_idx_, prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -651,22 +654,24 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
-    int status =
-        store_.Prepare(transaction_id, transaction, nonblock_timestamp);
+    const Timestamp prepare_timestamp{min_prepare_timestamp_.getTimestamp() + 1,
+                                      client_id};
+
+    int status = store_.Prepare(transaction_id, transaction, prepare_timestamp,
+                                nonblock_timestamp);
 
     if (status == REPLY_OK) {
         PendingRWCommitParticipantReply *pending_reply =
             new PendingRWCommitParticipantReply(client_id, client_req_id,
                                                 remote.clone());
         pending_reply->coordinator_shard = coordinator_shard;
-        pending_reply->prepare_timestamp = {
-            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        pending_reply->prepare_timestamp = prepare_timestamp;
 
         pending_rw_commit_p_replies_[transaction_id] = pending_reply;
 
         // TODO: Handle timeout
         replica_client_->Prepare(
-            transaction_id, transaction,
+            transaction_id, transaction, prepare_timestamp,
             std::bind(&Server::PrepareCallback, this, transaction_id,
                       std::placeholders::_1, std::placeholders::_2),
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
@@ -819,11 +824,12 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Transaction &transaction = coordinator.GetTransaction(transaction_id);
         Debug("[%lu] Received Prepare OK from all participants",
               transaction_id);
-        int status = store_.Prepare(transaction_id, transaction,
-                                    coord_reply->nonblock_timestamp);
+        const Timestamp prepare_timestamp{
+            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        int status =
+            store_.Prepare(transaction_id, transaction, prepare_timestamp,
+                           coord_reply->nonblock_timestamp);
         if (status == REPLY_OK) {
-            Timestamp prepare_timestamp{
-                min_prepare_timestamp_.getTimestamp() + 1, client_id};
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
                                               prepare_timestamp);
             ASSERT(cd.d == Decision::COMMIT);
@@ -975,15 +981,17 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     uint64_t transaction_id = request.txnid();
 
     if (request.op() == strongstore::proto::Request::PREPARE) {
-        store_.Prepare(transaction_id, Transaction(request.prepare().txn()));
+        store_.Prepare(transaction_id, Transaction(request.prepare().txn()),
+                       Timestamp(request.prepare().timestamp()));
     } else if (request.op() == strongstore::proto::Request::COMMIT) {
         Debug("[%lu] Received COMMIT", transaction_id);
+        const Timestamp commit_timestamp{request.commit().commit_timestamp()};
         if (request.commit().has_transaction()) {  // Coordinator commit
             store_.Prepare(transaction_id,
-                           Transaction(request.commit().transaction()));
+                           Transaction(request.commit().transaction()),
+                           commit_timestamp);
         }
 
-        Timestamp commit_timestamp{request.commit().commit_timestamp()};
         uint64_t commit_wait_ms = coordinator.CommitWaitMS(commit_timestamp);
 
         Debug("[%lu] delaying commit by %lu ms", transaction_id,
