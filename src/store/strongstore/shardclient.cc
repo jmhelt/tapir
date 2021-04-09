@@ -198,6 +198,7 @@ void ShardClient::Put(uint64_t transaction_id, const std::string &key,
 void ShardClient::ROCommit(uint64_t transaction_id,
                            const std::vector<std::string> &keys,
                            const Timestamp &commit_timestamp,
+                           const Timestamp &min_read_timestamp,
                            commit_callback ccb, commit_timeout_callback ctcb,
                            uint32_t timeout) {
     Debug("[shard %i] Sending ROCommit [%lu]", shard_idx_, transaction_id);
@@ -213,6 +214,7 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     ro_commit_.mutable_rid()->set_client_req_id(reqId);
     ro_commit_.set_transaction_id(transaction_id);
     commit_timestamp.serialize(ro_commit_.mutable_commit_timestamp());
+    min_read_timestamp.serialize(ro_commit_.mutable_min_timestamp());
 
     ro_commit_.clear_keys();
     for (auto &k : keys) {

@@ -77,7 +77,8 @@ class ShardClient : public TxnClient,
                      get_timeout_callback gtcb, uint32_t timeout) override;
 
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
-                  const Timestamp &commit_timestamp, commit_callback ccb,
+                  const Timestamp &commit_timestamp,
+                  const Timestamp &min_read_timestamp, commit_callback ccb,
                   commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitCoordinator(uint64_t transaction_id,
