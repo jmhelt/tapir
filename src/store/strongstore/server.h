@@ -277,7 +277,7 @@ class Server : public TransportReceiver,
 
     Latency_t ro_wait_lat_;
 
-    Timestamp max_write_timestamp_;
+    Timestamp min_prepare_timestamp_;
     int shard_idx_;
     int replica_idx_;
     Consistency consistency_;
