@@ -49,10 +49,13 @@ void BufferClient::Begin(uint64_t tid, const Timestamp &start_time) {
     txnclient->Begin(tid);
 }
 
-void BufferClient::RWCommitCoordinator(
-    uint64_t transaction_id, int n_participants, Timestamp &nonblock_timestamp,
-    prepare_callback pcb, prepare_timeout_callback ptcb, uint32_t timeout) {
-    shard_client_->RWCommitCoordinator(transaction_id, txn, n_participants,
+void BufferClient::RWCommitCoordinator(uint64_t transaction_id,
+                                       const std::set<int> participants,
+                                       Timestamp &nonblock_timestamp,
+                                       prepare_callback pcb,
+                                       prepare_timeout_callback ptcb,
+                                       uint32_t timeout) {
+    shard_client_->RWCommitCoordinator(transaction_id, txn, participants,
                                        nonblock_timestamp, pcb, ptcb, timeout);
 }
 

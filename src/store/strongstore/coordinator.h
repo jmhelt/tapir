@@ -24,28 +24,32 @@ class PreparedTransaction {
    public:
     PreparedTransaction()
         : commit_timestamp_{},
-          n_participants_{-1},
           ok_participants_{},
-          transaction_{} {}
+          transaction_{},
+          n_participants_{-1} {}
     PreparedTransaction(int shard_idx)
         : commit_timestamp_{},
-          n_participants_{-1},
           ok_participants_{{shard_idx}},
-          transaction_{} {}
+          transaction_{},
+          n_participants_{-1} {}
     PreparedTransaction(Timestamp &start_timestamp, int n_participants,
                         Transaction transaction)
         : commit_timestamp_{start_timestamp},
-          n_participants_{n_participants},
           ok_participants_{},
-          transaction_{transaction} {}
+          transaction_{transaction},
+          n_participants_{n_participants} {}
 
     ~PreparedTransaction() {}
 
     int n_participants() { return n_participants_; }
 
+    const std::unordered_set<int> &ok_participants() const {
+        return ok_participants_;
+    }
+
     Transaction &transaction() { return transaction_; }
 
-    void StartTransaction(Timestamp &start_timestamp, int n_participants,
+    void StartTransaction(Timestamp &start_timestamp, uint64_t n_participants,
                           Transaction transaction) {
         n_participants_ = n_participants;
         transaction_ = transaction;
@@ -73,9 +77,9 @@ class PreparedTransaction {
 
    private:
     Timestamp commit_timestamp_;
-    int n_participants_;
     std::unordered_set<int> ok_participants_;
     Transaction transaction_;
+    int n_participants_;
 };
 
 class Coordinator {
@@ -85,11 +89,11 @@ class Coordinator {
 
     bool HasTransaction(uint64_t transaction_id);
     Transaction &GetTransaction(uint64_t transaction_id);
-
-    int GetNParticipants(uint64_t transaction_id);
+    void GetPendingParticipants(uint64_t transaction_id,
+                                std::unordered_set<int> &participants);
 
     Decision StartTransaction(uint64_t client_id, uint64_t transaction_id,
-                              int n_participants, Transaction transaction);
+                              uint64_t n_participants, Transaction transaction);
 
     CommitDecision ReceivePrepareOK(uint64_t transaction_id, int shard_idx,
                                     const Timestamp &prepare_timestamp);

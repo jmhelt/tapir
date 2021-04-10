@@ -79,7 +79,7 @@ class LockStore {
                 std::unordered_set<uint64_t> &notify_rws,
                 std::unordered_set<uint64_t> &notify_ros);
 
-    void Abort(uint64_t transaction_id,
+    bool Abort(uint64_t transaction_id,
                std::unordered_set<uint64_t> &notify_rws,
                std::unordered_set<uint64_t> &notify_ros);
     void ReleaseLocks(uint64_t transaction_id, const Transaction &transaction,

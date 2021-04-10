@@ -31,6 +31,9 @@
 #ifndef _STRONG_BUFFER_CLIENT_H_
 #define _STRONG_BUFFER_CLIENT_H_
 
+#include <set>
+#include <vector>
+
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "store/common/frontend/bufferclient.h"
@@ -48,7 +51,8 @@ class BufferClient : public ::BufferClient {
 
     const Timestamp &start_timestamp() const { return txn.get_start_time(); }
 
-    void RWCommitCoordinator(uint64_t transaction_id, int n_participants,
+    void RWCommitCoordinator(uint64_t transaction_id,
+                             const std::set<int> participants,
                              Timestamp &nonblock_timestamp,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
