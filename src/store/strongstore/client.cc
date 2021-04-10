@@ -315,7 +315,6 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     req->maxRepliedTs = 0UL;
 
     int coordinator_shard = ChooseCoordinator();
-    int n_participants = participants_.size();
 
     Timestamp nonblock_timestamp = Timestamp();
     if (consistency_ == Consistency::RSS) {
@@ -326,7 +325,7 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     for (auto p : participants_) {
         if (p == coordinator_shard) {
             bclient[p]->RWCommitCoordinator(
-                t_id, n_participants, nonblock_timestamp,
+                t_id, participants_, nonblock_timestamp,
                 std::bind(&Client::PrepareCallback, this, req->id,
                           std::placeholders::_1, std::placeholders::_2),
                 std::bind(&Client::PrepareCallback, this, req->id,

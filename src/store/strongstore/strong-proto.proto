@@ -32,8 +32,8 @@ message RWCommitCoordinator {
     required RequestIDMessage rid = 1;
     required uint64 transaction_id = 2;
     required TransactionMessage transaction = 3;
-    required int32 n_participants = 4;
-    required TimestampMessage nonblock_timestamp = 5;
+    required TimestampMessage nonblock_timestamp = 4;
+    repeated int32 participants = 5;
 }
 
 message RWCommitCoordinatorReply {
@@ -82,7 +82,7 @@ message PrepareAbortReply {
 message Abort {
     required RequestIDMessage rid = 1;
     required uint64 transaction_id = 2;
-    required TransactionMessage transaction = 3;
+    optional TransactionMessage transaction = 3;
 }
 
 message AbortReply {

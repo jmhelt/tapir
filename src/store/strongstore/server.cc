@@ -435,7 +435,9 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     uint64_t client_req_id = msg.rid().client_req_id();
 
     uint64_t transaction_id = msg.transaction_id();
-    int n_participants = msg.n_participants();
+
+    const std::unordered_set<int> participants{msg.participants().begin(),
+                                               msg.participants().end()};
 
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
@@ -444,8 +446,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
     Debug("[%lu] Coordinator for transaction", transaction_id);
 
-    Decision d = coordinator.StartTransaction(client_id, transaction_id,
-                                              n_participants, transaction);
+    Decision d = coordinator.StartTransaction(
+        client_id, transaction_id, participants.size() - 1, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("[%lu] Trying fast path commit", transaction_id);
         const Timestamp prepare_timestamp{
@@ -506,6 +508,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
             new PendingRWCommitCoordinatorReply(client_id, client_req_id,
                                                 remote.clone());
         pending_reply->nonblock_timestamp = nonblock_timestamp;
+        pending_reply->participants = std::move(participants);
         pending_rw_commit_c_replies_[transaction_id] = pending_reply;
     }
 }
@@ -745,14 +748,15 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
                       std::placeholders::_3),
             []() {}, COMMIT_TIMEOUT);
     } else {
-        store_.Abort(transaction_id, notify_rws, notify_ros);
-
-        // TODO: Handle timeout
-        replica_client_->Abort(
-            transaction_id,
-            std::bind(&Server::AbortParticipantCallback, this, transaction_id,
-                      std::placeholders::_1, std::placeholders::_2),
-            []() {}, ABORT_TIMEOUT);
+        if (store_.Abort(transaction_id, notify_rws, notify_ros)) {
+            // TODO: Handle timeout
+            replica_client_->Abort(
+                transaction_id,
+                std::bind(&Server::AbortParticipantCallback, this,
+                          transaction_id, std::placeholders::_1,
+                          std::placeholders::_2),
+                []() {}, ABORT_TIMEOUT);
+        }
     }
 
     NotifyPendingROs(notify_ros);
@@ -849,8 +853,19 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             store_.ReleaseLocks(transaction_id, transaction, notify_rws);
             coordinator.Abort(transaction_id);
 
-            const TransportAddress *addr = coord_reply->rid.addr();
+            // Reply to participants
+            SendPrepareOKRepliesFail(reply);
+            delete reply;
+            pending_prepare_ok_replies_.erase(transaction_id);
+
+            // Notify other participants
+            SendAbortParticipants(transaction_id, coord_reply->participants);
+
+            // Notify waiting RW transactions
+            NotifyPendingRWs(notify_rws);
+
             // Reply to client
+            const TransportAddress *addr = coord_reply->rid.addr();
             SendRWCommmitCoordinatorReplyFail(*addr,
                                               coord_reply->rid.client_id(),
                                               coord_reply->rid.client_req_id());
@@ -858,18 +873,13 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
             delete coord_reply;
             pending_rw_commit_c_replies_.erase(transaction_id);
 
-            // Reply to participants
-            SendPrepareOKRepliesFail(reply);
-            delete reply;
-            pending_prepare_ok_replies_.erase(transaction_id);
-
-            NotifyPendingRWs(notify_rws);
         } else if (status == REPLY_WAIT) {
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
         } else {
             NOT_REACHABLE();
         }
     } else if (cd.d == Decision::ABORT) {
+        // TODO: Maybe get rid of this case?
         Debug("[%lu] Aborted", transaction_id);
         // Reply to participants
         SendPrepareOKRepliesFail(reply);
@@ -888,6 +898,7 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
 
     Debug("[%lu] Received Prepare ABORT", transaction_id);
 
+    // Release locks acquired during GETs
     std::unordered_set<uint64_t> notify_rws;
     if (coordinator.HasTransaction(transaction_id)) {
         store_.ReleaseLocks(transaction_id,
@@ -897,6 +908,15 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
 
     coordinator.Abort(transaction_id);
 
+    // Reply to OK participants
+    auto search2 = pending_prepare_ok_replies_.find(transaction_id);
+    if (search2 != pending_prepare_ok_replies_.end()) {
+        PendingPrepareOKReply *reply = search2->second;
+        SendPrepareOKRepliesFail(reply);
+        delete reply;
+        pending_prepare_ok_replies_.erase(transaction_id);
+    }
+
     // Reply to client
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     if (search != pending_rw_commit_c_replies_.end()) {
@@ -905,18 +925,13 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
         SendRWCommmitCoordinatorReplyFail(*(reply->rid.addr()),
                                           reply->rid.client_id(),
                                           reply->rid.client_req_id());
+
+        // Notify other participants
+        SendAbortParticipants(transaction_id, reply->participants);
+
         delete reply->rid.addr();
         delete reply;
         pending_rw_commit_c_replies_.erase(search);
-    }
-
-    // Reply to other participants
-    auto search2 = pending_prepare_ok_replies_.find(transaction_id);
-    if (search2 != pending_prepare_ok_replies_.end()) {
-        PendingPrepareOKReply *reply = search2->second;
-        SendPrepareOKRepliesFail(reply);
-        delete reply;
-        pending_prepare_ok_replies_.erase(transaction_id);
     }
 
     prepare_abort_reply_.mutable_rid()->set_client_id(client_id);
@@ -930,12 +945,26 @@ void Server::HandlePrepareAbort(const TransportAddress &remote,
 
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     uint64_t transaction_id = msg.transaction_id();
-    const Transaction transaction{msg.transaction()};
 
     Debug("[%lu] Received Abort request", transaction_id);
 
     std::unordered_set<uint64_t> notify_rws;
-    store_.ReleaseLocks(transaction_id, transaction, notify_rws);
+    std::unordered_set<uint64_t> notify_ros;
+    if (msg.has_transaction()) {
+        const Transaction transaction{msg.transaction()};
+
+        store_.ReleaseLocks(transaction_id, transaction, notify_rws);
+    } else {
+        if (store_.Abort(transaction_id, notify_rws, notify_ros)) {
+            // TODO: Handle timeout
+            replica_client_->Abort(
+                transaction_id,
+                std::bind(&Server::AbortParticipantCallback, this,
+                          transaction_id, std::placeholders::_1,
+                          std::placeholders::_2),
+                []() {}, ABORT_TIMEOUT);
+        }
+    }
 
     abort_reply_.mutable_rid()->CopyFrom(msg.rid());
     abort_reply_.set_status(REPLY_OK);
@@ -943,6 +972,20 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     transport_->SendMessage(this, remote, abort_reply_);
 
     NotifyPendingRWs(notify_rws);
+    NotifyPendingRWs(notify_ros);
+}
+
+void Server::SendAbortParticipants(
+    uint64_t transaction_id, const std::unordered_set<int> &participants) {
+    for (int p : participants) {
+        // TODO: Handle timeout
+        shard_clients_[p]->Abort(
+            transaction_id,
+            [transaction_id]() {
+                Debug("[%lu] Received ABORT callback", transaction_id);
+            },
+            []() {}, ABORT_TIMEOUT);
+    }
 }
 
 void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,

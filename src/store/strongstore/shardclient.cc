@@ -244,9 +244,9 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
 }
 
 void ShardClient::RWCommitCoordinator(
-    uint64_t transaction_id, const Transaction &transaction, int n_participants,
-    Timestamp &nonblock_timestamp, prepare_callback pcb,
-    prepare_timeout_callback ptcb, uint32_t timeout) {
+    uint64_t transaction_id, const Transaction &transaction,
+    const std::set<int> participants, Timestamp &nonblock_timestamp,
+    prepare_callback pcb, prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending RWCommitCoordinator [%lu]", shard_idx_,
           transaction_id);
 
@@ -262,8 +262,11 @@ void ShardClient::RWCommitCoordinator(
     rw_commit_c_.mutable_rid()->set_client_req_id(reqId);
     rw_commit_c_.set_transaction_id(transaction_id);
     transaction.serialize(rw_commit_c_.mutable_transaction());
-    rw_commit_c_.set_n_participants(n_participants);
     nonblock_timestamp.serialize((rw_commit_c_.mutable_nonblock_timestamp()));
+
+    for (int p : participants) {
+        rw_commit_c_.add_participants(p);
+    }
 
     Latency_Start(&opLat);
 
@@ -443,6 +446,27 @@ void ShardClient::Abort(uint64_t transaction_id, const Transaction &transaction,
     abort_.mutable_rid()->set_client_req_id(reqId);
     abort_.set_transaction_id(transaction_id);
     transaction.serialize(abort_.mutable_transaction());
+
+    Latency_Start(&opLat);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
+}
+
+void ShardClient::Abort(uint64_t transaction_id, abort_callback acb,
+                        abort_timeout_callback atcb, uint32_t timeout) {
+    Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
+
+    uint64_t reqId = lastReqId++;
+    PendingAbort *pendingAbort = new PendingAbort(reqId);
+    pendingAborts[reqId] = pendingAbort;
+    pendingAbort->acb = acb;
+    pendingAbort->atcb = atcb;
+
+    // TODO: Setup timeout
+    abort_.Clear();
+    abort_.mutable_rid()->set_client_id(client_id_);
+    abort_.mutable_rid()->set_client_req_id(reqId);
+    abort_.set_transaction_id(transaction_id);
 
     Latency_Start(&opLat);
 

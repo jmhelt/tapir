@@ -32,6 +32,8 @@
 #ifndef _STRONG_SHARDCLIENT_H_
 #define _STRONG_SHARDCLIENT_H_
 
+#include <set>
+
 #include "lib/assert.h"
 #include "lib/latency.h"
 #include "lib/message.h"
@@ -82,7 +84,8 @@ class ShardClient : public TxnClient,
                   commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitCoordinator(uint64_t transaction_id,
-                             const Transaction &transaction, int n_participants,
+                             const Transaction &transaction,
+                             const std::set<int> participants,
                              Timestamp &nonblock_timestamp,
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
@@ -103,6 +106,8 @@ class ShardClient : public TxnClient,
 
     virtual void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
                        abort_timeout_callback atcb, uint32_t timeout) override;
+    void Abort(uint64_t transaction_id, abort_callback acb,
+               abort_timeout_callback atcb, uint32_t timeout);
 
     // Override PingInitiator
     virtual bool SendPing(size_t replica, const PingMessage &ping);

@@ -19,25 +19,20 @@ Transaction &Coordinator::GetTransaction(uint64_t transaction_id) {
     return search->second.transaction();
 }
 
-int Coordinator::GetNParticipants(uint64_t transaction_id) {
-    auto search = prepared_transactions_.find(transaction_id);
-    ASSERT(search != prepared_transactions_.end());
-    return search->second.n_participants();
-}
-
 Decision Coordinator::StartTransaction(uint64_t client_id,
                                        uint64_t transaction_id,
-                                       int n_participants,
+                                       uint64_t n_participants,
                                        Transaction transaction) {
-    auto now = tt_.Now();
-    Timestamp start_timestamp{now.latest(), client_id};
-    Debug("Coordinator: StartTransaction %lu %lu.%lu %d", transaction_id,
-          start_timestamp.getTimestamp(), start_timestamp.getID(),
-          n_participants);
     if (aborted_transactions_.find(transaction_id) !=
         aborted_transactions_.end()) {
         return Decision::ABORT;
     }
+
+    auto now = tt_.Now();
+    Timestamp start_timestamp{now.latest(), client_id};
+    Debug("Coordinator: StartTransaction %lu %lu.%lu %lu", transaction_id,
+          start_timestamp.getTimestamp(), start_timestamp.getID(),
+          n_participants);
 
     PreparedTransaction &pt = prepared_transactions_[transaction_id];
     pt.StartTransaction(start_timestamp, n_participants, transaction);
