@@ -49,7 +49,7 @@ class PreparedTransaction {
 
     Transaction &transaction() { return transaction_; }
 
-    void StartTransaction(Timestamp &start_timestamp, uint64_t n_participants,
+    void StartTransaction(Timestamp &start_timestamp, int n_participants,
                           Transaction transaction) {
         n_participants_ = n_participants;
         transaction_ = transaction;
@@ -89,11 +89,9 @@ class Coordinator {
 
     bool HasTransaction(uint64_t transaction_id);
     Transaction &GetTransaction(uint64_t transaction_id);
-    void GetPendingParticipants(uint64_t transaction_id,
-                                std::unordered_set<int> &participants);
 
     Decision StartTransaction(uint64_t client_id, uint64_t transaction_id,
-                              uint64_t n_participants, Transaction transaction);
+                              int n_participants, Transaction transaction);
 
     CommitDecision ReceivePrepareOK(uint64_t transaction_id, int shard_idx,
                                     const Timestamp &prepare_timestamp);
