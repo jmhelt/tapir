@@ -30,7 +30,7 @@ Decision Coordinator::StartTransaction(uint64_t client_id,
 
     auto now = tt_.Now();
     Timestamp start_timestamp{now.latest(), client_id};
-    Debug("Coordinator: StartTransaction %lu %lu.%lu %d", transaction_id,
+    Debug("[%lu] Coordinator: StartTransaction %lu.%lu %d", transaction_id,
           start_timestamp.getTimestamp(), start_timestamp.getID(),
           n_participants);
 

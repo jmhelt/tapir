@@ -436,10 +436,11 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
     uint64_t transaction_id = msg.transaction_id();
 
-    const std::unordered_set<int> participants{msg.participants().begin(),
-                                               msg.participants().end()};
+    std::unordered_set<int> participants{msg.participants().begin(),
+                                         msg.participants().end()};
 
-    int n_participants = static_cast<int>(participants.size()) - 1;
+    int n_participants = static_cast<int>(participants.size());
+    participants.erase(shard_idx_);  // Remove coordinator
 
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
@@ -635,6 +636,20 @@ void Server::SendRWCommmitParticipantReplyOK(
     delete remote;
 }
 
+void Server::SendRWCommmitParticipantReplyFail(
+    PendingRWCommitParticipantReply *reply) {
+    rw_commit_p_reply_.mutable_rid()->set_client_id(reply->rid.client_id());
+    rw_commit_p_reply_.mutable_rid()->set_client_req_id(
+        reply->rid.client_req_id());
+    rw_commit_p_reply_.set_status(REPLY_FAIL);
+
+    // Respond to client
+    const TransportAddress *remote = reply->rid.addr();
+    transport_->SendMessage(this, *remote, rw_commit_p_reply_);
+    Debug("Sent participant reply");
+    delete remote;
+}
+
 void Server::SendRWCommmitParticipantReplyFail(const TransportAddress &remote,
                                                uint64_t client_id,
                                                uint64_t client_req_id) {
@@ -709,20 +724,27 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
 
 void Server::PrepareCallback(uint64_t transaction_id, int status,
                              Timestamp timestamp) {
-    ASSERT(status == REPLY_OK);
-
     PendingRWCommitParticipantReply *reply =
         pending_rw_commit_p_replies_[transaction_id];
+    if (status == REPLY_OK) {
+        // TODO: Handle timeout
+        shard_clients_[reply->coordinator_shard]->PrepareOK(
+            transaction_id, shard_idx_, reply->prepare_timestamp,
+            std::bind(&Server::PrepareOKCallback, this, transaction_id,
+                      placeholders::_1, placeholders::_2),
+            [](int, Timestamp) {}, PREPARE_TIMEOUT);
 
-    // TODO: Handle timeout
-    shard_clients_[reply->coordinator_shard]->PrepareOK(
-        transaction_id, shard_idx_, reply->prepare_timestamp,
-        std::bind(&Server::PrepareOKCallback, this, transaction_id,
-                  placeholders::_1, placeholders::_2),
-        [](int, Timestamp) {}, PREPARE_TIMEOUT);
+        // Reply to client
+        SendRWCommmitParticipantReplyOK(reply);
 
-    // Reply to client
-    SendRWCommmitParticipantReplyOK(reply);
+    } else if (status == REPLY_FAIL) {
+        // Already aborted by coordinator
+
+        SendRWCommmitParticipantReplyFail(reply);
+
+    } else {
+        NOT_REACHABLE();
+    }
 
     delete reply;
     pending_rw_commit_p_replies_.erase(transaction_id);
@@ -974,7 +996,7 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     transport_->SendMessage(this, remote, abort_reply_);
 
     NotifyPendingRWs(notify_rws);
-    NotifyPendingRWs(notify_ros);
+    NotifyPendingROs(notify_ros);
 }
 
 void Server::SendAbortParticipants(
@@ -984,7 +1006,8 @@ void Server::SendAbortParticipants(
         shard_clients_[p]->Abort(
             transaction_id,
             [transaction_id]() {
-                Debug("[%lu] Received ABORT callback", transaction_id);
+                Debug("[%lu] Received ABORT participant callback",
+                      transaction_id);
             },
             []() {}, ABORT_TIMEOUT);
     }
@@ -1027,15 +1050,15 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     uint64_t transaction_id = request.txnid();
 
     if (request.op() == strongstore::proto::Request::PREPARE) {
-        store_.Prepare(transaction_id, Transaction(request.prepare().txn()),
-                       Timestamp(request.prepare().timestamp()));
+        const Transaction transaction{request.prepare().txn()};
+        const Timestamp prepare_timestamp{request.prepare().timestamp()};
+        status = store_.Prepare(transaction_id, transaction, prepare_timestamp);
     } else if (request.op() == strongstore::proto::Request::COMMIT) {
         Debug("[%lu] Received COMMIT", transaction_id);
         const Timestamp commit_timestamp{request.commit().commit_timestamp()};
         if (request.commit().has_transaction()) {  // Coordinator commit
-            store_.Prepare(transaction_id,
-                           Transaction(request.commit().transaction()),
-                           commit_timestamp);
+            const Transaction transaction{request.commit().transaction()};
+            store_.Prepare(transaction_id, transaction, commit_timestamp);
         }
 
         uint64_t commit_wait_ms = coordinator.CommitWaitMS(commit_timestamp);
