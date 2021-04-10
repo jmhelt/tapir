@@ -267,9 +267,7 @@ bool LockStore::Abort(uint64_t transaction_id,
         // Drop locks.
         dropLocks(transaction_id, pt.transaction(), notify_rws);
 
-        ASSERT(notify_rws.size() == 0);
-
-        prepared_.erase(search);
+        waiting_.erase(search);
     }
 
     auto search2 = prepared_.find(transaction_id);
