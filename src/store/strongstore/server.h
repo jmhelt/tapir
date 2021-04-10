@@ -130,6 +130,7 @@ class Server : public TransportReceiver,
         RequestID rid;
         Timestamp commit_timestamp;
         Timestamp nonblock_timestamp;
+        std::unordered_set<int> participants;
     };
     class PendingRWCommitParticipantReply {
        public:
@@ -200,6 +201,9 @@ class Server : public TransportReceiver,
                                    proto::RWCommitParticipant &msg);
 
     void HandleAbort(const TransportAddress &remote, proto::Abort &msg);
+
+    void SendAbortParticipants(uint64_t transaction_id,
+                               const std::unordered_set<int> &participants);
 
     void HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &msg);
     void HandlePrepareAbort(const TransportAddress &remote,

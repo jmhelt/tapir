@@ -241,21 +241,39 @@ bool LockStore::Commit(uint64_t transaction_id, const Timestamp &timestamp,
     return false;
 }
 
-void LockStore::Abort(uint64_t transaction_id,
+bool LockStore::Abort(uint64_t transaction_id,
                       std::unordered_set<uint64_t> &notify_rws,
                       std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] ABORT", transaction_id);
-    auto search = prepared_.find(transaction_id);
-    if (search != prepared_.end()) {
+    auto search = waiting_.find(transaction_id);
+    if (search != waiting_.end()) {
         const PreparedTransaction &prepared = search->second;
+
+        ASSERT(prepared.waiting_ros().size() == 0);
+
+        // Drop locks.
+        dropLocks(transaction_id, prepared.transaction(), notify_rws);
+
+        ASSERT(notify_rws.size() == 0);
+
+        prepared_.erase(search);
+    }
+
+    auto search2 = prepared_.find(transaction_id);
+    if (search2 != prepared_.end()) {
+        const PreparedTransaction &prepared = search2->second;
 
         notify_ros = std::move(prepared.waiting_ros());
 
         // Drop locks.
         dropLocks(transaction_id, prepared.transaction(), notify_rws);
 
-        prepared_.erase(search);
+        prepared_.erase(search2);
+
+        return true;
     }
+
+    return false;
 }
 
 void LockStore::ReleaseLocks(uint64_t transaction_id,
