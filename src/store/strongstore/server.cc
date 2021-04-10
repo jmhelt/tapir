@@ -439,6 +439,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
     const std::unordered_set<int> participants{msg.participants().begin(),
                                                msg.participants().end()};
 
+    int n_participants = static_cast<int>(participants.size()) - 1;
+
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
@@ -446,8 +448,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
 
     Debug("[%lu] Coordinator for transaction", transaction_id);
 
-    Decision d = coordinator.StartTransaction(
-        client_id, transaction_id, participants.size() - 1, transaction);
+    Decision d = coordinator.StartTransaction(client_id, transaction_id,
+                                              n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("[%lu] Trying fast path commit", transaction_id);
         const Timestamp prepare_timestamp{

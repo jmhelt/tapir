@@ -21,7 +21,7 @@ Transaction &Coordinator::GetTransaction(uint64_t transaction_id) {
 
 Decision Coordinator::StartTransaction(uint64_t client_id,
                                        uint64_t transaction_id,
-                                       uint64_t n_participants,
+                                       int n_participants,
                                        Transaction transaction) {
     if (aborted_transactions_.find(transaction_id) !=
         aborted_transactions_.end()) {
@@ -30,7 +30,7 @@ Decision Coordinator::StartTransaction(uint64_t client_id,
 
     auto now = tt_.Now();
     Timestamp start_timestamp{now.latest(), client_id};
-    Debug("Coordinator: StartTransaction %lu %lu.%lu %lu", transaction_id,
+    Debug("Coordinator: StartTransaction %lu %lu.%lu %d", transaction_id,
           start_timestamp.getTimestamp(), start_timestamp.getID(),
           n_participants);
 
