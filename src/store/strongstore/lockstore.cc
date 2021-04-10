@@ -43,6 +43,7 @@ LockStore::LockStore(Consistency consistency)
       locks_{},
       prepared_{},
       waiting_{},
+      aborted_{},
       stats_{},
       consistency_{consistency} {}
 LockStore::~LockStore() {}
@@ -200,6 +201,11 @@ int LockStore::Prepare(uint64_t transaction_id, const Transaction &transaction,
         return REPLY_OK;
     }
 
+    if (aborted_.find(transaction_id) != aborted_.end()) {
+        Debug("[%lu] Already aborted", transaction_id);
+        return REPLY_FAIL;
+    }
+
     int status = getLocks(transaction_id, transaction);
 
     PreparedTransaction pt{transaction_id, transaction};
@@ -245,14 +251,21 @@ bool LockStore::Abort(uint64_t transaction_id,
                       std::unordered_set<uint64_t> &notify_rws,
                       std::unordered_set<uint64_t> &notify_ros) {
     Debug("[%lu] ABORT", transaction_id);
+
+    if (aborted_.find(transaction_id) != aborted_.end()) {
+        Debug("[%lu] already aborted", transaction_id);
+        return false;
+    }
+
+    bool prepared = false;
     auto search = waiting_.find(transaction_id);
     if (search != waiting_.end()) {
-        const PreparedTransaction &prepared = search->second;
+        const PreparedTransaction &pt = search->second;
 
-        ASSERT(prepared.waiting_ros().size() == 0);
+        ASSERT(pt.waiting_ros().size() == 0);
 
         // Drop locks.
-        dropLocks(transaction_id, prepared.transaction(), notify_rws);
+        dropLocks(transaction_id, pt.transaction(), notify_rws);
 
         ASSERT(notify_rws.size() == 0);
 
@@ -261,19 +274,31 @@ bool LockStore::Abort(uint64_t transaction_id,
 
     auto search2 = prepared_.find(transaction_id);
     if (search2 != prepared_.end()) {
-        const PreparedTransaction &prepared = search2->second;
+        const PreparedTransaction &pt = search2->second;
 
-        notify_ros = std::move(prepared.waiting_ros());
+        Debug("[%lu] waiting ros:", transaction_id);
+        for (uint64_t waiting_ro : pt.waiting_ros()) {
+            Debug("[%lu] waiting_ro: %lu", transaction_id, waiting_ro);
+        }
+
+        notify_ros = std::move(pt.waiting_ros());
+
+        Debug("[%lu] notify_ros:", transaction_id);
+        for (uint64_t waiting_ro : notify_ros) {
+            Debug("[%lu] waiting_ro: %lu", transaction_id, waiting_ro);
+        }
 
         // Drop locks.
-        dropLocks(transaction_id, prepared.transaction(), notify_rws);
+        dropLocks(transaction_id, pt.transaction(), notify_rws);
 
         prepared_.erase(search2);
 
-        return true;
+        prepared = true;
     }
 
-    return false;
+    aborted_.insert(transaction_id);
+
+    return prepared;
 }
 
 void LockStore::ReleaseLocks(uint64_t transaction_id,

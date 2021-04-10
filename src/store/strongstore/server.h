@@ -188,6 +188,8 @@ class Server : public TransportReceiver,
 
     void SendRWCommmitParticipantReplyOK(
         PendingRWCommitParticipantReply *reply);
+    void SendRWCommmitParticipantReplyFail(
+        PendingRWCommitParticipantReply *reply);
     void SendRWCommmitParticipantReplyFail(const TransportAddress &remote,
                                            uint64_t client_id,
                                            uint64_t client_req_id);

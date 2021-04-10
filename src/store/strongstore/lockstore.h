@@ -152,6 +152,7 @@ class LockStore {
 
     std::unordered_map<uint64_t, PreparedTransaction> prepared_;
     std::unordered_map<uint64_t, PreparedTransaction> waiting_;
+    std::unordered_set<uint64_t> aborted_;
 
     Stats stats_;
 
