@@ -468,6 +468,8 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     t_id++;
 
     const Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
+    Debug("commit_timestamp: %lu.%lu", commit_timestamp.getTimestamp(),
+          commit_timestamp.getID());
 
     std::unordered_map<int, std::vector<std::string>> sharded_keys;
 
@@ -531,6 +533,8 @@ void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status,
 
         // TODO: Implement full client-side RSS protocol
         min_read_timestamp_ = std::max(min_read_timestamp_, max_read_timestamp);
+        Debug("min_read_timestamp_: %lu.%lu",
+              min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
         Debug("[%lu] COMMIT OK", t_id);
         ccb(COMMITTED);
     }
