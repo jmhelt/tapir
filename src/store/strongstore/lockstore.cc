@@ -104,6 +104,12 @@ int LockStore::ROBegin(uint64_t transaction_id,
                 transaction_id, commit_timestamp.getTimestamp(),
                 pt.nonblock_timestamp().getTimestamp());
             continue;
+        } else {
+            Debug("min: %lu >= %lu", min_timestamp.getTimestamp(),
+                  pt.prepare_timestamp().getTimestamp());
+
+            Debug("nb: %lu >= %lu", commit_timestamp.getTimestamp(),
+                  pt.nonblock_timestamp().getTimestamp());
         }
 
         const Transaction &transaction = pt.transaction();
