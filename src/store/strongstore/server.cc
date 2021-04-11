@@ -210,8 +210,8 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
         const Transaction &transaction =
             coordinator.GetTransaction(transaction_id);
 
-        const Timestamp prepare_timestamp{
-            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+        const Timestamp prepare_timestamp{ts, client_id};
         min_prepare_timestamp_ = prepare_timestamp;
         int status = store_.ContinuePrepare(transaction_id, prepare_timestamp,
                                             notify_rws);
@@ -261,8 +261,8 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
         std::unordered_set<uint64_t> notify_rws;
 
-        const Timestamp prepare_timestamp{
-            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+        const Timestamp prepare_timestamp{ts, client_id};
         min_prepare_timestamp_ = prepare_timestamp;
 
         const int status = store_.ContinuePrepare(
@@ -457,8 +457,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                                               n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("[%lu] Trying fast path commit", transaction_id);
-        const Timestamp prepare_timestamp{
-            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+        const Timestamp prepare_timestamp{ts, client_id};
         min_prepare_timestamp_ = prepare_timestamp;
         int status = store_.Prepare(transaction_id, transaction,
                                     prepare_timestamp, nonblock_timestamp);
@@ -680,8 +680,8 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
-    const Timestamp prepare_timestamp{min_prepare_timestamp_.getTimestamp() + 1,
-                                      client_id};
+    uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+    const Timestamp prepare_timestamp{ts, client_id};
     min_prepare_timestamp_ = prepare_timestamp;
 
     int status = store_.Prepare(transaction_id, transaction, prepare_timestamp,
@@ -766,8 +766,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
     if (status == REPLY_OK) {
         if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
                           notify_ros)) {
-            min_prepare_timestamp_ =
-                std::max(min_prepare_timestamp_, commit_timestamp);
+            min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
         }
 
         // TODO: Handle timeout
@@ -859,8 +858,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Transaction &transaction = coordinator.GetTransaction(transaction_id);
         Debug("[%lu] Received Prepare OK from all participants",
               transaction_id);
-        const Timestamp prepare_timestamp{
-            min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+        const Timestamp prepare_timestamp{ts, client_id};
         min_prepare_timestamp_ = prepare_timestamp;
         int status =
             store_.Prepare(transaction_id, transaction, prepare_timestamp,
@@ -1077,10 +1076,8 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 Debug("[%lu] commiting", transaction_id);
                 std::unordered_set<uint64_t> notify_rws;
                 std::unordered_set<uint64_t> notify_ros;
-                if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
-                                  notify_ros)) {
-                    min_prepare_timestamp_ =
-                        std::max(min_prepare_timestamp_, commit_timestamp);
+                if (store_.Commit(transaction_id, commit_timestamp, notify_rws, notify_ros)) {
+                    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
                 }
 
                 NotifyPendingRWs(notify_rws);
