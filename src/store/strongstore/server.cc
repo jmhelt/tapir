@@ -212,6 +212,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 
         const Timestamp prepare_timestamp{
             min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        min_prepare_timestamp_ = prepare_timestamp;
         int status = store_.ContinuePrepare(transaction_id, prepare_timestamp,
                                             notify_rws);
         if (status == REPLY_OK) {
@@ -262,6 +263,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
         const Timestamp prepare_timestamp{
             min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        min_prepare_timestamp_ = prepare_timestamp;
 
         const int status = store_.ContinuePrepare(
             transaction_id, prepare_timestamp, notify_rws);
@@ -364,6 +366,7 @@ void Server::SendROCommitReply(PendingROCommitReply *reply) {
         value.first.serialize(rreply->mutable_timestamp());
     }
 
+    // TODO: is this correct?
     min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
 
     const TransportAddress *remote = reply->rid.addr();
@@ -424,6 +427,7 @@ void Server::HandleROCommit(const TransportAddress &remote,
         value.first.serialize(rreply->mutable_timestamp());
     }
 
+    // TODO: is this correct?
     min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
 
     transport_->SendMessage(this, remote, ro_commit_reply_);
@@ -455,6 +459,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
         Debug("[%lu] Trying fast path commit", transaction_id);
         const Timestamp prepare_timestamp{
             min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        min_prepare_timestamp_ = prepare_timestamp;
         int status = store_.Prepare(transaction_id, transaction,
                                     prepare_timestamp, nonblock_timestamp);
         Debug("[%lu] store prepare returned status %d", transaction_id, status);
@@ -677,6 +682,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
 
     const Timestamp prepare_timestamp{min_prepare_timestamp_.getTimestamp() + 1,
                                       client_id};
+    min_prepare_timestamp_ = prepare_timestamp;
 
     int status = store_.Prepare(transaction_id, transaction, prepare_timestamp,
                                 nonblock_timestamp);
@@ -855,6 +861,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
               transaction_id);
         const Timestamp prepare_timestamp{
             min_prepare_timestamp_.getTimestamp() + 1, client_id};
+        min_prepare_timestamp_ = prepare_timestamp;
         int status =
             store_.Prepare(transaction_id, transaction, prepare_timestamp,
                            coord_reply->nonblock_timestamp);
