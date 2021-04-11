@@ -196,7 +196,24 @@ void Server::ContinueGet(uint64_t transaction_id) {
 }
 
 const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
-    uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+    const TrueTimeInterval now = tt_.Now();
+    uint64_t temp = now.earliest();
+
+    switch (shard_idx_) {
+        case 0:
+            temp = now.earliest() + (73 * 1000);
+            break;
+        case 1:
+            temp = now.earliest() + (73 * 1000);
+            break;
+        case 2:
+            temp = now.earliest() + (160 * 1000);
+            break;
+        default:
+            NOT_REACHABLE();
+    }
+
+    uint64_t ts = std::max(temp, min_prepare_timestamp_.getTimestamp() + 1);
     const Timestamp prepare_timestamp{ts, client_id};
     min_prepare_timestamp_ = prepare_timestamp;
 
