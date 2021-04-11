@@ -236,7 +236,7 @@ const TimestampMessage &ShardClient::FindMaxReadTimestamp(
     int max_i = 0;
 
     for (int i = 0; i < reply.values().size(); i++) {
-        auto v = reply.values().at(i);
+        auto v = reply.values()[i];
         const TimestampMessage &t = v.timestamp();
         if (t.timestamp() > max_timestamp ||
             (t.timestamp() == max_timestamp && t.id() > max_id)) {
@@ -246,7 +246,7 @@ const TimestampMessage &ShardClient::FindMaxReadTimestamp(
         }
     }
 
-    return reply.values().at(max_i).timestamp();
+    return reply.values()[max_i].timestamp();
 }
 
 void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
