@@ -195,6 +195,14 @@ void Server::ContinueGet(uint64_t transaction_id) {
     }
 }
 
+const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
+    uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
+    const Timestamp prepare_timestamp{ts, client_id};
+    min_prepare_timestamp_ = prepare_timestamp;
+
+    return prepare_timestamp;
+}
+
 void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     if (search != pending_rw_commit_c_replies_.end()) {
@@ -210,9 +218,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
         const Transaction &transaction =
             coordinator.GetTransaction(transaction_id);
 
-        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
-        const Timestamp prepare_timestamp{ts, client_id};
-        min_prepare_timestamp_ = prepare_timestamp;
+        const Timestamp prepare_timestamp = GetPrepareTimestamp(client_id);
         int status = store_.ContinuePrepare(transaction_id, prepare_timestamp,
                                             notify_rws);
         if (status == REPLY_OK) {
@@ -261,9 +267,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
         std::unordered_set<uint64_t> notify_rws;
 
-        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
-        const Timestamp prepare_timestamp{ts, client_id};
-        min_prepare_timestamp_ = prepare_timestamp;
+        const Timestamp prepare_timestamp = GetPrepareTimestamp(client_id);
 
         const int status = store_.ContinuePrepare(
             transaction_id, prepare_timestamp, notify_rws);
@@ -457,9 +461,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote,
                                               n_participants, transaction);
     if (d == Decision::TRY_COORD) {
         Debug("[%lu] Trying fast path commit", transaction_id);
-        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
-        const Timestamp prepare_timestamp{ts, client_id};
-        min_prepare_timestamp_ = prepare_timestamp;
+        const Timestamp prepare_timestamp = GetPrepareTimestamp(client_id);
         int status = store_.Prepare(transaction_id, transaction,
                                     prepare_timestamp, nonblock_timestamp);
         Debug("[%lu] store prepare returned status %d", transaction_id, status);
@@ -680,9 +682,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote,
     Transaction transaction{msg.transaction()};
     Timestamp nonblock_timestamp{msg.nonblock_timestamp()};
 
-    uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
-    const Timestamp prepare_timestamp{ts, client_id};
-    min_prepare_timestamp_ = prepare_timestamp;
+    const Timestamp prepare_timestamp = GetPrepareTimestamp(client_id);
 
     int status = store_.Prepare(transaction_id, transaction, prepare_timestamp,
                                 nonblock_timestamp);
@@ -764,8 +764,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status,
     std::unordered_set<uint64_t> notify_ros;
 
     if (status == REPLY_OK) {
-        if (store_.Commit(transaction_id, commit_timestamp, notify_rws,
-                          notify_ros)) {
+        if (store_.Commit(transaction_id, commit_timestamp, notify_rws, notify_ros)) {
             min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_timestamp);
         }
 
@@ -858,12 +857,9 @@ void Server::HandlePrepareOK(const TransportAddress &remote,
         Transaction &transaction = coordinator.GetTransaction(transaction_id);
         Debug("[%lu] Received Prepare OK from all participants",
               transaction_id);
-        uint64_t ts = std::max(tt_.Now().earliest(), min_prepare_timestamp_.getTimestamp() + 1);
-        const Timestamp prepare_timestamp{ts, client_id};
-        min_prepare_timestamp_ = prepare_timestamp;
-        int status =
-            store_.Prepare(transaction_id, transaction, prepare_timestamp,
-                           coord_reply->nonblock_timestamp);
+        const Timestamp prepare_timestamp = GetPrepareTimestamp(client_id);
+        int status = store_.Prepare(transaction_id, transaction, prepare_timestamp,
+                                    coord_reply->nonblock_timestamp);
         if (status == REPLY_OK) {
             cd = coordinator.ReceivePrepareOK(transaction_id, shard_idx_,
                                               prepare_timestamp);

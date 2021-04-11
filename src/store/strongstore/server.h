@@ -238,6 +238,8 @@ class Server : public TransportReceiver,
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
     bool NotifyPendingRO(PendingROCommitReply *reply);
 
+    const Timestamp GetPrepareTimestamp(uint64_t client_id);
+
     LockStore store_;
 
     const transport::Configuration &shard_config_;
