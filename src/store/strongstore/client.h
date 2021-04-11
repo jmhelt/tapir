@@ -130,8 +130,8 @@ class Client : public ::Client {
 
     void AbortCallback(uint64_t reqId);
 
-    void ROCommitCallback(uint64_t reqId, const Timestamp commit_timestamp,
-                          transaction_status_t status);
+    void ROCommitCallback(uint64_t reqId, transaction_status_t status,
+                          const Timestamp max_read_timestamp);
 
     // choose coordinator from participants
     void CalculateCoordinatorChoices();

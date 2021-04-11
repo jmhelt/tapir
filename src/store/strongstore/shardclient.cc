@@ -199,8 +199,8 @@ void ShardClient::ROCommit(uint64_t transaction_id,
                            const std::vector<std::string> &keys,
                            const Timestamp &commit_timestamp,
                            const Timestamp &min_read_timestamp,
-                           commit_callback ccb, commit_timeout_callback ctcb,
-                           uint32_t timeout) {
+                           ro_commit_callback ccb,
+                           ro_commit_timeout_callback ctcb, uint32_t timeout) {
     Debug("[shard %i] Sending ROCommit [%lu]", shard_idx_, transaction_id);
 
     uint64_t reqId = lastReqId++;
@@ -226,6 +226,29 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     transport_->SendMessageToReplica(this, shard_idx_, replica_, ro_commit_);
 }
 
+const TimestampMessage &ShardClient::FindMaxReadTimestamp(
+    const proto::ROCommitReply &reply) {
+    ASSERT(reply.values().size() > 0);
+
+    const TimestampMessage &first = reply.values().begin()->timestamp();
+    uint64_t max_timestamp = first.timestamp();
+    uint64_t max_id = first.id();
+    int max_i = 0;
+
+    for (int i = 0; i < reply.values().size(); i++) {
+        auto v = reply.values().at(i);
+        const TimestampMessage &t = v.timestamp();
+        if (t.timestamp() > max_timestamp ||
+            (t.timestamp() == max_timestamp && t.id() > max_id)) {
+            max_timestamp = t.timestamp();
+            max_id = t.id();
+            max_i = i;
+        }
+    }
+
+    return reply.values().at(max_i).timestamp();
+}
+
 void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
     uint64_t req_id = reply.rid().client_req_id();
 
@@ -236,11 +259,13 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
     }
 
     PendingROCommit *req = itr->second;
-    commit_callback ccb = req->ccb;
+    ro_commit_callback ccb = req->ccb;
     pendingROCommits.erase(itr);
     delete req;
 
-    ccb(COMMITTED);
+    const Timestamp max_ts{FindMaxReadTimestamp(reply)};
+
+    ccb(COMMITTED, max_ts);
 }
 
 void ShardClient::RWCommitCoordinator(

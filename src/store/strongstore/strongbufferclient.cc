@@ -79,8 +79,8 @@ void BufferClient::ROCommit(uint64_t transaction_id,
                             const std::vector<std::string> &keys,
                             const Timestamp &commit_timestamp,
                             const Timestamp &min_read_timestamp,
-                            commit_callback ccb, commit_timeout_callback ctcb,
-                            uint32_t timeout) {
+                            ro_commit_callback ccb,
+                            ro_commit_timeout_callback ctcb, uint32_t timeout) {
     shard_client_->ROCommit(transaction_id, keys, commit_timestamp,
                             min_read_timestamp, ccb, ctcb, timeout);
 }
