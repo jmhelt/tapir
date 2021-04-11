@@ -56,6 +56,10 @@ enum Mode {
     MODE_MVTSO
 };
 
+typedef std::function<void(transaction_status_t, const Timestamp &)>
+    ro_commit_callback;
+typedef std::function<void()> ro_commit_timeout_callback;
+
 class ShardClient : public TxnClient,
                     public TransportReceiver,
                     public PingInitiator,
@@ -80,8 +84,8 @@ class ShardClient : public TxnClient,
 
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,
-                  const Timestamp &min_read_timestamp, commit_callback ccb,
-                  commit_timeout_callback ctcb, uint32_t timeout);
+                  const Timestamp &min_read_timestamp, ro_commit_callback ccb,
+                  ro_commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitCoordinator(uint64_t transaction_id,
                              const Transaction &transaction,
@@ -140,8 +144,8 @@ class ShardClient : public TxnClient,
     };
     struct PendingROCommit : public PendingRequest {
         PendingROCommit(uint64_t reqId) : PendingRequest(reqId) {}
-        commit_callback ccb;
-        commit_timeout_callback ctcb;
+        ro_commit_callback ccb;
+        ro_commit_timeout_callback ctcb;
     };
 
     void HandleGetReply(const proto::GetReply &reply);
@@ -153,6 +157,9 @@ class ShardClient : public TxnClient,
     void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
     void HandleROCommitReply(const proto::ROCommitReply &reply);
     void HandleAbortReply(const proto::AbortReply &reply);
+
+    const TimestampMessage &FindMaxReadTimestamp(
+        const proto::ROCommitReply &reply);
 
     const transport::Configuration &config_;
     Transport *transport_;  // Transport layer.
