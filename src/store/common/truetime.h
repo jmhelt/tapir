@@ -18,8 +18,8 @@ class TrueTimeInterval {
 
     ~TrueTimeInterval() {}
 
-    uint64_t earliest() const { return earliest_; }
-    uint64_t latest() const { return latest_; }
+    uint64_t earliest() { return earliest_; }
+    uint64_t latest() { return latest_; }
 
    private:
     uint64_t earliest_;
