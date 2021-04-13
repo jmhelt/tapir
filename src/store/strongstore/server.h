@@ -41,6 +41,7 @@
 #include "replication/vr/client.h"
 #include "replication/vr/replica.h"
 #include "store/common/backend/pingserver.h"
+#include "store/common/backend/versionstore.h"
 #include "store/common/truetime.h"
 #include "store/server.h"
 #include "store/strongstore/common.h"
@@ -157,8 +158,6 @@ class Server : public TransportReceiver,
                              TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
-        uint64_t transaction_id;
-        uint64_t n_waiting_prepared;
         Latency_Frame_t wait_lat;
     };
     class PendingGetReply {
@@ -168,7 +167,6 @@ class Server : public TransportReceiver,
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
         std::string key;
-        Timestamp timestamp;
     };
 
     void HandleGet(const TransportAddress &remote, proto::Get &msg);
@@ -177,8 +175,6 @@ class Server : public TransportReceiver,
 
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    proto::RWCommitCoordinator &msg);
-
-    void ContinueROCommit(PendingROCommitReply *reply);
 
     void SendRWCommmitCoordinatorReplyOK(PendingRWCommitCoordinatorReply *reply,
                                          uint64_t response_delay_ms);
@@ -236,7 +232,7 @@ class Server : public TransportReceiver,
     void ContinueParticipantPrepare(uint64_t transaction_id);
 
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
-    bool NotifyPendingRO(PendingROCommitReply *reply);
+    void ContinueROCommit(uint64_t transaction_id);
 
     const Timestamp GetPrepareTimestamp(uint64_t client_id);
     void CommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
@@ -244,7 +240,8 @@ class Server : public TransportReceiver,
     const TrueTime &tt_;
     TransactionStore transactions_;
     LockTable locks_;
-    LockStore store_;
+    VersionedKVStore<Timestamp, std::string> store_;
+    LockStore store_old_;
 
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
