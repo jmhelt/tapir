@@ -42,9 +42,14 @@ class ReplicaClient {
                  prepare_timeout_callback ptcb, uint32_t timeout);
 
     void CoordinatorCommit(uint64_t transaction_id,
-                           const Transaction transaction,
-                           Timestamp &commit_timestamp, commit_callback ccb,
-                           commit_timeout_callback ctcb, uint32_t timeout);
+                           const Timestamp &start_ts, int coordinator,
+                           const std::unordered_set<int> participants,
+                           const Transaction &transaction,
+                           const Timestamp &nonblock_ts,
+                           const Timestamp &commit_ts,
+                           commit_callback ccb,
+                           commit_timeout_callback ctcb,
+                           uint32_t timeout);
 
     void Commit(uint64_t transaction_id, Timestamp &commit_timestamp,
                 commit_callback ccb, commit_timeout_callback ctcb,

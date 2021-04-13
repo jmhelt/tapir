@@ -111,12 +111,15 @@ message ROCommitReply {
 
 message PrepareMessage {
     required TransactionMessage txn = 1;
-    optional TimestampMessage timestamp = 2;
+    optional TimestampMessage start_ts = 2;
+    optional int32 coordinator_shard = 3;
+    repeated int32 participants = 4;
+    optional TimestampMessage nonblock_ts = 5;
+    optional TimestampMessage timestamp = 6;
 }
 
 message CommitMessage {
     required TimestampMessage commit_timestamp = 1;
-    optional TransactionMessage transaction = 2;
 }
 
 message Request {

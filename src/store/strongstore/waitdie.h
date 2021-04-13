@@ -30,6 +30,7 @@ class WaitDie {
     ~WaitDie();
 
     const LockState GetLockState(const std::string &lock) const;
+    bool HasReadLock(const std::string &lock, uint64_t requester) const;
 
     int LockForRead(const std::string &lock, uint64_t requester,
                     const Timestamp &start_timestamp);
@@ -95,6 +96,8 @@ class WaitDie {
                               std::unordered_set<uint64_t> &notify_rws);
 
         const LockState state() const { return state_; }
+
+        const std::unordered_set<uint64_t> &holders() const { return holders_; };
 
        private:
         LockState state_;

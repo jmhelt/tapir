@@ -77,22 +77,34 @@ bool ReplicaClient::PrepareCallback(uint64_t reqId, const string &request_str,
 }
 
 void ReplicaClient::CoordinatorCommit(uint64_t transaction_id,
-                                      const Transaction transaction,
-                                      Timestamp &commit_timestamp,
+                                      const Timestamp &start_ts, int coordinator,
+                                      const std::unordered_set<int> participants,
+                                      const Transaction &transaction,
+                                      const Timestamp &nonblock_ts,
+                                      const Timestamp &commit_ts,
                                       commit_callback ccb,
                                       commit_timeout_callback ctcb,
                                       uint32_t timeout) {
-    Debug("[shard %i] Sending fast path COMMIT: %lu", shard_idx_,
-          transaction_id);
+    Debug("[shard %i] Sending fast path COMMIT: %lu", shard_idx_, transaction_id);
 
     // create commit request
     string request_str;
     Request request;
     request.set_op(Request::COMMIT);
     request.set_txnid(transaction_id);
-    commit_timestamp.serialize(
-        request.mutable_commit()->mutable_commit_timestamp());
-    transaction.serialize(request.mutable_commit()->mutable_transaction());
+
+    auto prepare = request.mutable_prepare();
+
+    start_ts.serialize(prepare->mutable_start_ts());
+    prepare->set_coordinator_shard(coordinator);
+    for (int p : participants) {
+        prepare->add_participants(p);
+    }
+    transaction.serialize(prepare->mutable_txn());
+    nonblock_ts.serialize(prepare->mutable_nonblock_ts());
+
+    commit_ts.serialize(request.mutable_commit()->mutable_commit_timestamp());
+
     request.SerializeToString(&request_str);
 
     uint64_t reqId = lastReqId++;
