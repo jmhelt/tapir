@@ -429,6 +429,20 @@ const LockState WaitDie::GetLockState(const std::string &lock) const {
     return search->second.state();
 }
 
+bool WaitDie::HasReadLock(const std::string &lock, uint64_t requester) const {
+    auto search = locks.find(lock);
+    if (search == locks.end()) {
+        return false;
+    }
+
+    const Lock &l = search->second;
+    if (l.state() != LOCKED_FOR_READ && l.state() != LOCKED_FOR_READ_WRITE) {
+        return false;
+    }
+
+    return l.holders().count(requester) > 0;
+}
+
 int WaitDie::LockForRead(const string &lock, uint64_t requester,
                          const Timestamp &start_timestamp) {
     Lock &l = locks[lock];
