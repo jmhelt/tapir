@@ -36,11 +36,12 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 1,
+  "client_total": 2,
   "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "clients": [
-    "client-0-0"
+    "client-0-0",
+    "client-1-0"
   ],
   "server_regions": {
     "us-east-1": [

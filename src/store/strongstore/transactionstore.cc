@@ -28,30 +28,36 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
     commit_ts_ = std::max(commit_ts_, start_ts);
 
     if (participants_.size() == 1) {
-        status_ = PREPARING;
+        state_ = PREPARING;
     } else {
-        status_ = WAIT_PARTICIPANTS;
+        state_ = WAIT_PARTICIPANTS;
     }
 }
 
 void TransactionStore::PendingRWTransaction::FinishCoordinatorPrepare(const Timestamp &prepare_ts) {
     prepare_ts_ = std::max(prepare_ts_, prepare_ts);
     commit_ts_ = prepare_ts_;
-    status_ = PREPARED;
+    state_ = COMMITTING;
 }
 
 void TransactionStore::PendingROTransaction::StartRO(const std::unordered_set<std::string> &keys,
                                                      const Timestamp &min_ts,
-                                                     const Timestamp &commit_ts) {
+                                                     const Timestamp &commit_ts,
+                                                     uint64_t n_conflicts) {
     keys_.insert(keys.begin(), keys.end());
     min_ts_ = min_ts;
     commit_ts_ = commit_ts;
-    status_ = PREPARING;
+    n_conflicts_ = n_conflicts;
+    if (n_conflicts_ == 0) {
+        state_ = COMMITTING;
+    } else {
+        state_ = PREPARE_WAIT;
+    }
 }
 
 void TransactionStore::StartGet(uint64_t transaction_id, const std::string &key) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READING);
+    ASSERT(pt.state() == READING);
 
     pt.AddReadSet(key);
 }
@@ -59,14 +65,14 @@ void TransactionStore::StartGet(uint64_t transaction_id, const std::string &key)
 void TransactionStore::FinishGet(uint64_t transaction_id, const std::string &key) {
     (void)key;
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READING);
+    ASSERT(pt.state() == READING);
 }
 
 void TransactionStore::AbortGet(uint64_t transaction_id, const std::string &key) {
     (void)key;
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READING ||
-           pt.status() == READ_WAIT);
+    ASSERT(pt.state() == READING ||
+           pt.state() == READ_WAIT);
 
     pending_rw_.erase(transaction_id);
     aborted_.insert(transaction_id);
@@ -75,49 +81,57 @@ void TransactionStore::AbortGet(uint64_t transaction_id, const std::string &key)
 void TransactionStore::PauseGet(uint64_t transaction_id, const std::string &key) {
     (void)key;
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READING);
+    ASSERT(pt.state() == READING);
 
-    pt.set_status(READ_WAIT);
+    pt.set_state(READ_WAIT);
 }
 
 void TransactionStore::ContinueGet(uint64_t transaction_id, const std::string &key) {
     (void)key;
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READ_WAIT);
+    ASSERT(pt.state() == READ_WAIT);
 
-    pt.set_status(READING);
+    pt.set_state(READING);
 }
 
-TransactionStatus TransactionStore::StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
-                                                            int coordinator, const std::unordered_set<int> participants,
-                                                            const Transaction &transaction,
-                                                            const Timestamp &nonblock_ts) {
+TransactionState TransactionStore::StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
+                                                           int coordinator, const std::unordered_set<int> participants,
+                                                           const Transaction &transaction,
+                                                           const Timestamp &nonblock_ts) {
     if (aborted_.count(transaction_id) > 0) {
         return ABORTED;
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == READING);
+    ASSERT(pt.state() == READING);
 
     Debug("[%lu] Coordinator: StartTransaction %lu.%lu", transaction_id, start_ts.getTimestamp(), start_ts.getID());
 
     pt.StartCoordinatorPrepare(start_ts, coordinator, participants, transaction, nonblock_ts);
 
-    return pt.status();
+    return pt.state();
 }
 
 void TransactionStore::FinishCoordinatorPrepare(uint64_t transaction_id, const Timestamp &prepare_ts) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARING);
+    ASSERT(pt.state() == PREPARING);
     pt.FinishCoordinatorPrepare(prepare_ts);
 }
 
-TransactionStatus TransactionStore::GetTransactionStatus(uint64_t transaction_id) {
+TransactionState TransactionStore::GetTransactionState(uint64_t transaction_id) {
+    if (committed_.count(transaction_id) > 0) {
+        return COMMITTED;
+    }
+
+    if (aborted_.count(transaction_id) > 0) {
+        return ABORTED;
+    }
+
     auto search = pending_rw_.find(transaction_id);
     if (search == pending_rw_.end()) {
-        return READING;
+        return NOT_FOUND;
     } else {
-        return search->second.status();
+        return search->second.state();
     }
 }
 
@@ -147,27 +161,27 @@ const Transaction &TransactionStore::GetTransaction(uint64_t transaction_id) {
 
 const Timestamp &TransactionStore::GetRWCommitTimestamp(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARED);
+    ASSERT(pt.state() == COMMITTING);
     return pt.commit_ts();
 }
 
 const Timestamp &TransactionStore::GetROCommitTimestamp(uint64_t transaction_id) {
     PendingROTransaction &pt = pending_ro_[transaction_id];
-    ASSERT(pt.status() == PREPARED);
+    ASSERT(pt.state() == COMMITTING);
     return pt.commit_ts();
 }
 
 const std::unordered_set<std::string> &TransactionStore::GetROKeys(uint64_t transaction_id) {
     PendingROTransaction &pt = pending_ro_[transaction_id];
-    ASSERT(pt.status() == PREPARED);
+    ASSERT(pt.state() == COMMITTING);
     return pt.keys();
 }
 
 void TransactionStore::AbortPrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARING ||
-           pt.status() == PREPARE_WAIT ||
-           pt.status() == WAIT_PARTICIPANTS);
+    ASSERT(pt.state() == PREPARING ||
+           pt.state() == PREPARE_WAIT ||
+           pt.state() == WAIT_PARTICIPANTS);
 
     pending_rw_.erase(transaction_id);
     aborted_.insert(transaction_id);
@@ -175,15 +189,29 @@ void TransactionStore::AbortPrepare(uint64_t transaction_id) {
 
 void TransactionStore::PausePrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARING);
+    ASSERT(pt.state() == PREPARING);
 
-    pt.set_status(PREPARE_WAIT);
+    pt.set_state(PREPARE_WAIT);
 }
 void TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARE_WAIT);
+    ASSERT(pt.state() == PREPARE_WAIT);
 
-    pt.set_status(PREPARING);
+    pt.set_state(PREPARING);
+}
+
+void TransactionStore::NotifyROs(std::unordered_set<uint64_t> &ros) {
+    for (auto it = ros.begin(); it != ros.end();) {
+        ASSERT(pending_ro_.find(*it) != pending_ro_.end());
+        PendingROTransaction &pt = pending_ro_[*it];
+        pt.decr_conflicts();
+
+        if (pt.n_conflicts() > 0) {
+            it = ros.erase(it);
+        } else {
+            it++;
+        }
+    }
 }
 
 TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
@@ -192,9 +220,10 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
     TransactionFinishResult r;
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.status() == PREPARED);
+    ASSERT(pt.state() == COMMITTING);
 
     r.notify_ros = std::move(pt.waiting_ros());
+    NotifyROs(r.notify_ros);
 
     pending_rw_.erase(transaction_id);
     committed_.insert(transaction_id);
@@ -202,14 +231,31 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
     return r;
 }
 
-uint64_t TransactionStore::StartRO(uint64_t transaction_id,
-                                   const std::unordered_set<std::string> &keys,
-                                   const Timestamp &min_ts,
-                                   const Timestamp &commit_ts) {
-    PendingROTransaction &ro = pending_ro_[transaction_id];
-    ASSERT(ro.status() == PREPARING);
+TransactionFinishResult TransactionStore::Abort(uint64_t transaction_id) {
+    Debug("[%lu] ABORT", transaction_id);
 
-    ro.StartRO(keys, min_ts, commit_ts);
+    TransactionFinishResult r;
+
+    PendingRWTransaction &pt = pending_rw_[transaction_id];
+    ASSERT(pt.state() != COMMITTING &&
+           pt.state() != COMMITTED &&
+           pt.state() != ABORTED);
+
+    r.notify_ros = std::move(pt.waiting_ros());
+    NotifyROs(r.notify_ros);
+
+    pending_rw_.erase(transaction_id);
+    aborted_.insert(transaction_id);
+
+    return r;
+}
+
+TransactionState TransactionStore::StartRO(uint64_t transaction_id,
+                                           const std::unordered_set<std::string> &keys,
+                                           const Timestamp &min_ts,
+                                           const Timestamp &commit_ts) {
+    PendingROTransaction &ro = pending_ro_[transaction_id];
+    ASSERT(ro.state() == PREPARING);
 
     uint64_t n_conflicts = 0;
 
@@ -218,7 +264,7 @@ uint64_t TransactionStore::StartRO(uint64_t transaction_id,
     for (auto &p : pending_rw_) {
         PendingRWTransaction &rw = p.second;
 
-        if (rw.status() != PREPARED) {
+        if (rw.state() != PREPARED && rw.state() != COMMITTING) {
             continue;
         }
 
@@ -253,28 +299,24 @@ uint64_t TransactionStore::StartRO(uint64_t transaction_id,
         }
     }
 
-    if (n_conflicts == 0) {
-        ro.set_status(PREPARED);
-    } else {
-        ro.set_status(PREPARE_WAIT);
-    }
+    ro.StartRO(keys, min_ts, commit_ts, n_conflicts);
 
     stats_.IncrementList("n_conflicting_prepared", n_conflicts);
-    return n_conflicts;
+    return ro.state();
 }
 
 void TransactionStore::ContinueRO(uint64_t transaction_id) {
     PendingROTransaction &ro = pending_ro_[transaction_id];
-    ASSERT(ro.status() == PREPARE_WAIT);
+    ASSERT(ro.state() == PREPARE_WAIT);
 
-    ro.set_status(PREPARED);
+    ro.set_state(COMMITTING);
 }
 
 void TransactionStore::CommitRO(uint64_t transaction_id) {
     PendingROTransaction &ro = pending_ro_[transaction_id];
-    ASSERT(ro.status() == PREPARED);
+    ASSERT(ro.state() == COMMITTING);
 
-    ro.set_status(COMMITTED);
+    ro.set_state(COMMITTED);
     pending_ro_.erase(transaction_id);
     committed_.insert(transaction_id);
 }

@@ -52,19 +52,6 @@ class LockStore {
     LockStore(Consistency consistency);
     ~LockStore();
 
-    int Get(uint64_t transaction_id, const Timestamp &start_timestamp,
-            const std::string &key, std::pair<Timestamp, std::string> &value);
-
-    int ROBegin(uint64_t transaction_id,
-                const std::unordered_set<std::string> &keys,
-                const Timestamp &commit_timestamp,
-                const Timestamp &min_timestamp,
-                uint64_t &n_conflicting_prepared);
-
-    int ROGet(uint64_t transaction_id, const std::string &key,
-              const Timestamp &timestamp,
-              std::pair<Timestamp, std::string> &value);
-
     int Prepare(uint64_t transaction_id, const Transaction &transaction,
                 const Timestamp &prepare_timestamp);
     int Prepare(uint64_t transaction_id, const Transaction &transaction,
@@ -84,9 +71,6 @@ class LockStore {
                std::unordered_set<uint64_t> &notify_ros);
     void ReleaseLocks(uint64_t transaction_id, const Transaction &transaction,
                       std::unordered_set<uint64_t> &notify_rws);
-
-    void Load(const std::string &key, const std::string &value,
-              const Timestamp &timestamp);
 
     Stats &GetStats() { return stats_; };
 
