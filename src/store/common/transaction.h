@@ -45,14 +45,16 @@ class Transaction {
     Transaction(const TransactionMessage &msg);
     ~Transaction();
 
-    const Timestamp &get_start_time() const;
+    const Timestamp &start_time() const;
     const std::unordered_map<std::string, Timestamp> &getReadSet() const;
     const std::unordered_map<std::string, std::string> &getWriteSet() const;
+    void serialize(TransactionMessage *msg) const;
 
     void addReadSet(const std::string &key, const Timestamp &readTime);
     void addWriteSet(const std::string &key, const std::string &value);
     void set_start_time(const Timestamp &ts);
-    void serialize(TransactionMessage *msg) const;
+
+    void add_read_write_sets(const Transaction &other);
 };
 
 #endif /* _TRANSACTION_H_ */

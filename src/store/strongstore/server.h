@@ -46,10 +46,12 @@
 #include "store/strongstore/common.h"
 #include "store/strongstore/coordinator.h"
 #include "store/strongstore/lockstore.h"
+#include "store/strongstore/locktable.h"
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/replicaclient.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
+#include "store/strongstore/transactionstore.h"
 
 namespace strongstore {
 
@@ -156,9 +158,7 @@ class Server : public TransportReceiver,
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
         uint64_t transaction_id;
-        Timestamp commit_timestamp;
         uint64_t n_waiting_prepared;
-        std::unordered_set<std::string> keys;
         Latency_Frame_t wait_lat;
     };
     class PendingGetReply {
@@ -178,7 +178,7 @@ class Server : public TransportReceiver,
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    proto::RWCommitCoordinator &msg);
 
-    void SendROCommitReply(PendingROCommitReply *reply);
+    void ContinueROCommit(PendingROCommitReply *reply);
 
     void SendRWCommmitCoordinatorReplyOK(PendingRWCommitCoordinatorReply *reply,
                                          uint64_t response_delay_ms);
@@ -239,7 +239,11 @@ class Server : public TransportReceiver,
     bool NotifyPendingRO(PendingROCommitReply *reply);
 
     const Timestamp GetPrepareTimestamp(uint64_t client_id);
+    void CommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
 
+    const TrueTime &tt_;
+    TransactionStore transactions_;
+    LockTable locks_;
     LockStore store_;
 
     const transport::Configuration &shard_config_;
@@ -249,7 +253,6 @@ class Server : public TransportReceiver,
     ReplicaClient *replica_client_;
 
     Transport *transport_;
-    const TrueTime &tt_;
     Coordinator coordinator;
 
     uint64_t server_id_;

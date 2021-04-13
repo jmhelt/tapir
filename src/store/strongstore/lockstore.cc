@@ -347,7 +347,7 @@ void LockStore::dropLocks(uint64_t transaction_id,
 
 int LockStore::getLocks(uint64_t transaction_id,
                         const Transaction &transaction) {
-    const Timestamp &start_timestamp = transaction.get_start_time();
+    const Timestamp &start_timestamp = transaction.start_time();
     Debug("start_time: %lu.%lu", start_timestamp.getTimestamp(),
           start_timestamp.getID());
     int ret = REPLY_OK;
