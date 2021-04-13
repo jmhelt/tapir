@@ -15,13 +15,15 @@
 
 namespace strongstore {
 
-enum TransactionStatus {
+enum TransactionState {
+    NOT_FOUND,
     READING,
     READ_WAIT,
     PREPARING,
     WAIT_PARTICIPANTS,
     PREPARE_WAIT,
     PREPARED,
+    COMMITTING,
     COMMITTED,
     ABORTED
 };
@@ -35,7 +37,7 @@ class TransactionStore {
     TransactionStore(const TrueTime &tt, Consistency consistency);
     ~TransactionStore();
 
-    TransactionStatus GetTransactionStatus(uint64_t transaction_id);
+    TransactionState GetTransactionState(uint64_t transaction_id);
     const Transaction &GetTransaction(uint64_t transaction_id);
     const Timestamp &GetRWCommitTimestamp(uint64_t transaction_id);
     const Timestamp &GetStartTimestamp(uint64_t transaction_id);
@@ -45,10 +47,10 @@ class TransactionStore {
     const Timestamp &GetROCommitTimestamp(uint64_t transaction_id);
     const std::unordered_set<std::string> &GetROKeys(uint64_t transaction_id);
 
-    uint64_t StartRO(uint64_t transaction_id,
-                     const std::unordered_set<std::string> &keys,
-                     const Timestamp &min_ts,
-                     const Timestamp &commit_ts);
+    TransactionState StartRO(uint64_t transaction_id,
+                             const std::unordered_set<std::string> &keys,
+                             const Timestamp &min_ts,
+                             const Timestamp &commit_ts);
     void ContinueRO(uint64_t transaction_id);
     void CommitRO(uint64_t transaction_id);
 
@@ -58,10 +60,10 @@ class TransactionStore {
     void PauseGet(uint64_t transaction_id, const std::string &key);
     void ContinueGet(uint64_t transaction_id, const std::string &key);
 
-    TransactionStatus StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
-                                              int coordinator, const std::unordered_set<int> participants,
-                                              const Transaction &transaction,
-                                              const Timestamp &nonblock_ts);
+    TransactionState StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
+                                             int coordinator, const std::unordered_set<int> participants,
+                                             const Transaction &transaction,
+                                             const Timestamp &nonblock_ts);
     void FinishCoordinatorPrepare(uint64_t transaction_id, const Timestamp &prepare_ts);
     void AbortPrepare(uint64_t transaction_id);
     void PausePrepare(uint64_t transaction_id);
@@ -75,11 +77,11 @@ class TransactionStore {
    private:
     class PendingRWTransaction {
        public:
-        PendingRWTransaction() : status_{READING} {}
+        PendingRWTransaction() : state_{READING} {}
         ~PendingRWTransaction() {}
 
-        TransactionStatus status() const { return status_; }
-        void set_status(TransactionStatus s) { status_ = s; }
+        TransactionState state() const { return state_; }
+        void set_state(TransactionState s) { state_ = s; }
 
         const Timestamp &start_ts() const { return start_ts_; }
         const Timestamp &nonblock_ts() const { return nonblock_ts_; }
@@ -112,30 +114,37 @@ class TransactionStore {
         Timestamp prepare_ts_;
         Timestamp commit_ts_;
         int coordinator_;
-        TransactionStatus status_;
+        TransactionState state_;
     };
 
     class PendingROTransaction {
        public:
-        PendingROTransaction() : status_{PREPARING} {}
+        PendingROTransaction() : state_{PREPARING} {}
         ~PendingROTransaction() {}
 
-        TransactionStatus status() const { return status_; }
-        void set_status(TransactionStatus s) { status_ = s; }
+        TransactionState state() const { return state_; }
+        void set_state(TransactionState s) { state_ = s; }
+
+        uint64_t n_conflicts() const { return n_conflicts_; }
+        void decr_conflicts() { n_conflicts_ -= 1; }
 
         const Timestamp &commit_ts() const { return commit_ts_; }
         const std::unordered_set<std::string> &keys() const { return keys_; }
 
         void StartRO(const std::unordered_set<std::string> &keys,
                      const Timestamp &min_ts,
-                     const Timestamp &commit_ts);
+                     const Timestamp &commit_ts,
+                     uint64_t n_conflicts);
 
        private:
         std::unordered_set<std::string> keys_;
         Timestamp min_ts_;
         Timestamp commit_ts_;
-        TransactionStatus status_;
+        uint64_t n_conflicts_;
+        TransactionState state_;
     };
+
+    void NotifyROs(std::unordered_set<uint64_t> &ros);
 
     const TrueTime &tt_;
     std::unordered_map<uint64_t, PendingRWTransaction> pending_rw_;

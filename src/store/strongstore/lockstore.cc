@@ -48,111 +48,6 @@ LockStore::LockStore(Consistency consistency)
       consistency_{consistency} {}
 LockStore::~LockStore() {}
 
-int LockStore::Get(uint64_t transaction_id, const Timestamp &start_timestamp,
-                   const string &key, std::pair<Timestamp, string> &value) {
-    Debug("[%lu] GET %s", transaction_id, BytesToHex(key, 16).c_str());
-
-    std::unordered_set<uint64_t> notify_rws;
-
-    // grab the lock (ok, if we already have it)
-    int status = locks_.LockForRead(key, transaction_id, start_timestamp);
-    if (status == REPLY_OK) {
-        if (!store_.get(key, value)) {
-            Debug("[%lu] Couldn't find key %s", transaction_id,
-                  BytesToHex(key, 16).c_str());
-
-            locks_.ReleaseForRead(key, transaction_id, notify_rws);
-            // couldn't find the key
-            status = REPLY_FAIL;
-        } else {
-            Debug("[%lu] GET for key %s; return ts %lu.%lu.", transaction_id,
-                  BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
-                  value.first.getID());
-        }
-    }
-
-    return status;
-}
-
-int LockStore::ROBegin(uint64_t transaction_id,
-                       const std::unordered_set<std::string> &keys,
-                       const Timestamp &commit_timestamp,
-                       const Timestamp &min_timestamp,
-                       uint64_t &n_conflicting_prepared) {
-    n_conflicting_prepared = 0;
-
-    ASSERT(min_timestamp < commit_timestamp);
-
-    for (auto &p : prepared_) {
-        PreparedTransaction &pt = p.second;
-
-        if (commit_timestamp < pt.prepare_timestamp()) {
-            Debug(
-                "[%lu] Not waiting for prepared transaction (prepare): %lu < "
-                "%lu",
-                transaction_id, commit_timestamp.getTimestamp(),
-                pt.prepare_timestamp().getTimestamp());
-            continue;
-        }
-
-        if (consistency_ == Consistency::RSS &&
-            min_timestamp < pt.prepare_timestamp() &&
-            commit_timestamp < pt.nonblock_timestamp()) {
-            Debug(
-                "[%lu] Not waiting for prepared transaction (nonblock): %lu < "
-                "%lu",
-                transaction_id, commit_timestamp.getTimestamp(),
-                pt.nonblock_timestamp().getTimestamp());
-            continue;
-        } else {
-            Debug("min: %lu >= %lu", min_timestamp.getTimestamp(),
-                  pt.prepare_timestamp().getTimestamp());
-
-            Debug("nb: %lu >= %lu", commit_timestamp.getTimestamp(),
-                  pt.nonblock_timestamp().getTimestamp());
-        }
-
-        const Transaction &transaction = pt.transaction();
-
-        for (auto &w : transaction.getWriteSet()) {
-            if (keys.count(w.first) != 0) {
-                Debug("%lu conflicts with %lu: %lu >= %lu", transaction_id,
-                      p.first, commit_timestamp.getTimestamp(),
-                      pt.nonblock_timestamp().getTimestamp());
-                pt.add_waiting_ro(transaction_id);
-                n_conflicting_prepared += 1;
-                break;
-            }
-        }
-    }
-
-    stats_.IncrementList("n_conflicting_prepared", n_conflicting_prepared);
-    if (n_conflicting_prepared == 0) {
-        return REPLY_OK;
-    } else {
-        return REPLY_WAIT;
-    }
-}
-
-int LockStore::ROGet(uint64_t transaction_id, const string &key,
-                     const Timestamp &timestamp,
-                     pair<Timestamp, string> &value) {
-    Debug("[%lu] RO GET %s", transaction_id, BytesToHex(key, 16).c_str());
-
-    if (!store_.get(key, timestamp, value)) {
-        Debug("[%lu] Couldn't find key %s", transaction_id,
-              BytesToHex(key, 16).c_str());
-        // couldn't find the key
-        return REPLY_FAIL;
-    }
-
-    Debug("[%lu] RO GET for key %s; return ts %lu.%lu.", transaction_id,
-          BytesToHex(key, 16).c_str(), value.first.getTimestamp(),
-          value.first.getID());
-
-    return REPLY_OK;
-}
-
 int LockStore::ContinuePrepare(uint64_t transaction_id,
                                const Timestamp &prepare_timestamp,
                                std::unordered_set<uint64_t> &notify_rws) {
@@ -323,11 +218,6 @@ const Transaction &LockStore::GetPreparedTransaction(
     ASSERT(search != prepared_.end());
 
     return search->second.transaction();
-}
-
-void LockStore::Load(const string &key, const string &value,
-                     const Timestamp &timestamp) {
-    store_.put(key, value, timestamp);
 }
 
 /* Used on commit and abort for second phase of 2PL. */
