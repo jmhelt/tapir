@@ -44,7 +44,7 @@ class TransactionStore {
     const Timestamp &GetStartTimestamp(uint64_t transaction_id);
     const std::unordered_set<int> &GetParticipants(uint64_t transaction_id);
     const Timestamp &GetNonBlockTimestamp(uint64_t transaction_id);
-    int &GetCoordinator(uint64_t transaction_id);
+    int GetCoordinator(uint64_t transaction_id);
 
     const Timestamp &GetROCommitTimestamp(uint64_t transaction_id);
     const std::unordered_set<std::string> &GetROKeys(uint64_t transaction_id);
@@ -70,12 +70,15 @@ class TransactionStore {
 
     TransactionState StartParticipantPrepare(uint64_t transaction_id, int coordinator,
                                              const Transaction &transaction, const Timestamp &nonblock_ts);
-    void SetParticipantPrepareTimestamp(const Timestamp &prepare_ts);
+    void SetParticipantPrepareTimestamp(uint64_t transaction_id, const Timestamp &prepare_ts);
     TransactionState FinishParticipantPrepare(uint64_t transaction_id);
 
     void AbortPrepare(uint64_t transaction_id);
     void PausePrepare(uint64_t transaction_id);
     void ContinuePrepare(uint64_t transaction_id);
+
+    TransactionState CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant_shard, const Timestamp &prepare_ts);
+    TransactionState ParticipantReceivePrepareOK(uint64_t transaction_id);
 
     TransactionFinishResult Commit(uint64_t transaction_id);
     TransactionFinishResult Abort(uint64_t transaction_id);
@@ -96,6 +99,7 @@ class TransactionStore {
         const Timestamp &prepare_ts() const { return prepare_ts_; }
         const Timestamp &commit_ts() const { return commit_ts_; }
         const Transaction &transaction() const { return transaction_; }
+        int coordinator() const { return coordinator_; }
 
         const std::unordered_set<int> &participants() const { return participants_; }
 
@@ -113,9 +117,18 @@ class TransactionStore {
 
         void FinishCoordinatorPrepare(const Timestamp &prepare_ts);
 
+        void ReceivePrepareOK(int participant_shard, const Timestamp &prepare_ts);
+
+        void StartParticipantPrepare(int coordinator,
+                                     const Transaction &transaction,
+                                     const Timestamp &nonblock_ts);
+        void SetParticipantPrepareTimestamp(const Timestamp &prepare_ts);
+        void FinishParticipantPrepare();
+
        private:
         Transaction transaction_;
         std::unordered_set<int> participants_;
+        std::unordered_set<int> ok_participants_;
         std::unordered_set<uint64_t> waiting_ros_;
         Timestamp start_ts_;
         Timestamp nonblock_ts_;

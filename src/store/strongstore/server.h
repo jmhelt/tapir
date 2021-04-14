@@ -45,8 +45,6 @@
 #include "store/common/truetime.h"
 #include "store/server.h"
 #include "store/strongstore/common.h"
-#include "store/strongstore/coordinator.h"
-#include "store/strongstore/lockstore.h"
 #include "store/strongstore/locktable.h"
 #include "store/strongstore/occstore.h"
 #include "store/strongstore/replicaclient.h"
@@ -224,12 +222,12 @@ class Server : public TransportReceiver,
 
     const Timestamp GetPrepareTimestamp(uint64_t client_id);
     void CoordinatorCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
+    void ParticipantCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
 
     const TrueTime &tt_;
     TransactionStore transactions_;
     LockTable locks_;
     VersionedKVStore<Timestamp, std::string> store_;
-    LockStore store_old_;
 
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
@@ -238,18 +236,13 @@ class Server : public TransportReceiver,
     ReplicaClient *replica_client_;
 
     Transport *transport_;
-    Coordinator coordinator;
 
     uint64_t server_id_;
 
-    std::unordered_map<uint64_t, PendingRWCommitCoordinatorReply *>
-        pending_rw_commit_c_replies_;
-    std::unordered_map<uint64_t, PendingRWCommitParticipantReply *>
-        pending_rw_commit_p_replies_;
-    std::unordered_map<uint64_t, PendingPrepareOKReply *>
-        pending_prepare_ok_replies_;
-    std::unordered_map<uint64_t, PendingROCommitReply *>
-        pending_ro_commit_replies_;
+    std::unordered_map<uint64_t, PendingRWCommitCoordinatorReply *> pending_rw_commit_c_replies_;
+    std::unordered_map<uint64_t, PendingRWCommitParticipantReply *> pending_rw_commit_p_replies_;
+    std::unordered_map<uint64_t, PendingPrepareOKReply *> pending_prepare_ok_replies_;
+    std::unordered_map<uint64_t, PendingROCommitReply *> pending_ro_commit_replies_;
     std::unordered_map<uint64_t, PendingGetReply *> pending_get_replies_;
 
     proto::Get get_;
