@@ -2,11 +2,14 @@ d := $(dir $(lastword $(MAKEFILE_LIST)))
 
 SRCS += $(addprefix $(d), occstore.cc server.cc \
 					client.cc shardclient.cc replicaclient.cc \
-					strongbufferclient.cc networkconfig.cc waitdie.cc locktable.cc transactionstore.cc)
+					strongbufferclient.cc networkconfig.cc \
+					waitdie.cc woundwait.cc locktable.cc transactionstore.cc)
 
 PROTOS += $(addprefix $(d), strong-proto.proto)
 
 LIB-waitdie := $(o)waitdie.o $(LIB-store-common) $(LIB-message)
+
+LIB-woundwait := $(o)woundwait.o $(LIB-store-common) $(LIB-message)
 
 OBJS-shard-client := $(LIB-latency) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)shardclient.o
 
