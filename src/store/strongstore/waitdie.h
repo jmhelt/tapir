@@ -3,6 +3,7 @@
 
 #include <sys/time.h>
 
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
@@ -123,11 +124,12 @@ class WaitDie {
         bool PopWaiter();
     };
 
-    /* Global store which keep key -> (timestamp, value) list. */
-    std::unordered_map<std::string, Lock> locks;
+    bool NotifyRW(const std::string &lock, uint64_t rw);
+    void NotifyRWs(const std::string &lock, std::unordered_set<uint64_t> &notify_rws);
 
-    uint64_t readers;
-    uint64_t writers;
+    /* Global store which keep key -> (timestamp, value) list. */
+    std::unordered_map<std::string, Lock> locks_;
+    std::unordered_map<uint64_t, std::unordered_set<std::string>> waiting_;
 };
 
 };  // namespace strongstore
