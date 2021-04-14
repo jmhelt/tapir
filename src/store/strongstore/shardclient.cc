@@ -367,7 +367,7 @@ void ShardClient::HandleRWCommitParticipantReply(
 }
 
 void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
-                            Timestamp &prepare_timestamp, prepare_callback pcb,
+                            const Timestamp &prepare_timestamp, prepare_callback pcb,
                             prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending PrepareOK [%lu]", shard_idx_, transaction_id);
 
