@@ -475,377 +475,489 @@ TEST(WoundWait, MergeMultiReadWriteWaiter) {
     ASSERT_EQ(notify.size(), 0);
 }
 
-// TEST(WoundWait, MergeWriteReadWaiter) {
-//     WoundWait ww;
+TEST(WoundWait, MergeWriteReadWaiter) {
+    WoundWait ww;
 
-//     std::unordered_set<uint64_t> notify;
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     int status = ww.LockForWrite("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    int status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(wound.size(), 0);
 
-//     status = ww.LockForRead("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ_WRITE);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(2), 1);
-//     notify.clear();
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForRead("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    ASSERT_EQ(wound.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ_WRITE);
 
-// TEST(WoundWait, ReleaseReadWaiter) {
-//     WoundWait ww;
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
 
-//     std::unordered_set<uint64_t> notify;
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     int status = ww.LockForWrite("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     status = ww.LockForRead("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+TEST(WoundWait, ReleaseReadWaiter) {
+    WoundWait ww;
 
-//     ww.ReleaseForRead("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ASSERT_EQ(notify.size(), 0);
+    int status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    ASSERT_EQ(wound.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-// TEST(WoundWait, ReleaseWriteWaiter) {
-//     WoundWait ww;
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     std::unordered_set<uint64_t> notify;
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     int status = ww.LockForRead("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     ASSERT_EQ(notify.size(), 0);
+TEST(WoundWait, ReleaseWriteWaiter) {
+    WoundWait ww;
 
-//     ww.ReleaseForRead("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    int status = ww.LockForRead("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-// TEST(WoundWait, ReleaseMultiWriteWaiter) {
-//     WoundWait ww;
+    ASSERT_EQ(wound.size(), 0);
 
-//     std::unordered_set<uint64_t> notify;
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     int status = ww.LockForRead("lock", 1, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     status = ww.LockForWrite("lock", 3, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     ASSERT_EQ(notify.size(), 0);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     ww.ReleaseForRead("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+TEST(WoundWait, ReleaseMultiWriteWaiter) {
+    WoundWait ww;
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(3), 1);
-//     notify.clear();
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ww.ReleaseForWrite("lock", 3, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    int status = ww.LockForRead("lock", 1, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ASSERT_EQ(wound.size(), 0);
 
-// TEST(WoundWait, ReleaseReadWriteWaiter1) {
-//     WoundWait ww;
+    status = ww.LockForWrite("lock", 2, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     std::unordered_set<uint64_t> notify;
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     int status = ww.LockForWrite("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    status = ww.LockForWrite("lock", 3, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     status = ww.LockForRead("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(wound.size(), 2);
+    ASSERT_EQ(wound.count(1), 1);
+    ASSERT_EQ(wound.count(2), 1);
+    wound.clear();
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ww.ReleaseForRead("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(notify.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(3), 1);
+    notify.clear();
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ww.ReleaseForWrite("lock", 3, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-// TEST(WoundWait, ReleaseReadWriteWaiter2) {
-//     WoundWait ww;
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     std::unordered_set<uint64_t> notify;
+TEST(WoundWait, ReleaseReadWriteWaiter1) {
+    WoundWait ww;
 
-//     int status = ww.LockForWrite("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     status = ww.LockForRead("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    int status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(wound.size(), 0);
 
-//     ww.ReleaseForRead("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 0);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     ww.ReleaseForWrite("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(2), 1);
-//     notify.clear();
+    ASSERT_EQ(wound.size(), 0);
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ASSERT_EQ(notify.size(), 0);
 
-// TEST(WoundWait, ReleaseReadWriteWaiter3) {
-//     WoundWait ww;
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     std::unordered_set<uint64_t> notify;
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     int status = ww.LockForWrite("lock", 1, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+TEST(WoundWait, ReleaseReadWriteWaiter2) {
+    WoundWait ww;
 
-//     status = ww.LockForRead("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    int status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(wound.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(2), 1);
-//     notify.clear();
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForRead("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    ASSERT_EQ(wound.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-// TEST(WoundWait, Release2WriteWaiter) {
-//     WoundWait ww;
+    ASSERT_EQ(notify.size(), 0);
 
-//     std::unordered_set<uint64_t> notify;
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     int status = ww.LockForRead("lock", 1, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     ASSERT_EQ(notify.size(), 0);
+TEST(WoundWait, ReleaseReadWriteWaiter3) {
+    WoundWait ww;
 
-//     status = ww.LockForWrite("lock", 3, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ww.ReleaseForRead("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+    int status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(3), 1);
-//     notify.clear();
+    ASSERT_EQ(wound.size(), 0);
 
-//     ww.ReleaseForWrite("lock", 3, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-// TEST(WoundWait, Release2WriteReadWaiter) {
-//     WoundWait ww;
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     std::unordered_set<uint64_t> notify;
+    ASSERT_EQ(wound.size(), 0);
 
-//     int status = ww.LockForRead("lock", 1, Timestamp(3));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
 
-//     status = ww.LockForWrite("lock", 3, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ww.ReleaseForWrite("lock", 3, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
 
-//     ASSERT_EQ(notify.size(), 0);
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     status = ww.LockForRead("lock", 4, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     ww.ReleaseForRead("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
+TEST(WoundWait, Release2WriteWaiter) {
+    WoundWait ww;
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(2), 1);
-//     notify.clear();
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    int status = ww.LockForRead("lock", 1, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(4), 1);
-//     notify.clear();
+    ASSERT_EQ(wound.size(), 0);
 
-//     ww.ReleaseForRead("lock", 4, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    status = ww.LockForWrite("lock", 2, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-// TEST(WoundWait, ReleaseWriteReadWaiter) {
-//     WoundWait ww;
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     std::unordered_set<uint64_t> notify;
+    ASSERT_EQ(notify.size(), 0);
 
-//     int status = ww.LockForRead("lock", 1, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    status = ww.LockForWrite("lock", 3, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     status = ww.LockForWrite("lock", 2, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     ww.ReleaseForWrite("lock", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ASSERT_EQ(notify.size(), 0);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(3), 1);
+    notify.clear();
 
-//     status = ww.LockForRead("lock", 3, Timestamp(0));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 3, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
 
-//     ww.ReleaseForRead("lock", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ASSERT_EQ(notify.size(), 0);
+}
 
-//     ASSERT_EQ(notify.size(), 0);
+TEST(WoundWait, Release2WriteReadWaiter) {
+    WoundWait ww;
 
-//     ww.ReleaseForRead("lock", 3, notify);
-//     ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    int status = ww.LockForRead("lock", 1, Timestamp(3), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-// TEST(WoundWait, WaitTwoLocks) {
-//     WoundWait ww;
+    ASSERT_EQ(wound.size(), 0);
 
-//     std::unordered_set<uint64_t> notify;
+    status = ww.LockForWrite("lock", 2, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     int status = ww.LockForRead("lock1", 1, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_READ);
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
 
-//     status = ww.LockForRead("lock2", 1, Timestamp(2));
-//     ASSERT_EQ(status, REPLY_OK);
-//     ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_READ);
+    status = ww.LockForWrite("lock", 3, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     status = ww.LockForWrite("lock1", 2, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_READ);
+    ASSERT_EQ(wound.size(), 2);
+    ASSERT_EQ(wound.count(1), 1);
+    ASSERT_EQ(wound.count(2), 1);
+    wound.clear();
 
-//     status = ww.LockForWrite("lock2", 2, Timestamp(1));
-//     ASSERT_EQ(status, REPLY_WAIT);
-//     ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_READ);
+    ww.ReleaseForWrite("lock", 3, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ww.ReleaseForRead("lock1", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(notify.size(), 0);
 
-//     ASSERT_EQ(notify.size(), 0);
+    status = ww.LockForRead("lock", 4, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ww.ReleaseForRead("lock2", 1, notify);
-//     ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_WRITE);
+    ASSERT_EQ(wound.size(), 2);
+    ASSERT_EQ(wound.count(1), 1);
+    ASSERT_EQ(wound.count(2), 1);
+    wound.clear();
 
-//     ASSERT_EQ(notify.size(), 1);
-//     ASSERT_EQ(notify.count(2), 1);
-//     notify.clear();
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_WRITE);
 
-//     ww.ReleaseForWrite("lock1", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock1"), UNLOCKED);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
 
-//     ASSERT_EQ(notify.size(), 0);
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
 
-//     ww.ReleaseForWrite("lock2", 2, notify);
-//     ASSERT_EQ(ww.GetLockState("lock2"), UNLOCKED);
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(4), 1);
+    notify.clear();
 
-//     ASSERT_EQ(notify.size(), 0);
-// }
+    ww.ReleaseForRead("lock", 4, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify.size(), 0);
+}
+
+TEST(WoundWait, ReleaseWriteReadWaiter) {
+    WoundWait ww;
+
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
+
+    int status = ww.LockForRead("lock", 1, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForWrite("lock", 2, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
+
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(notify.size(), 0);
+
+    status = ww.LockForRead("lock", 3, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(notify.size(), 0);
+
+    ww.ReleaseForRead("lock", 3, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify.size(), 0);
+}
+
+TEST(WoundWait, WaitTwoLocks) {
+    WoundWait ww;
+
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
+
+    int status = ww.LockForRead("lock1", 1, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForRead("lock2", 1, Timestamp(2), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForWrite("lock1", 2, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
+
+    status = ww.LockForWrite("lock2", 2, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
+
+    ww.ReleaseForRead("lock1", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock1"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify.size(), 0);
+
+    ww.ReleaseForRead("lock2", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock2"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
+
+    ww.ReleaseForWrite("lock1", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock1"), UNLOCKED);
+
+    ASSERT_EQ(notify.size(), 0);
+
+    ww.ReleaseForWrite("lock2", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock2"), UNLOCKED);
+
+    ASSERT_EQ(notify.size(), 0);
+}
 
 };  // namespace strongstore
