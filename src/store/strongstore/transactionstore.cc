@@ -29,9 +29,6 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
-    Debug("n: %lu", n);
-    Debug("ok: %lu", ok);
-    Debug("coordinator: %d", coordinator);
     if (ok == n - 1) {
         state_ = PREPARING;
     } else {
@@ -68,9 +65,6 @@ void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int participant_sh
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
-    Debug("n: %lu", n);
-    Debug("ok: %lu", ok);
-    Debug("coordinator: %d", coordinator_);
     if (n == 0) {
         state_ = WAIT_PARTICIPANTS;
     } else if (ok == n - 1) {
