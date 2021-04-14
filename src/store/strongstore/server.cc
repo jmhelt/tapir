@@ -291,9 +291,7 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
 
 void Server::ContinueROCommit(uint64_t transaction_id) {
     auto search = pending_ro_commit_replies_.find(transaction_id);
-    if (search == pending_ro_commit_replies_.end()) {
-        return;
-    }
+    ASSERT(search != pending_ro_commit_replies_.end());
 
     PendingROCommitReply *reply = search->second;
 
@@ -475,6 +473,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts) {
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     if (search == pending_rw_commit_c_replies_.end()) {
+        Debug("[%lu] No pending commit coordinator reply found", transaction_id);
         return;
     }
 
@@ -510,6 +509,7 @@ void Server::SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
 void Server::SendPrepareOKRepliesOK(uint64_t transaction_id, const Timestamp &commit_ts) {
     auto search = pending_prepare_ok_replies_.find(transaction_id);
     if (search == pending_prepare_ok_replies_.end()) {
+        Debug("[%lu] No pending prepare ok reply found", transaction_id);
         return;
     }
     PendingPrepareOKReply *reply = search->second;
@@ -901,6 +901,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == WAITING) {
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+
+            transactions_.PausePrepare(transaction_id);
         } else {
             NOT_REACHABLE();
         }
@@ -1015,7 +1017,7 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     }
 
     if (state == ABORTED) {
-        Debug("[%lu] Not aborting transaction", transaction_id);
+        Debug("[%lu] Transaction already aborted", transaction_id);
         abort_reply_.set_status(REPLY_OK);
         transport_->SendMessage(this, remote, abort_reply_);
         return;
@@ -1222,13 +1224,16 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
     } else if (request.op() == strongstore::proto::Request::ABORT) {
         Debug("[%lu] Received ABORT", transaction_id);
-        const Transaction &transaction = transactions_.GetTransaction(transaction_id);
 
-        LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
-        TransactionFinishResult fr = transactions_.Abort(transaction_id);
+        if (transactions_.GetTransactionState(transaction_id) != ABORTED) {  // replica abort
+            const Transaction &transaction = transactions_.GetTransaction(transaction_id);
 
-        NotifyPendingRWs(rr.notify_rws);
-        NotifyPendingROs(fr.notify_ros);
+            LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
+            TransactionFinishResult fr = transactions_.Abort(transaction_id);
+
+            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingROs(fr.notify_ros);
+        }
     } else {
         NOT_REACHABLE();
     }
