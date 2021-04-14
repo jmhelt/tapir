@@ -291,7 +291,9 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
 
 void Server::ContinueROCommit(uint64_t transaction_id) {
     auto search = pending_ro_commit_replies_.find(transaction_id);
-    ASSERT(search != pending_ro_commit_replies_.end());
+    if (search == pending_ro_commit_replies_.end()) {
+        return;
+    }
 
     PendingROCommitReply *reply = search->second;
 
@@ -471,7 +473,12 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 }
 
 void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts) {
-    PendingRWCommitCoordinatorReply *reply = pending_rw_commit_c_replies_[transaction_id];
+    auto search = pending_rw_commit_c_replies_.find(transaction_id);
+    if (search == pending_rw_commit_c_replies_.end()) {
+        return;
+    }
+
+    PendingRWCommitCoordinatorReply *reply = search->second;
 
     uint64_t client_id = reply->rid.client_id();
     uint64_t client_req_id = reply->rid.client_req_id();
@@ -486,7 +493,7 @@ void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Time
 
     delete remote;
     delete reply;
-    pending_rw_commit_c_replies_.erase(transaction_id);
+    pending_rw_commit_c_replies_.erase(search);
 }
 
 void Server::SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
@@ -1140,10 +1147,11 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
         Debug("[%lu] Received PREPARE", transaction_id);
 
         TransactionState s = transactions_.GetTransactionState(transaction_id);
+        Debug("state: %d", static_cast<int>(s));
         if (s == ABORTED) {
             Debug("[%lu] Already aborted", transaction_id);
             status = REPLY_FAIL;
-        } else if (s != PREPARING) {
+        } else if (s == NOT_FOUND) {  // Replica prepare
             const Timestamp prepare_ts{request.prepare().timestamp()};
             int coordinator = request.prepare().coordinator();
             const Transaction transaction{request.prepare().txn()};
@@ -1156,6 +1164,10 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             ASSERT(ar.status == LockStatus::ACQUIRED);
 
             transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
+
+            transactions_.FinishParticipantPrepare(transaction_id);
+        } else if (s == PREPARING) {
+            Debug("[%lu] Already prepared", transaction_id);
         } else {
             NOT_REACHABLE();
         }
@@ -1179,6 +1191,13 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
                 TransactionState s = transactions_.StartCoordinatorPrepare(transaction_id, start_ts, coordinator,
                                                                            participants, transaction, nonblock_ts);
+                Debug("s: %d", static_cast<int>(s));
+                for (int p : participants) {
+                    if (p != coordinator) {
+                        s = transactions_.CoordinatorReceivePrepareOK(transaction_id, p, commit_ts);
+                    }
+                }
+                Debug("s: %d", static_cast<int>(s));
                 ASSERT(s == PREPARING);
 
                 LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
@@ -1194,6 +1213,10 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             transport_->Timer(commit_wait_ms, std::bind(&Server::CoordinatorCommitTransaction, this, transaction_id, commit_ts));
         } else {  // Participant commit
             Debug("[%lu] Participant commit", transaction_id);
+            if (transactions_.GetTransactionState(transaction_id) != COMMITTING) {
+                transactions_.ParticipantReceivePrepareOK(transaction_id);
+            }
+
             ParticipantCommitTransaction(transaction_id, commit_ts);
         }
 

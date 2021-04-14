@@ -29,6 +29,9 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
+    Debug("n: %lu", n);
+    Debug("ok: %lu", ok);
+    Debug("coordinator: %d", coordinator);
     if (ok == n - 1) {
         state_ = PREPARING;
     } else {
@@ -65,9 +68,13 @@ void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int participant_sh
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
+    Debug("n: %lu", n);
+    Debug("ok: %lu", ok);
+    Debug("coordinator: %d", coordinator_);
     if (n == 0) {
         state_ = WAIT_PARTICIPANTS;
     } else if (ok == n - 1) {
+        Debug("set preparing");
         state_ = PREPARING;
     }
 }
@@ -287,6 +294,7 @@ TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transact
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
+    Debug("s: %d", static_cast<int>(pt.state()));
     ASSERT(pt.state() == WAIT_PARTICIPANTS);
     pt.ReceivePrepareOK(participant_shard, prepare_ts);
 
@@ -322,6 +330,7 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
     TransactionFinishResult r;
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
+    Debug("s: %d", static_cast<int>(pt.state()));
     ASSERT(pt.state() == COMMITTING);
 
     r.notify_ros = std::move(pt.waiting_ros());
