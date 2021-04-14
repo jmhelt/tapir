@@ -101,7 +101,7 @@ class ShardClient : public TxnClient,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 
     void PrepareOK(uint64_t transaction_id, int participant_shard,
-                   Timestamp &prepare_timestamp, prepare_callback pcb,
+                   const Timestamp &prepare_timestamp, prepare_callback pcb,
                    prepare_timeout_callback ptcb, uint32_t timeout);
 
     void PrepareAbort(uint64_t transaction_id, int participant_shard,

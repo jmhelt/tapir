@@ -5,7 +5,7 @@
 
 namespace strongstore {
 
-TransactionStore::TransactionStore(const TrueTime &tt, Consistency c) : tt_{tt}, consistency_{c} {}
+TransactionStore::TransactionStore(Consistency c) : consistency_{c} {}
 
 TransactionStore::~TransactionStore() {}
 
@@ -193,6 +193,7 @@ void TransactionStore::PausePrepare(uint64_t transaction_id) {
 
     pt.set_state(PREPARE_WAIT);
 }
+
 void TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == PREPARE_WAIT);
@@ -264,7 +265,9 @@ TransactionState TransactionStore::StartRO(uint64_t transaction_id,
     for (auto &p : pending_rw_) {
         PendingRWTransaction &rw = p.second;
 
-        if (rw.state() != PREPARED && rw.state() != COMMITTING) {
+        if (rw.state() != PREPARING &&
+            rw.state() != PREPARED &&
+            rw.state() != COMMITTING) {
             continue;
         }
 

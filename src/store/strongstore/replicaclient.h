@@ -20,15 +20,10 @@ class ReplicaClient {
     typedef std::function<void(int, Timestamp)> prepare_callback;
     typedef std::function<void(int, Timestamp)> prepare_timeout_callback;
 
-    typedef std::function<void(transaction_status_t,
-                               std::unordered_set<uint64_t> &,
-                               std::unordered_set<uint64_t> &)>
-        commit_callback;
+    typedef std::function<void(transaction_status_t)> commit_callback;
     typedef std::function<void()> commit_timeout_callback;
 
-    typedef std::function<void(std::unordered_set<uint64_t> &,
-                               std::unordered_set<uint64_t> &)>
-        abort_callback;
+    typedef std::function<void()> abort_callback;
     typedef std::function<void()> abort_timeout_callback;
 
    public:
@@ -37,9 +32,12 @@ class ReplicaClient {
                   uint64_t client_id, int shard);
     virtual ~ReplicaClient();
 
-    void Prepare(uint64_t id, const Transaction &txn,
-                 const Timestamp &prepare_timestamp, prepare_callback pcb,
-                 prepare_timeout_callback ptcb, uint32_t timeout);
+    void Prepare(uint64_t transaction_id,
+                 const Transaction &transaction,
+                 const Timestamp &prepare_ts, int coordinator,
+                 const Timestamp &nonblock_ts,
+                 prepare_callback pcb, prepare_timeout_callback ptcb,
+                 uint32_t timeout);
 
     void CoordinatorCommit(uint64_t transaction_id,
                            const Timestamp &start_ts, int coordinator,
