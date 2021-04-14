@@ -2,14 +2,9 @@
 
 #include <algorithm>
 
-using namespace std;
-
 namespace strongstore {
 
-WaitDie::WaitDie() {
-    readers = 0;
-    writers = 0;
-}
+WaitDie::WaitDie() {}
 
 WaitDie::~WaitDie() {}
 
@@ -421,8 +416,8 @@ bool WaitDie::Lock::isWriteNext() {
 }
 
 const LockState WaitDie::GetLockState(const std::string &lock) const {
-    auto search = locks.find(lock);
-    if (search == locks.end()) {
+    auto search = locks_.find(lock);
+    if (search == locks_.end()) {
         return UNLOCKED;
     }
 
@@ -430,8 +425,8 @@ const LockState WaitDie::GetLockState(const std::string &lock) const {
 }
 
 bool WaitDie::HasReadLock(const std::string &lock, uint64_t requester) const {
-    auto search = locks.find(lock);
-    if (search == locks.end()) {
+    auto search = locks_.find(lock);
+    if (search == locks_.end()) {
         return false;
     }
 
@@ -443,42 +438,78 @@ bool WaitDie::HasReadLock(const std::string &lock, uint64_t requester) const {
     return l.holders().count(requester) > 0;
 }
 
-int WaitDie::LockForRead(const string &lock, uint64_t requester,
+int WaitDie::LockForRead(const std::string &lock, uint64_t requester,
                          const Timestamp &start_timestamp) {
-    Lock &l = locks[lock];
+    Lock &l = locks_[lock];
     Debug("[%lu] Lock for Read: %s", requester, lock.c_str());
 
-    return l.TryAcquireReadLock(requester, start_timestamp);
+    int ret = l.TryAcquireReadLock(requester, start_timestamp);
+    if (ret == REPLY_WAIT) {
+        waiting_[requester].insert(lock);
+    }
+
+    return ret;
 }
 
-int WaitDie::LockForWrite(const string &lock, uint64_t requester,
+int WaitDie::LockForWrite(const std::string &lock, uint64_t requester,
                           const Timestamp &start_timestamp) {
-    Lock &l = locks[lock];
+    Lock &l = locks_[lock];
 
     Debug("[%lu] Lock for Write: %s", requester, lock.c_str());
 
-    return l.TryAcquireWriteLock(requester, start_timestamp);
+    int ret = l.TryAcquireWriteLock(requester, start_timestamp);
+    if (ret == REPLY_WAIT) {
+        waiting_[requester].insert(lock);
+    }
+
+    return ret;
 }
 
-void WaitDie::ReleaseForRead(const string &lock, uint64_t holder,
+bool WaitDie::NotifyRW(const std::string &lock, uint64_t rw) {
+    waiting_[rw].erase(lock);
+    if (waiting_[rw].size() == 0) {
+        waiting_.erase(rw);
+        return true;
+    }
+
+    return false;
+}
+
+void WaitDie::NotifyRWs(const std::string &lock, std::unordered_set<uint64_t> &notify_rws) {
+    for (auto it = notify_rws.begin(); it != notify_rws.end();) {
+        if (NotifyRW(lock, *it)) {
+            ++it;
+        } else {
+            it = notify_rws.erase(it);
+        }
+    }
+}
+
+void WaitDie::ReleaseForRead(const std::string &lock, uint64_t holder,
                              std::unordered_set<uint64_t> &notify_rws) {
-    if (locks.find(lock) == locks.end()) {
+    if (locks_.find(lock) == locks_.end()) {
         return;
     }
 
-    Lock &l = locks[lock];
+    Lock &l = locks_[lock];
 
     l.ReleaseReadLock(holder, notify_rws);
+
+    NotifyRW(lock, holder);
+    NotifyRWs(lock, notify_rws);
 }
 
-void WaitDie::ReleaseForWrite(const string &lock, uint64_t holder,
+void WaitDie::ReleaseForWrite(const std::string &lock, uint64_t holder,
                               std::unordered_set<uint64_t> &notify_rws) {
-    if (locks.find(lock) == locks.end()) {
+    if (locks_.find(lock) == locks_.end()) {
         return;
     }
 
-    Lock &l = locks[lock];
+    Lock &l = locks_[lock];
 
     l.ReleaseWriteLock(holder, notify_rws);
+
+    NotifyRW(lock, holder);
+    NotifyRWs(lock, notify_rws);
 }
 };  // namespace strongstore

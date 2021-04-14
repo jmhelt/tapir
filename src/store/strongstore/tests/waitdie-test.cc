@@ -704,4 +704,48 @@ TEST(WaitDie, ReleaseWriteReadWaiter) {
     ASSERT_EQ(notify_rws.size(), 0);
 }
 
+TEST(WaitDie, WaitTwoLocks) {
+    WaitDie wd;
+
+    std::unordered_set<uint64_t> notify_rws;
+
+    int status = wd.LockForRead("lock1", 1, Timestamp(2));
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(wd.GetLockState("lock1"), LOCKED_FOR_READ);
+
+    status = wd.LockForRead("lock2", 1, Timestamp(2));
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(wd.GetLockState("lock2"), LOCKED_FOR_READ);
+
+    status = wd.LockForWrite("lock1", 2, Timestamp(1));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock1"), LOCKED_FOR_READ);
+
+    status = wd.LockForWrite("lock2", 2, Timestamp(1));
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(wd.GetLockState("lock2"), LOCKED_FOR_READ);
+
+    wd.ReleaseForRead("lock1", 1, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock1"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForRead("lock2", 1, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock2"), LOCKED_FOR_WRITE);
+
+    ASSERT_EQ(notify_rws.size(), 1);
+    ASSERT_EQ(notify_rws.count(2), 1);
+    notify_rws.clear();
+
+    wd.ReleaseForWrite("lock1", 2, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock1"), UNLOCKED);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+
+    wd.ReleaseForWrite("lock2", 2, notify_rws);
+    ASSERT_EQ(wd.GetLockState("lock2"), UNLOCKED);
+
+    ASSERT_EQ(notify_rws.size(), 0);
+}
+
 };  // namespace strongstore
