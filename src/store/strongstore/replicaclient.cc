@@ -24,7 +24,8 @@ ReplicaClient::~ReplicaClient() { delete client; }
 
 void ReplicaClient::Prepare(uint64_t transaction_id,
                             const Transaction &transaction,
-                            const Timestamp &prepare_timestamp,
+                            const Timestamp &prepare_ts, int coordinator,
+                            const Timestamp &nonblock_ts,
                             prepare_callback pcb, prepare_timeout_callback ptcb,
                             uint32_t timeout) {
     Debug("[shard %i] Sending PREPARE: %lu", shard_idx_, transaction_id);
@@ -34,8 +35,14 @@ void ReplicaClient::Prepare(uint64_t transaction_id,
     Request request;
     request.set_op(Request::PREPARE);
     request.set_txnid(transaction_id);
-    transaction.serialize(request.mutable_prepare()->mutable_txn());
-    prepare_timestamp.serialize(request.mutable_prepare()->mutable_timestamp());
+
+    auto prepare = request.mutable_prepare();
+
+    transaction.serialize(prepare->mutable_txn());
+    prepare_ts.serialize(prepare->mutable_timestamp());
+    prepare->set_coordinator(coordinator);
+    nonblock_ts.serialize(prepare->mutable_nonblock_ts());
+
     request.SerializeToString(&request_str);
 
     uint64_t reqId = lastReqId++;
@@ -95,13 +102,13 @@ void ReplicaClient::CoordinatorCommit(uint64_t transaction_id,
 
     auto prepare = request.mutable_prepare();
 
-    start_ts.serialize(prepare->mutable_start_ts());
-    prepare->set_coordinator_shard(coordinator);
+    transaction.serialize(prepare->mutable_txn());
+    start_ts.serialize(prepare->mutable_timestamp());
+    prepare->set_coordinator(coordinator);
+    nonblock_ts.serialize(prepare->mutable_nonblock_ts());
     for (int p : participants) {
         prepare->add_participants(p);
     }
-    transaction.serialize(prepare->mutable_txn());
-    nonblock_ts.serialize(prepare->mutable_nonblock_ts());
 
     commit_ts.serialize(request.mutable_commit()->mutable_commit_timestamp());
 
@@ -156,19 +163,13 @@ bool ReplicaClient::CommitCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received COMMIT callback [%d]", shard_idx_,
           reply.status());
 
-    std::unordered_set<uint64_t> notify_rws{reply.notify_rws().begin(),
-                                            reply.notify_rws().end()};
-
-    std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
-                                            reply.notify_ros().end()};
-
     auto itr = this->pendingCommits.find(reqId);
     ASSERT(itr != pendingCommits.end());
     PendingCommit *pendingCommit = itr->second;
     commit_callback ccb = pendingCommit->ccb;
     this->pendingCommits.erase(itr);
     delete pendingCommit;
-    ccb(COMMITTED, notify_rws, notify_ros);
+    ccb(COMMITTED);
 
     return true;
 }
@@ -206,19 +207,13 @@ bool ReplicaClient::AbortCallback(uint64_t reqId, const string &request_str,
     Debug("[shard %i] Received ABORT callback [%d]", shard_idx_,
           reply.status());
 
-    std::unordered_set<uint64_t> notify_rws{reply.notify_rws().begin(),
-                                            reply.notify_rws().end()};
-
-    std::unordered_set<uint64_t> notify_ros{reply.notify_ros().begin(),
-                                            reply.notify_ros().end()};
-
     auto itr = this->pendingAborts.find(reqId);
     ASSERT(itr != pendingAborts.end());
     PendingAbort *pendingAbort = itr->second;
     abort_callback acb = pendingAbort->acb;
     this->pendingAborts.erase(itr);
     delete pendingAbort;
-    acb(notify_rws, notify_ros);
+    acb();
 
     return true;
 }

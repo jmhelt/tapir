@@ -34,15 +34,17 @@ struct TransactionFinishResult {
 
 class TransactionStore {
    public:
-    TransactionStore(const TrueTime &tt, Consistency consistency);
+    TransactionStore(Consistency consistency);
     ~TransactionStore();
 
     TransactionState GetTransactionState(uint64_t transaction_id);
     const Transaction &GetTransaction(uint64_t transaction_id);
+    const Timestamp &GetPrepareTimestamp(uint64_t transaction_id);
     const Timestamp &GetRWCommitTimestamp(uint64_t transaction_id);
     const Timestamp &GetStartTimestamp(uint64_t transaction_id);
     const std::unordered_set<int> &GetParticipants(uint64_t transaction_id);
     const Timestamp &GetNonBlockTimestamp(uint64_t transaction_id);
+    int &GetCoordinator(uint64_t transaction_id);
 
     const Timestamp &GetROCommitTimestamp(uint64_t transaction_id);
     const std::unordered_set<std::string> &GetROKeys(uint64_t transaction_id);
@@ -65,6 +67,12 @@ class TransactionStore {
                                              const Transaction &transaction,
                                              const Timestamp &nonblock_ts);
     void FinishCoordinatorPrepare(uint64_t transaction_id, const Timestamp &prepare_ts);
+
+    TransactionState StartParticipantPrepare(uint64_t transaction_id, int coordinator,
+                                             const Transaction &transaction, const Timestamp &nonblock_ts);
+    void SetParticipantPrepareTimestamp(const Timestamp &prepare_ts);
+    TransactionState FinishParticipantPrepare(uint64_t transaction_id);
+
     void AbortPrepare(uint64_t transaction_id);
     void PausePrepare(uint64_t transaction_id);
     void ContinuePrepare(uint64_t transaction_id);
@@ -146,7 +154,6 @@ class TransactionStore {
 
     void NotifyROs(std::unordered_set<uint64_t> &ros);
 
-    const TrueTime &tt_;
     std::unordered_map<uint64_t, PendingRWTransaction> pending_rw_;
     std::unordered_map<uint64_t, PendingROTransaction> pending_ro_;
     std::unordered_set<uint64_t> committed_;

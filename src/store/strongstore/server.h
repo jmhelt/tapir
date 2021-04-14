@@ -176,23 +176,19 @@ class Server : public TransportReceiver,
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    proto::RWCommitCoordinator &msg);
 
-    void SendRWCommmitCoordinatorReplyOK(PendingRWCommitCoordinatorReply *reply,
-                                         uint64_t response_delay_ms);
+    void SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts);
     void SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
                                            uint64_t client_id,
                                            uint64_t client_req_id);
 
-    void SendRWCommmitParticipantReplyOK(
-        PendingRWCommitParticipantReply *reply);
-    void SendRWCommmitParticipantReplyFail(
-        PendingRWCommitParticipantReply *reply);
+    void SendRWCommmitParticipantReplyOK(uint64_t transaction_id);
+    void SendRWCommmitParticipantReplyFail(uint64_t transaction_id);
+
     void SendRWCommmitParticipantReplyFail(const TransportAddress &remote,
                                            uint64_t client_id,
                                            uint64_t client_req_id);
 
-    void SendPrepareOKRepliesOK(PendingPrepareOKReply *reply,
-                                Timestamp &commit_timestamp,
-                                uint64_t response_delay_ms);
+    void SendPrepareOKRepliesOK(uint64_t transaction_id, const Timestamp &commit_ts);
     void SendPrepareOKRepliesFail(PendingPrepareOKReply *reply);
 
     void HandleRWCommitParticipant(const TransportAddress &remote,
@@ -214,17 +210,9 @@ class Server : public TransportReceiver,
     void PrepareAbortCallback(uint64_t transaction_id, int status,
                               Timestamp timestamp);
 
-    void CommitCoordinatorCallback(
-        uint64_t transaction_id, transaction_status_t status,
-        const std::unordered_set<uint64_t> &notify_rws,
-        const std::unordered_set<uint64_t> &notify_ros);
-    void CommitParticipantCallback(
-        uint64_t transaction_id, transaction_status_t status,
-        const std::unordered_set<uint64_t> &notify_rws,
-        const std::unordered_set<uint64_t> &notify_ros);
-    void AbortParticipantCallback(
-        uint64_t transaction_id, const std::unordered_set<uint64_t> &notify_rws,
-        const std::unordered_set<uint64_t> &notify_ros);
+    void CommitCoordinatorCallback(uint64_t transaction_id, transaction_status_t status);
+    void CommitParticipantCallback(uint64_t transaction_id, transaction_status_t status);
+    void AbortParticipantCallback(uint64_t transaction_id);
 
     void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
     void ContinueGet(uint64_t transaction_id);
@@ -235,7 +223,7 @@ class Server : public TransportReceiver,
     void ContinueROCommit(uint64_t transaction_id);
 
     const Timestamp GetPrepareTimestamp(uint64_t client_id);
-    void CommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
+    void CoordinatorCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
 
     const TrueTime &tt_;
     TransactionStore transactions_;
