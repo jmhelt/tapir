@@ -34,10 +34,7 @@ void WoundWait::Lock::AddReadWriteWaiter(uint64_t requester, const Timestamp &ts
 bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
                                std::unordered_set<uint64_t> &wound) {
     auto search = waiters_.find(requester);
-    if (search == waiters_.end()) {
-        // Add waiter
-        AddReadWaiter(requester, ts);
-    } else {  // I already have a waiter
+    if (search != waiters_.end()) {  // I already have a waiter
         std::shared_ptr<Waiter> w = search->second;
         bool isread = w->isread();
         bool iswrite = w->iswrite();
@@ -54,11 +51,29 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
         }
     }
 
+    // Add waiter
+    if (wait_q_.size() > 0) {
+        // Try merging with readers at end of queue
+        uint64_t b = wait_q_.back();
+        auto search = waiters_.find(b);
+        if (search != waiters_.end() && !search->second->iswrite()) {
+            search->second->add_waiter(requester, ts);
+            waiters_.emplace(requester, search->second);
+        } else {
+            AddReadWaiter(requester, ts);
+        }
+    } else {
+        AddReadWaiter(requester, ts);
+    }
+
+    // Wound other waiters
     for (auto it = wait_q_.begin(); it != wait_q_.end();) {
         uint64_t h = *it;
+        Debug("h: %lu", h);
 
         // Already in wound set
         if (wound.count(h) > 0) {
+            ++it;
             continue;
         }
 
@@ -71,10 +86,26 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
 
         std::shared_ptr<Waiter> waiter = search->second;
 
+        // No need to wound other readers
+        if (waiter->waiters().count(requester) > 0) {
+            ++it;
+            continue;
+        }
+
         for (auto w : waiter->waiters()) {
+            Debug("w: %lu %lu.%lu", w.first, w.second.getTimestamp(), w.second.getID());
             if (ts < w.second) {
                 wound.insert(w.first);
             }
+        }
+
+        ++it;
+    }
+
+    // Wound holders
+    for (auto w : holders_) {
+        if (w.first != requester && ts < w.second) {
+            wound.insert(w.first);
         }
     }
 
@@ -115,8 +146,8 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
     }
 
     // Wait (and possibly wound)
-    ReadWait(requester, ts, wound);
     Debug("[%lu] Waiting on lock", requester);
+    ReadWait(requester, ts, wound);
     return REPLY_WAIT;
 }
 
@@ -164,8 +195,7 @@ bool WoundWait::Lock::PopWaiter() {
     return modified;
 }
 
-void WoundWait::Lock::ReleaseReadLock(uint64_t holder,
-                                      std::unordered_set<uint64_t> &notify) {
+void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64_t> &notify) {
     // Clean up waiter
     auto search = waiters_.find(holder);
     if (search != waiters_.end()) {
@@ -234,11 +264,9 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
 
 bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
                                 std::unordered_set<uint64_t> &wound) {
+    bool rw = false;
     auto search = waiters_.find(requester);
-    if (search == waiters_.end()) {
-        // Add waiter
-        AddWriteWaiter(requester, ts);
-    } else {  // I already have a waiter
+    if (search != waiters_.end()) {  // I already have a waiter
         std::shared_ptr<Waiter> w = search->second;
         bool isread = w->isread();
         bool iswrite = w->iswrite();
@@ -255,14 +283,16 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
             // Wait as read-write
             w->remove_waiter(requester);
             waiters_.erase(search);
-            AddReadWriteWaiter(requester, ts);
+            rw = true;
         } else {
             NOT_REACHABLE();
         }
     }
 
+    // Wound other waiters
     for (auto it = wait_q_.begin(); it != wait_q_.end();) {
         uint64_t h = *it;
+        Debug("h: %lu", h);
 
         // Already in wound set
         if (wound.count(h) > 0) {
@@ -279,10 +309,27 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         std::shared_ptr<Waiter> waiter = search->second;
 
         for (auto w : waiter->waiters()) {
-            if (ts < w.second) {
+            Debug("w: %lu %lu.%lu", w.first, w.second.getTimestamp(), w.second.getID());
+            if (w.first != requester && ts < w.second) {
                 wound.insert(w.first);
             }
         }
+
+        ++it;
+    }
+
+    // Wound holders
+    for (auto w : holders_) {
+        if (w.first != requester && ts < w.second) {
+            wound.insert(w.first);
+        }
+    }
+
+    // Add waiter
+    if (rw) {
+        AddReadWriteWaiter(requester, ts);
+    } else {
+        AddWriteWaiter(requester, ts);
     }
 
     return true;
@@ -313,8 +360,8 @@ int WoundWait::Lock::TryAcquireWriteLock(uint64_t requester, const Timestamp &ts
     }
 
     // Wait (and possibly wound)
-    WriteWait(requester, ts, wound);
     Debug("[%lu] Waiting on lock", requester);
+    WriteWait(requester, ts, wound);
     return REPLY_WAIT;
 }
 
