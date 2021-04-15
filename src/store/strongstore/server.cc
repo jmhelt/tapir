@@ -393,9 +393,6 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
             const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
 
             auto *reply = new PendingRWCommitCoordinatorReply(client_id, client_req_id, remote.clone());
-            // TODO: Can we delete nonblock and commit ts from reply?
-            reply->nonblock_timestamp = nonblock_ts;
-            reply->commit_timestamp = commit_ts;
             pending_rw_commit_c_replies_[transaction_id] = reply;
 
             // TODO: Handle timeout
@@ -420,7 +417,6 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
             auto reply = new PendingRWCommitCoordinatorReply(client_id, client_req_id, remote.clone());
-            reply->nonblock_timestamp = nonblock_ts;
             pending_rw_commit_c_replies_[transaction_id] = reply;
 
             transactions_.PausePrepare(transaction_id);
@@ -441,8 +437,6 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
         Debug("[%lu] Waiting for other participants", transaction_id);
 
         auto reply = new PendingRWCommitCoordinatorReply(client_id, client_req_id, remote.clone());
-        reply->nonblock_timestamp = nonblock_ts;
-        reply->participants = std::move(participants);
         pending_rw_commit_c_replies_[transaction_id] = reply;
     } else {
         NOT_REACHABLE();
@@ -471,8 +465,6 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
         const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
         transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
         const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
-
-        reply->commit_timestamp = commit_ts;
 
         const Timestamp &start_ts = transactions_.GetStartTimestamp(transaction_id);
         const std::unordered_set<int> &participants = transactions_.GetParticipants(transaction_id);
@@ -669,10 +661,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
 
             transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
 
-            auto *reply = new PendingRWCommitParticipantReply(client_id, client_req_id, remote.clone());
-            reply->coordinator_shard = coordinator;
-            reply->prepare_timestamp = prepare_ts;
-
+            auto reply = new PendingRWCommitParticipantReply(client_id, client_req_id, remote.clone());
             pending_rw_commit_p_replies_[transaction_id] = reply;
 
             // TODO: Handle timeout
@@ -703,8 +692,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
         } else if (ar.status == LockStatus::WAITING) {
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
-            auto *reply = new PendingRWCommitParticipantReply(client_id, client_req_id, remote.clone());
-            reply->coordinator_shard = coordinator;
+            auto reply = new PendingRWCommitParticipantReply(client_id, client_req_id, remote.clone());
             pending_rw_commit_p_replies_[transaction_id] = reply;
 
             transactions_.PausePrepare(transaction_id);
