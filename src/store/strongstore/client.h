@@ -95,6 +95,12 @@ class Client : public ::Client {
    private:
     const static std::size_t MAX_SHARDS = 8;
 
+    enum State {
+        EXECUTING,
+        COMMITTING,
+        ABORTED
+    };
+
     struct PendingRequest {
         PendingRequest(uint64_t id, uint64_t txnId)
             : nonblock_timestamp{},
@@ -133,6 +139,8 @@ class Client : public ::Client {
     void ROCommitCallback(uint64_t reqId, transaction_status_t status,
                           const Timestamp max_read_timestamp);
 
+    void HandleWound(uint64_t transaction_id);
+
     // choose coordinator from participants
     void CalculateCoordinatorChoices();
     int ChooseCoordinator();
@@ -149,6 +157,9 @@ class Client : public ::Client {
     const std::string client_region_;
 
     transport::Configuration &config_;
+
+    State state_;
+
     // Unique ID for this client.
     uint64_t client_id_;
 

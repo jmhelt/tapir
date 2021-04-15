@@ -109,6 +109,10 @@ message ROCommitReply {
     repeated ReadReply values = 3;
 }
 
+message Wound {
+    required uint64 transaction_id = 1;
+}
+
 message PrepareMessage {
     required TransactionMessage txn = 1;
     required TimestampMessage timestamp = 2;

@@ -5,11 +5,15 @@
 
 namespace strongstore {
 
-TransactionStore::TransactionStore(Consistency c) : consistency_{c} {}
+TransactionStore::TransactionStore(int this_shard, Consistency c) : this_shard_{this_shard}, consistency_{c} {}
 
 TransactionStore::~TransactionStore() {}
 
-void TransactionStore::PendingRWTransaction::AddReadSet(const std::string &key) {
+void TransactionStore::PendingRWTransaction::StartGet(const TransportAddress &remote, const std::string &key) {
+    if (!client_addr_) {
+        client_addr_.reset(remote.clone());
+    }
+
     transaction_.addReadSet(key, Timestamp());
 }
 
@@ -20,12 +24,17 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
     ASSERT(participants.size() > 0);
 
     start_ts_ = start_ts;
-    coordinator_ = coordinator;
     participants_ = participants;
     transaction_.add_read_write_sets(transaction);
     transaction_.set_start_time(transaction.start_time());
     nonblock_ts_ = nonblock_ts;
     commit_ts_ = std::max(commit_ts_, start_ts);
+
+    if (coordinator_ == -1) {
+        coordinator_ = coordinator;
+    } else {
+        ASSERT(coordinator_ == coordinator);
+    }
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
@@ -45,7 +54,12 @@ void TransactionStore::PendingRWTransaction::FinishCoordinatorPrepare(const Time
 void TransactionStore::PendingRWTransaction::StartParticipantPrepare(int coordinator,
                                                                      const Transaction &transaction,
                                                                      const Timestamp &nonblock_ts) {
-    coordinator_ = coordinator;
+    if (coordinator_ == -1) {
+        coordinator_ = coordinator;
+    } else {
+        ASSERT(coordinator_ == coordinator);
+    }
+
     transaction_.add_read_write_sets(transaction);
     nonblock_ts_ = nonblock_ts;
     state_ = PREPARING;
@@ -59,16 +73,21 @@ void TransactionStore::PendingRWTransaction::FinishParticipantPrepare() {
     state_ = PREPARED;
 }
 
-void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int participant_shard, const Timestamp &prepare_ts) {
+void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int coordinator, int participant, const Timestamp &prepare_ts) {
+    if (coordinator_ == -1) {
+        coordinator_ = coordinator;
+    } else {
+        ASSERT(coordinator_ == coordinator);
+    }
+
     prepare_ts_ = std::max(prepare_ts_, prepare_ts);
-    ok_participants_.insert(participant_shard);
+    ok_participants_.insert(participant);
 
     std::size_t n = participants_.size();
     std::size_t ok = ok_participants_.size();
-    if (n == 0) {
+    if (n == 0 || ok != n - 1) {
         state_ = WAIT_PARTICIPANTS;
-    } else if (ok == n - 1) {
-        Debug("set preparing");
+    } else {
         state_ = PREPARING;
     }
 }
@@ -88,11 +107,11 @@ void TransactionStore::PendingROTransaction::StartRO(const std::unordered_set<st
     }
 }
 
-void TransactionStore::StartGet(uint64_t transaction_id, const std::string &key) {
+void TransactionStore::StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == READING);
 
-    pt.AddReadSet(key);
+    pt.StartGet(remote, key);
 }
 
 void TransactionStore::FinishGet(uint64_t transaction_id, const std::string &key) {
@@ -234,6 +253,12 @@ int TransactionStore::GetCoordinator(uint64_t transaction_id) {
     return search->second.coordinator();
 }
 
+std::shared_ptr<TransportAddress> TransactionStore::GetClientAddr(uint64_t transaction_id) {
+    auto search = pending_rw_.find(transaction_id);
+    ASSERT(search != pending_rw_.end());
+    return search->second.client_addr();
+}
+
 const Timestamp &TransactionStore::GetPrepareTimestamp(uint64_t transaction_id) {
     auto search = pending_rw_.find(transaction_id);
     ASSERT(search != pending_rw_.end());
@@ -282,7 +307,7 @@ void TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     pt.set_state(PREPARING);
 }
 
-TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant_shard, const Timestamp &prepare_ts) {
+TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant, const Timestamp &prepare_ts) {
     if (aborted_.count(transaction_id) > 0) {
         return ABORTED;
     }
@@ -290,7 +315,7 @@ TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transact
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     Debug("s: %d", static_cast<int>(pt.state()));
     ASSERT(pt.state() == WAIT_PARTICIPANTS);
-    pt.ReceivePrepareOK(participant_shard, prepare_ts);
+    pt.ReceivePrepareOK(this_shard_, participant, prepare_ts);
 
     return pt.state();
 }
