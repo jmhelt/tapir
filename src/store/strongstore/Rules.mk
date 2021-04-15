@@ -15,7 +15,7 @@ OBJS-shard-client := $(LIB-latency) $(LIB-udptransport) $(LIB-store-frontend) $(
 
 OBJS-replica-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) $(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)replicaclient.o
 
-LIB-strong-store := $(o)occstore.o $(o)locktable.o $(o)transactionstore.o $(LIB-waitdie) $(OBJS-shard-client) $(OBJS-replica-client)
+LIB-strong-store := $(o)occstore.o $(o)locktable.o $(o)transactionstore.o $(LIB-woundwait) $(OBJS-shard-client) $(OBJS-replica-client)
 
 OBJS-strong-store := $(LIB-udptransport) $(OBJS-vr-replica) \
     $(LIB-message) $(LIB-strong-store) $(LIB-store-common) \

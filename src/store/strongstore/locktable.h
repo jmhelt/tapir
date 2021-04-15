@@ -7,7 +7,7 @@
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "store/common/transaction.h"
-#include "store/strongstore/waitdie.h"
+#include "store/strongstore/woundwait.h"
 
 namespace strongstore {
 
@@ -39,9 +39,9 @@ class LockTable {
     LockReleaseResult ReleaseLocks(uint64_t transaction_id, const Transaction &transaction);
 
    private:
-    WaitDie locks_;
+    WoundWait locks_;
 
-    LockAcquireResult ConvertToResult(int status);
+    LockStatus ConvertToResultStatus(int status);
 };
 
 }  // namespace strongstore

@@ -6,21 +6,23 @@ LockTable::LockTable() {}
 
 LockTable::~LockTable() {}
 
-LockAcquireResult LockTable::ConvertToResult(int status) {
+LockStatus LockTable::ConvertToResultStatus(int status) {
     if (status == REPLY_OK) {
-        return {LockStatus::ACQUIRED};
+        return ACQUIRED;
     } else if (status == REPLY_WAIT) {
-        return {LockStatus::WAITING};
+        return WAITING;
     } else if (status == REPLY_FAIL) {
-        return {LockStatus::FAIL};
+        return FAIL;
     } else {
         NOT_REACHABLE();
     }
 }
 
 LockAcquireResult LockTable::AcquireReadLock(uint64_t transaction_id, const Timestamp &ts, const std::string &key) {
-    int status = locks_.LockForRead(key, transaction_id, ts);
-    return ConvertToResult(status);
+    LockAcquireResult r;
+    int status = locks_.LockForRead(key, transaction_id, ts, r.wound_rws);
+    r.status = ConvertToResultStatus(status);
+    return r;
 }
 
 bool LockTable::HasReadLock(uint64_t transaction_id, const std::string &key) {
@@ -31,11 +33,12 @@ LockAcquireResult LockTable::AcquireLocks(uint64_t transaction_id, const Transac
     const Timestamp &start_ts = transaction.start_time();
     Debug("[%lu] start_time: %lu.%lu", transaction_id, start_ts.getTimestamp(), start_ts.getID());
 
+    LockAcquireResult r;
     int ret = REPLY_OK;
 
     // get read locks
     for (auto &read : transaction.getReadSet()) {
-        int status = locks_.LockForRead(read.first, transaction_id, start_ts);
+        int status = locks_.LockForRead(read.first, transaction_id, start_ts, r.wound_rws);
         Debug("[%lu] LockForRead returned status %d", transaction_id, status);
         if (ret == REPLY_OK && status == REPLY_WAIT) {
             ret = REPLY_WAIT;
@@ -46,7 +49,7 @@ LockAcquireResult LockTable::AcquireLocks(uint64_t transaction_id, const Transac
 
     // get write locks
     for (auto &write : transaction.getWriteSet()) {
-        int status = locks_.LockForWrite(write.first, transaction_id, start_ts);
+        int status = locks_.LockForWrite(write.first, transaction_id, start_ts, r.wound_rws);
         Debug("[%lu] LockForWrite returned status %d", transaction_id, status);
         if (ret == REPLY_OK && status == REPLY_WAIT) {
             ret = REPLY_WAIT;
@@ -55,7 +58,8 @@ LockAcquireResult LockTable::AcquireLocks(uint64_t transaction_id, const Transac
         }
     }
 
-    return ConvertToResult(ret);
+    r.status = ConvertToResultStatus(ret);
+    return r;
 }
 
 LockReleaseResult LockTable::ReleaseLocks(uint64_t transaction_id, const Transaction &transaction) {
