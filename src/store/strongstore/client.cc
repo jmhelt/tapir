@@ -236,15 +236,23 @@ void Client::HandleWound(uint64_t transaction_id) {
         return;
     }
 
-    if (state_ != EXECUTING) {
-        Debug("[%lu] Already wounded or committing", transaction_id);
+    if (state_ == ABORTED) {
+        Debug("[%lu] Already aborted", transaction_id);
         return;
     }
 
-    // Send aborts
-    Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
-
-    state_ = ABORTED;
+    if (state_ == EXECUTING) {
+        Debug("[%lu] Sending aborts", transaction_id);
+        Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
+        state_ = ABORTED;
+    } else if (state_ == COMMITTING) {
+        // Forward wound to coordinator
+        Debug("[%lu] Forwarding wound to coordinator", transaction_id);
+        int coordinator = ChooseCoordinator();
+        sclient[coordinator]->Wound(transaction_id);
+    } else {
+        NOT_REACHABLE();
+    }
 }
 
 /* Begins a transaction. All subsequent operations before a commit() or

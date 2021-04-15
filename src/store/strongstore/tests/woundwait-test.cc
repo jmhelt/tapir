@@ -960,4 +960,56 @@ TEST(WoundWait, WaitTwoLocks) {
     ASSERT_EQ(notify.size(), 0);
 }
 
+TEST(WoundWait, MultipleReadWriteLocksWound) {
+    WoundWait ww;
+
+    std::unordered_set<uint64_t> wound;
+    std::unordered_set<uint64_t> notify;
+
+    int status = ww.LockForRead("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForRead("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_OK);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForWrite("lock", 1, Timestamp(1), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 0);
+
+    status = ww.LockForWrite("lock", 2, Timestamp(0), wound);
+    ASSERT_EQ(status, REPLY_WAIT);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(wound.size(), 1);
+    ASSERT_EQ(wound.count(1), 1);
+    wound.clear();
+
+    ww.ReleaseForWrite("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+
+    ASSERT_EQ(notify.size(), 0);
+
+    ww.ReleaseForRead("lock", 1, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ_WRITE);
+
+    ASSERT_EQ(notify.size(), 1);
+    ASSERT_EQ(notify.count(2), 1);
+    notify.clear();
+
+    ww.ReleaseForWrite("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), LOCKED_FOR_READ);
+    ww.ReleaseForRead("lock", 2, notify);
+    ASSERT_EQ(ww.GetLockState("lock"), UNLOCKED);
+
+    ASSERT_EQ(notify.size(), 0);
+}
+
 };  // namespace strongstore

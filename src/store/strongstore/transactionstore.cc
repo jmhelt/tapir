@@ -138,12 +138,18 @@ void TransactionStore::PauseGet(uint64_t transaction_id, const std::string &key)
     pt.set_state(READ_WAIT);
 }
 
-void TransactionStore::ContinueGet(uint64_t transaction_id, const std::string &key) {
+TransactionState TransactionStore::ContinueGet(uint64_t transaction_id, const std::string &key) {
     (void)key;
+    if (aborted_.count(transaction_id) > 0) {
+        return ABORTED;
+    }
+
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == READ_WAIT);
 
     pt.set_state(READING);
+
+    return pt.state();
 }
 
 TransactionState TransactionStore::StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
@@ -349,7 +355,6 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
     TransactionFinishResult r;
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    Debug("s: %d", static_cast<int>(pt.state()));
     ASSERT(pt.state() == COMMITTING);
 
     r.notify_ros = std::move(pt.waiting_ros());
