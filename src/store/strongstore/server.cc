@@ -204,23 +204,30 @@ void Server::ContinueGet(uint64_t transaction_id) {
 
     Debug("[%lu] Continuing GET request %s", transaction_id, key.c_str());
 
-    transactions_.ContinueGet(transaction_id, key);
-
-    ASSERT(locks_.HasReadLock(transaction_id, key));
-
-    std::pair<Timestamp, std::string> value;
-    ASSERT(store_.get(key, value));
-
     get_reply_.Clear();
     get_reply_.mutable_rid()->set_client_id(client_id);
     get_reply_.mutable_rid()->set_client_req_id(client_req_id);
-    get_reply_.set_status(REPLY_OK);
     get_reply_.set_key(key);
 
-    get_reply_.set_val(value.second);
-    value.first.serialize(get_reply_.mutable_timestamp());
+    TransactionState s = transactions_.ContinueGet(transaction_id, key);
+    if (s == READING) {
+        ASSERT(locks_.HasReadLock(transaction_id, key));
 
-    transport_->SendMessage(this, *remote, get_reply_);
+        std::pair<Timestamp, std::string> value;
+        ASSERT(store_.get(key, value));
+
+        get_reply_.set_status(REPLY_OK);
+        get_reply_.set_val(value.second);
+
+        value.first.serialize(get_reply_.mutable_timestamp());
+
+        transport_->SendMessage(this, *remote, get_reply_);
+    } else if (s == ABORTED) {  // Already aborted
+        get_reply_.set_status(REPLY_FAIL);
+        transport_->SendMessage(this, *remote, get_reply_);
+    } else {
+        NOT_REACHABLE();
+    }
 
     delete remote;
     delete reply;
@@ -239,6 +246,7 @@ const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
 
 void Server::WoundPendingRWs(const std::unordered_set<uint64_t> &rws) {
     for (uint64_t transaction_id : rws) {
+        Debug("Wounding %lu", transaction_id);
         TransactionState s = transactions_.GetTransactionState(transaction_id);
         ASSERT(s != NOT_FOUND);
 
@@ -431,7 +439,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
         SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
 
-        // TODO: Also send abort to participants?
+        SendAbortParticipants(transaction_id, participants);
 
     } else if (s == WAIT_PARTICIPANTS) {
         Debug("[%lu] Waiting for other participants", transaction_id);
@@ -1038,7 +1046,63 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 
     Debug("[%lu] Received Wound request", transaction_id);
 
-    // TODO: Finish implementing wound
+    TransactionState state = transactions_.GetTransactionState(transaction_id);
+    if (state == NOT_FOUND) {
+        Debug("[%lu] Transaction not in progress", transaction_id);
+        return;
+    }
+
+    if (state == ABORTED) {
+        Debug("[%lu] Transaction already aborted", transaction_id);
+        return;
+    }
+
+    if (state == COMMITTING || state == COMMITTED) {
+        Debug("[%lu] Transaction already committing", transaction_id);
+        return;
+    }
+
+    ASSERT(state != PREPARED);
+
+    if (state == PREPARING || state == WAIT_PARTICIPANTS || state == PREPARE_WAIT) {
+        // Only coordinator should handle wounds
+        ASSERT(transactions_.GetCoordinator(transaction_id) == shard_idx_);
+
+        // Reply to client
+        auto search = pending_rw_commit_c_replies_.find(transaction_id);
+        if (search != pending_rw_commit_c_replies_.end()) {
+            PendingRWCommitCoordinatorReply *reply = search->second;
+
+            uint64_t client_id = reply->rid.client_id();
+            uint64_t client_req_id = reply->rid.client_req_id();
+            const TransportAddress *addr = reply->rid.addr();
+
+            SendRWCommmitCoordinatorReplyFail(*addr, client_id, client_req_id);
+
+            delete addr;
+            delete reply;
+            pending_rw_commit_c_replies_.erase(search);
+        }
+
+        // Reply to OK participants
+        auto search2 = pending_prepare_ok_replies_.find(transaction_id);
+        if (search2 != pending_prepare_ok_replies_.end()) {
+            PendingPrepareOKReply *reply = search2->second;
+            SendPrepareOKRepliesFail(reply);
+            delete reply;
+            pending_prepare_ok_replies_.erase(search2);
+        }
+
+        const std::unordered_set<int> &participants = transactions_.GetParticipants(transaction_id);
+        SendAbortParticipants(transaction_id, participants);
+    }
+
+    const Transaction &transaction = transactions_.GetTransaction(transaction_id);
+    LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
+    TransactionFinishResult fr = transactions_.Abort(transaction_id);
+
+    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingROs(fr.notify_ros);
 }
 
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
@@ -1087,19 +1151,22 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     abort_reply_.set_status(REPLY_OK);
     transport_->SendMessage(this, remote, abort_reply_);
 
+    // Reply to client for any ongoing GETs
+    ContinueGet(transaction_id);
+
     NotifyPendingRWs(rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
 }
 
 void Server::SendAbortParticipants(uint64_t transaction_id, const std::unordered_set<int> &participants) {
     for (int p : participants) {
-        // TODO: Handle timeout
-        shard_clients_[p]->Abort(
-            transaction_id,
-            [transaction_id]() {
-                Debug("[%lu] Received ABORT participant callback", transaction_id);
-            },
-            []() {}, ABORT_TIMEOUT);
+        if (p != shard_idx_) {  // Don't send abort to self (coordinator)
+            // TODO: Handle timeout
+            shard_clients_[p]->Abort(
+                transaction_id,
+                [transaction_id]() { Debug("[%lu] Received ABORT participant callback", transaction_id); },
+                []() {}, ABORT_TIMEOUT);
+        }
     }
 }
 
