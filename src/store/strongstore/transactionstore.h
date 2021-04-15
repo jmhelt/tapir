@@ -63,7 +63,7 @@ class TransactionStore {
     void FinishGet(uint64_t transaction_id, const std::string &key);
     void AbortGet(uint64_t transaction_id, const std::string &key);
     void PauseGet(uint64_t transaction_id, const std::string &key);
-    void ContinueGet(uint64_t transaction_id, const std::string &key);
+    TransactionState ContinueGet(uint64_t transaction_id, const std::string &key);
 
     TransactionState StartCoordinatorPrepare(uint64_t transaction_id, const Timestamp &start_ts,
                                              int coordinator, const std::unordered_set<int> participants,
