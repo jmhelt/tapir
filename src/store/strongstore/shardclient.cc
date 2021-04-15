@@ -39,12 +39,14 @@ using namespace std;
 using namespace proto;
 
 ShardClient::ShardClient(const transport::Configuration &config,
-                         Transport *transport, uint64_t client_id, int shard)
+                         Transport *transport, uint64_t client_id, int shard,
+                         wound_callback wcb)
     : PingInitiator(this, transport, 1),  // TODO: Assumes replica 0 is leader.
       config_{config},
       transport_{transport},
       client_id_{client_id},
-      shard_idx_{shard} {
+      shard_idx_{shard},
+      wcb_{wcb} {
     transport_->Register(this, config_, -1, -1);
 
     // TODO: Remove hardcoding
@@ -57,7 +59,7 @@ ShardClient::~ShardClient() { Latency_Dump(&opLat); }
 void ShardClient::ReceiveMessage(const TransportAddress &remote,
                                  const std::string &type,
                                  const std::string &data, void *meta_data) {
-    if (type != ping_.GetTypeName()) {
+    if (type != ping_.GetTypeName() && type != wound_.GetTypeName()) {
         Latency_End(&opLat);
     }
 
@@ -85,10 +87,19 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == ping_.GetTypeName()) {
         ping_.ParseFromString(data);
         HandlePingResponse(ping_);
+    } else if (type == wound_.GetTypeName()) {
+        wound_.ParseFromString(data);
+        HandleWound(wound_);
     } else {
         Panic("Received unexpected message type: %s", type.c_str());
     }
 }
+
+void ShardClient::HandleWound(const proto::Wound &msg) {
+    uint64_t transaction_id = msg.transaction_id();
+    Debug("Received wound for tid: %lu", transaction_id);
+    wcb_(transaction_id);
+};
 
 bool ShardClient::SendPing(size_t replica, const PingMessage &ping) {
     transport_->SendMessageToReplica(this, shard_idx_, replica_, ping);
@@ -496,6 +507,14 @@ void ShardClient::Abort(uint64_t transaction_id, abort_callback acb,
     Latency_Start(&opLat);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
+}
+
+void ShardClient::Wound(uint64_t transaction_id) {
+    Debug("[%lu] [shard %i] Sending wound", transaction_id, shard_idx_);
+
+    wound_.set_transaction_id(transaction_id);
+
+    transport_->SendMessageToReplica(this, shard_idx_, replica_, wound_);
 }
 
 void ShardClient::HandleAbortReply(const proto::AbortReply &reply) {

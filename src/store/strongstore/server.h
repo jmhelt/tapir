@@ -193,6 +193,7 @@ class Server : public TransportReceiver,
                                    proto::RWCommitParticipant &msg);
 
     void HandleAbort(const TransportAddress &remote, proto::Abort &msg);
+    void HandleWound(const TransportAddress &remote, proto::Wound &msg);
 
     void SendAbortParticipants(uint64_t transaction_id,
                                const std::unordered_set<int> &participants);
@@ -211,6 +212,8 @@ class Server : public TransportReceiver,
     void CommitCoordinatorCallback(uint64_t transaction_id, transaction_status_t status);
     void CommitParticipantCallback(uint64_t transaction_id, transaction_status_t status);
     void AbortParticipantCallback(uint64_t transaction_id);
+
+    void WoundPendingRWs(const std::unordered_set<uint64_t> &rws);
 
     void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
     void ContinueGet(uint64_t transaction_id);
@@ -261,6 +264,7 @@ class Server : public TransportReceiver,
     proto::ROCommitReply ro_commit_reply_;
     proto::AbortReply abort_reply_;
     PingMessage ping_;
+    proto::Wound wound_;
 
     Stats stats_;
 

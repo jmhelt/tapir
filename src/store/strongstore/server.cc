@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <unordered_set>
 
 namespace strongstore {
@@ -49,7 +50,7 @@ Server::Server(Consistency consistency,
                Transport *transport, const TrueTime &tt, bool debug_stats)
     : PingServer(transport),
       tt_{tt},
-      transactions_{consistency},
+      transactions_{shard_idx, consistency},
       shard_config_{shard_config},
       replica_config_{replica_config},
       transport_{transport},
@@ -62,8 +63,7 @@ Server::Server(Consistency consistency,
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
 
     for (int i = 0; i < shard_config_.n; i++) {
-        shard_clients_.push_back(
-            new ShardClient(shard_config_, transport, server_id_, i));
+        shard_clients_.push_back(new ShardClient(shard_config_, transport, server_id_, i));
     }
 
     replica_client_ =
@@ -117,6 +117,9 @@ void Server::ReceiveMessage(const TransportAddress &remote,
     } else if (type == abort_.GetTypeName()) {
         abort_.ParseFromString(data);
         HandleAbort(remote, abort_);
+    } else if (type == wound_.GetTypeName()) {
+        wound_.ParseFromString(data);
+        HandleWound(remote, wound_);
     } else if (type == ping_.GetTypeName()) {
         ping_.ParseFromString(data);
         HandlePingMessage(this, remote, ping_);
@@ -135,12 +138,13 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
 
     Debug("[%lu] Received GET request: %s", transaction_id, key.c_str());
 
-    transactions_.StartGet(transaction_id, key);
+    transactions_.StartGet(transaction_id, remote, key);
 
     LockAcquireResult r = locks_.AcquireReadLock(transaction_id, timestamp, key);
     if (r.status == LockStatus::ACQUIRED) {
-        std::pair<Timestamp, std::string> value;
+        ASSERT(r.wound_rws.size() == 0);
 
+        std::pair<Timestamp, std::string> value;
         ASSERT(store_.get(key, value));
 
         get_reply_.Clear();
@@ -155,6 +159,8 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
 
         transactions_.FinishGet(transaction_id, key);
     } else if (r.status == LockStatus::FAIL) {
+        ASSERT(r.wound_rws.size() == 0);
+
         get_reply_.Clear();
         get_reply_.mutable_rid()->CopyFrom(msg.rid());
         get_reply_.set_status(REPLY_FAIL);
@@ -175,6 +181,8 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
         pending_get_replies_[msg.transaction_id()] = reply;
 
         transactions_.PauseGet(transaction_id, key);
+
+        WoundPendingRWs(r.wound_rws);
     } else {
         NOT_REACHABLE();
     }
@@ -227,6 +235,30 @@ const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
     min_prepare_timestamp_ = prepare_timestamp;
 
     return prepare_timestamp;
+}
+
+void Server::WoundPendingRWs(const std::unordered_set<uint64_t> &rws) {
+    for (uint64_t transaction_id : rws) {
+        TransactionState s = transactions_.GetTransactionState(transaction_id);
+        ASSERT(s != NOT_FOUND);
+
+        if (s == READING || s == READ_WAIT) {
+            // Send wound to client
+            std::shared_ptr<TransportAddress> remote = transactions_.GetClientAddr(transaction_id);
+            wound_.set_transaction_id(transaction_id);
+            transport_->SendMessage(this, *remote, wound_);
+        } else if (s == PREPARING || s == WAIT_PARTICIPANTS || s == PREPARE_WAIT || s == PREPARED) {
+            // Send wound to coordinator
+            int coordinator = transactions_.GetCoordinator(transaction_id);
+            ASSERT(coordinator >= 0);
+            shard_clients_[coordinator]->Wound(transaction_id);
+
+        } else if (s == COMMITTING || s == COMMITTED || s == ABORTED) {
+            Debug("[%lu] Not wounding. Will complete soon", transaction_id);
+        } else {
+            NOT_REACHABLE();
+        }
+    }
 }
 
 void Server::NotifyPendingRWs(const std::unordered_set<uint64_t> &rws) {
@@ -355,6 +387,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
         LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
         if (ar.status == LockStatus::ACQUIRED) {
+            ASSERT(ar.wound_rws.size() == 0);
             const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
             transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
             const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
@@ -374,6 +407,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
                 []() {}, COMMIT_TIMEOUT);
 
         } else if (ar.status == LockStatus::FAIL) {
+            ASSERT(ar.wound_rws.size() == 0);
             Debug("[%lu] Coordinator prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
@@ -390,6 +424,8 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
             pending_rw_commit_c_replies_[transaction_id] = reply;
 
             transactions_.PausePrepare(transaction_id);
+
+            WoundPendingRWs(ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -431,6 +467,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
     LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
     if (ar.status == LockStatus::ACQUIRED) {
+        ASSERT(ar.wound_rws.size() == 0);
         const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
         transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
         const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
@@ -450,6 +487,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
             []() {}, COMMIT_TIMEOUT);
 
     } else if (ar.status == LockStatus::FAIL) {
+        ASSERT(ar.wound_rws.size() == 0);
         Debug("[%lu] Coordinator prepare failed", transaction_id);
         LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
@@ -465,6 +503,8 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
         Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
         transactions_.PausePrepare(transaction_id);
+
+        WoundPendingRWs(ar.wound_rws);
     } else {
         NOT_REACHABLE();
     }
@@ -624,6 +664,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
     if (s == PREPARING) {
         LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
         if (ar.status == LockStatus::ACQUIRED) {
+            ASSERT(ar.wound_rws.size() == 0);
             const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
 
             transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
@@ -642,6 +683,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
                           std::placeholders::_1, std::placeholders::_2),
                 [](int, Timestamp) {}, PREPARE_TIMEOUT);
         } else if (ar.status == LockStatus::FAIL) {
+            ASSERT(ar.wound_rws.size() == 0);
             Debug("[%lu] Participant prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
@@ -666,6 +708,8 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
             pending_rw_commit_p_replies_[transaction_id] = reply;
 
             transactions_.PausePrepare(transaction_id);
+
+            WoundPendingRWs(ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -700,6 +744,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
     LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
     if (ar.status == LockStatus::ACQUIRED) {
+        ASSERT(ar.wound_rws.size() == 0);
         const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
 
         transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
@@ -715,6 +760,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
 
     } else if (ar.status == LockStatus::FAIL) {
+        ASSERT(ar.wound_rws.size() == 0);
         Debug("[%lu] Participant prepare failed", transaction_id);
         LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
@@ -738,6 +784,8 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
         Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
         transactions_.PausePrepare(transaction_id);
+
+        WoundPendingRWs(ar.wound_rws);
     } else {
         NOT_REACHABLE();
     }
@@ -859,6 +907,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 
         LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
         if (ar.status == LockStatus::ACQUIRED) {
+            ASSERT(ar.wound_rws.size() == 0);
             const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
             transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
 
@@ -874,6 +923,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
                           transaction_id, std::placeholders::_1),
                 []() {}, COMMIT_TIMEOUT);
         } else if (ar.status == FAIL) {
+            ASSERT(ar.wound_rws.size() == 0);
             Debug("[%lu] Coordinator prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
@@ -903,6 +953,8 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
             Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
             transactions_.PausePrepare(transaction_id);
+
+            WoundPendingRWs(ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -993,6 +1045,14 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
     transactions_.Abort(transaction_id);
 }
 
+void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
+    uint64_t transaction_id = msg.transaction_id();
+
+    Debug("[%lu] Received Wound request", transaction_id);
+
+    // TODO: Finish implementing wound
+}
+
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     uint64_t transaction_id = msg.transaction_id();
 
@@ -1043,15 +1103,13 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     NotifyPendingROs(fr.notify_ros);
 }
 
-void Server::SendAbortParticipants(
-    uint64_t transaction_id, const std::unordered_set<int> &participants) {
+void Server::SendAbortParticipants(uint64_t transaction_id, const std::unordered_set<int> &participants) {
     for (int p : participants) {
         // TODO: Handle timeout
         shard_clients_[p]->Abort(
             transaction_id,
             [transaction_id]() {
-                Debug("[%lu] Received ABORT participant callback",
-                      transaction_id);
+                Debug("[%lu] Received ABORT participant callback", transaction_id);
             },
             []() {}, ABORT_TIMEOUT);
     }

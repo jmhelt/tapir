@@ -19,6 +19,7 @@ enum LockStatus {
 
 struct LockAcquireResult {
     LockStatus status;
+    std::unordered_set<uint64_t> wound_rws;
 };
 
 struct LockReleaseResult {

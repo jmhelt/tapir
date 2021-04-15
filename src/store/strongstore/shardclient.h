@@ -56,9 +56,10 @@ enum Mode {
     MODE_MVTSO
 };
 
-typedef std::function<void(transaction_status_t, const Timestamp &)>
-    ro_commit_callback;
+typedef std::function<void(transaction_status_t, const Timestamp &)> ro_commit_callback;
 typedef std::function<void()> ro_commit_timeout_callback;
+
+typedef std::function<void(uint64_t)> wound_callback;
 
 class ShardClient : public TxnClient,
                     public TransportReceiver,
@@ -66,8 +67,9 @@ class ShardClient : public TxnClient,
                     public PingTransport {
    public:
     /* Constructor needs path to shard config. */
-    ShardClient(const transport::Configuration &config, Transport *transport,
-                uint64_t client_id, int shard);
+    ShardClient(
+        const transport::Configuration &config, Transport *transport,
+        uint64_t client_id, int shard, wound_callback wcb = [](uint64_t transaction_id) {});
     virtual ~ShardClient();
 
     virtual void ReceiveMessage(const TransportAddress &remote,
@@ -113,6 +115,8 @@ class ShardClient : public TxnClient,
     void Abort(uint64_t transaction_id, abort_callback acb,
                abort_timeout_callback atcb, uint32_t timeout);
 
+    void Wound(uint64_t transaction_id);
+
     // Override PingInitiator
     virtual bool SendPing(size_t replica, const PingMessage &ping);
 
@@ -157,6 +161,7 @@ class ShardClient : public TxnClient,
     void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
     void HandleROCommitReply(const proto::ROCommitReply &reply);
     void HandleAbortReply(const proto::AbortReply &reply);
+    void HandleWound(const proto::Wound &wound);
 
     const TimestampMessage &FindMaxReadTimestamp(
         const proto::ROCommitReply &reply);
@@ -166,6 +171,7 @@ class ShardClient : public TxnClient,
     uint64_t client_id_;    // Unique ID for this client.
     int shard_idx_;         // which shard this client accesses
     int replica_;           // which replica to use for reads
+    wound_callback wcb_;
 
     std::unordered_map<uint64_t, PendingGet *> pendingGets;
     std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
@@ -183,6 +189,7 @@ class ShardClient : public TxnClient,
     proto::PrepareAbort prepare_abort_;
     proto::ROCommit ro_commit_;
     proto::Abort abort_;
+    proto::Wound wound_;
 
     proto::GetReply get_reply_;
     proto::RWCommitCoordinatorReply rw_commit_c_reply_;

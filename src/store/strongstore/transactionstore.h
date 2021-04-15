@@ -2,12 +2,14 @@
 #define _STRONG_TRANSACTION_STORE_H_
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "lib/assert.h"
 #include "lib/message.h"
+#include "lib/transport.h"
 #include "store/common/stats.h"
 #include "store/common/transaction.h"
 #include "store/common/truetime.h"
@@ -34,7 +36,7 @@ struct TransactionFinishResult {
 
 class TransactionStore {
    public:
-    TransactionStore(Consistency consistency);
+    TransactionStore(int this_shard, Consistency consistency);
     ~TransactionStore();
 
     TransactionState GetTransactionState(uint64_t transaction_id);
@@ -45,6 +47,7 @@ class TransactionStore {
     const std::unordered_set<int> &GetParticipants(uint64_t transaction_id);
     const Timestamp &GetNonBlockTimestamp(uint64_t transaction_id);
     int GetCoordinator(uint64_t transaction_id);
+    std::shared_ptr<TransportAddress> GetClientAddr(uint64_t transaction_id);
 
     const Timestamp &GetROCommitTimestamp(uint64_t transaction_id);
     const std::unordered_set<std::string> &GetROKeys(uint64_t transaction_id);
@@ -56,7 +59,7 @@ class TransactionStore {
     void ContinueRO(uint64_t transaction_id);
     void CommitRO(uint64_t transaction_id);
 
-    void StartGet(uint64_t transaction_id, const std::string &key);
+    void StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key);
     void FinishGet(uint64_t transaction_id, const std::string &key);
     void AbortGet(uint64_t transaction_id, const std::string &key);
     void PauseGet(uint64_t transaction_id, const std::string &key);
@@ -88,7 +91,7 @@ class TransactionStore {
    private:
     class PendingRWTransaction {
        public:
-        PendingRWTransaction() : state_{READING} {}
+        PendingRWTransaction() : client_addr_{nullptr}, coordinator_{-1}, state_{READING} {}
         ~PendingRWTransaction() {}
 
         TransactionState state() const { return state_; }
@@ -100,6 +103,7 @@ class TransactionStore {
         const Timestamp &commit_ts() const { return commit_ts_; }
         const Transaction &transaction() const { return transaction_; }
         int coordinator() const { return coordinator_; }
+        std::shared_ptr<TransportAddress> client_addr() const { return client_addr_; }
 
         const std::unordered_set<int> &participants() const { return participants_; }
 
@@ -108,7 +112,7 @@ class TransactionStore {
             waiting_ros_.insert(transaction_id);
         }
 
-        void AddReadSet(const std::string &key);
+        void StartGet(const TransportAddress &remote, const std::string &key);
 
         void StartCoordinatorPrepare(const Timestamp &start_ts, int coordinator,
                                      const std::unordered_set<int> participants,
@@ -117,7 +121,7 @@ class TransactionStore {
 
         void FinishCoordinatorPrepare(const Timestamp &prepare_ts);
 
-        void ReceivePrepareOK(int participant_shard, const Timestamp &prepare_ts);
+        void ReceivePrepareOK(int coordinator, int participant, const Timestamp &prepare_ts);
 
         void StartParticipantPrepare(int coordinator,
                                      const Transaction &transaction,
@@ -134,6 +138,7 @@ class TransactionStore {
         Timestamp nonblock_ts_;
         Timestamp prepare_ts_;
         Timestamp commit_ts_;
+        std::shared_ptr<TransportAddress> client_addr_;
         int coordinator_;
         TransactionState state_;
     };
@@ -172,6 +177,7 @@ class TransactionStore {
     std::unordered_set<uint64_t> committed_;
     std::unordered_set<uint64_t> aborted_;
     Stats stats_;
+    int this_shard_;
     Consistency consistency_;
 };
 
