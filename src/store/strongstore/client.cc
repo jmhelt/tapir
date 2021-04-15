@@ -241,7 +241,7 @@ void Client::HandleWound(uint64_t transaction_id) {
         return;
     }
 
-    // TODO: send aborts
+    // Send aborts
     Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
 
     state_ = ABORTED;

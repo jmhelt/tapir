@@ -129,9 +129,6 @@ class Server : public TransportReceiver,
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
-        Timestamp commit_timestamp;
-        Timestamp nonblock_timestamp;
-        std::unordered_set<int> participants;
     };
     class PendingRWCommitParticipantReply {
        public:
@@ -140,8 +137,6 @@ class Server : public TransportReceiver,
                                         TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
-        Timestamp prepare_timestamp;
-        int coordinator_shard;
     };
     class PendingPrepareOKReply {
        public:
