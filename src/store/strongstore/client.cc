@@ -32,6 +32,7 @@
 #include "store/strongstore/client.h"
 
 #include <cmath>
+#include <functional>
 
 #include "lib/configuration.h"
 #include "lib/latency.h"
@@ -53,6 +54,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       net_config_{net_config},
       client_region_{client_region},
       config_{config},
+      state_{EXECUTING},
       client_id_{client_id},
       nshards_(nShards),
       transport_{transport},
@@ -69,8 +71,8 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
 
     /* Start a client for each shard. */
     for (uint64_t i = 0; i < nshards_; i++) {
-        ShardClient *shardclient =
-            new ShardClient(config_, transport_, client_id_, i);
+        ShardClient *shardclient = new ShardClient(config_, transport_, client_id_, i,
+                                                   std::bind(&Client::HandleWound, this, std::placeholders::_1));
         bclient.push_back(new BufferClient(shardclient));
         sclient.push_back(shardclient);
     }
@@ -228,6 +230,23 @@ Timestamp Client::ChooseNonBlockTimestamp() {
     return {now.earliest() + lat, client_id_};
 }
 
+void Client::HandleWound(uint64_t transaction_id) {
+    if (transaction_id != t_id) {
+        Debug("[%lu] Wound for wrong tid: %lu", t_id, transaction_id);
+        return;
+    }
+
+    if (state_ != EXECUTING) {
+        Debug("[%lu] Already wounded or committing", transaction_id);
+        return;
+    }
+
+    // TODO: send aborts
+    Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
+
+    state_ = ABORTED;
+}
+
 /* Begins a transaction. All subsequent operations before a commit() or
  * abort() are part of this transaction.
  *
@@ -235,6 +254,8 @@ Timestamp Client::ChooseNonBlockTimestamp() {
  */
 void Client::Begin(bool is_retry, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
+    state_ = EXECUTING;
+
     if (debug_stats_) {
         Latency_Start(&op_lat_);
     }
@@ -265,6 +286,12 @@ void Client::Begin(bool is_retry, begin_callback bcb,
 /* Returns the value corresponding to the supplied key. */
 void Client::Get(const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
+    if (state_ == ABORTED) {
+        Debug("[%lu] Already aborted", t_id);
+        gcb(REPLY_FAIL, "", "", Timestamp());
+        return;
+    }
+
     transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
@@ -403,10 +430,19 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
 /* Attempts to commit the ongoing transaction. */
 void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
+    if (state_ == ABORTED) {
+        Debug("[%lu] Already aborted", t_id);
+        ccb(ABORTED_SYSTEM);
+        return;
+    }
+
+    state_ = COMMITTING;
+
     if (debug_stats_) {
         Latency_End(&op_lat_);
         Latency_Start(&commit_lat_);
     }
+
     uint64_t reqId = lastReqId++;
     PendingRequest *req = new PendingRequest(reqId, t_id);
     pendingReqs[reqId] = req;
@@ -426,6 +462,12 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     Debug("[%lu] ABORT", t_id);
 
+    if (state_ == ABORTED) {
+        Debug("[%lu] Already aborted", t_id);
+        acb();
+        return;
+    }
+
     uint64_t reqId = lastReqId++;
     PendingRequest *req = new PendingRequest(reqId, t_id);
     pendingReqs[reqId] = req;
@@ -438,6 +480,8 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
         bclient[p]->Abort(
             std::bind(&Client::AbortCallback, this, req->id), []() {}, timeout);
     }
+
+    state_ = ABORTED;
 }
 
 void Client::AbortCallback(uint64_t reqId) {
@@ -465,6 +509,7 @@ void Client::AbortCallback(uint64_t reqId) {
 void Client::ROCommit(const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
+    state_ = COMMITTING;
     t_id++;
 
     const Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
