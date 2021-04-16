@@ -306,11 +306,17 @@ void TransactionStore::PausePrepare(uint64_t transaction_id) {
     pt.set_state(PREPARE_WAIT);
 }
 
-void TransactionStore::ContinuePrepare(uint64_t transaction_id) {
-    PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.state() == PREPARE_WAIT);
+TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
+    if (aborted_.count(transaction_id) > 0) {
+        return ABORTED;
+    }
 
-    pt.set_state(PREPARING);
+    PendingRWTransaction &pt = pending_rw_[transaction_id];
+    if (pt.state() == PREPARE_WAIT) {
+        pt.set_state(PREPARING);
+    }
+
+    return pt.state();
 }
 
 TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant, const Timestamp &prepare_ts) {

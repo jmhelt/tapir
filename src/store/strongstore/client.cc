@@ -244,7 +244,6 @@ void Client::HandleWound(uint64_t transaction_id) {
     if (state_ == EXECUTING) {
         Debug("[%lu] Sending aborts", transaction_id);
         Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
-        state_ = ABORTED;
     } else if (state_ == COMMITTING) {
         // Forward wound to coordinator
         Debug("[%lu] Forwarding wound to coordinator", transaction_id);
@@ -262,8 +261,6 @@ void Client::HandleWound(uint64_t transaction_id) {
  */
 void Client::Begin(bool is_retry, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
-    state_ = EXECUTING;
-
     if (debug_stats_) {
         Latency_Start(&op_lat_);
     }
@@ -273,6 +270,8 @@ void Client::Begin(bool is_retry, begin_callback bcb,
     }
 
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
+        state_ = EXECUTING;
+
         if (ping_replicas_ && first_) {
             for (uint64_t i = 0; i < nshards_; i++) {
                 sclient[i]->StartPings();
@@ -294,13 +293,13 @@ void Client::Begin(bool is_retry, begin_callback bcb,
 /* Returns the value corresponding to the supplied key. */
 void Client::Get(const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
-    if (state_ == ABORTED) {
-        Debug("[%lu] Already aborted", t_id);
-        gcb(REPLY_FAIL, "", "", Timestamp());
-        return;
-    }
-
     transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
+        if (state_ == ABORTED) {
+            Debug("[%lu] Already aborted", t_id);
+            gcb(REPLY_FAIL, "", "", Timestamp());
+            return;
+        }
+
         Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
         // Contact the appropriate shard to get the value.
         int i = (*part)(key, nshards_, -1, participants_);
@@ -476,6 +475,8 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
         return;
     }
 
+    state_ = ABORTED;
+
     uint64_t reqId = lastReqId++;
     PendingRequest *req = new PendingRequest(reqId, t_id);
     pendingReqs[reqId] = req;
@@ -488,8 +489,6 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
         bclient[p]->Abort(
             std::bind(&Client::AbortCallback, this, req->id), []() {}, timeout);
     }
-
-    state_ = ABORTED;
 }
 
 void Client::AbortCallback(uint64_t reqId) {
