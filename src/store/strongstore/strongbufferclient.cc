@@ -69,12 +69,6 @@ void BufferClient::RWCommitParticipant(uint64_t transaction_id,
                                        nonblock_timestamp, pcb, ptcb, timeout);
 }
 
-void BufferClient::AddReadSet(const std::string &key,
-                              const Timestamp &timestamp) {
-    this->txn.addReadSet(key, timestamp);
-    this->readSet.insert(std::make_pair(key, std::make_tuple("", timestamp)));
-}
-
 void BufferClient::ROCommit(uint64_t transaction_id,
                             const std::vector<std::string> &keys,
                             const Timestamp &commit_timestamp,

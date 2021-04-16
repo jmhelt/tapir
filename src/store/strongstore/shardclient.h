@@ -33,6 +33,7 @@
 #define _STRONG_SHARDCLIENT_H_
 
 #include <set>
+#include <vector>
 
 #include "lib/assert.h"
 #include "lib/latency.h"
@@ -43,6 +44,7 @@
 #include "store/common/promise.h"
 #include "store/common/timestamp.h"
 #include "store/common/transaction.h"
+#include "store/strongstore/preparedtransaction.h"
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore {
@@ -56,7 +58,7 @@ enum Mode {
     MODE_MVTSO
 };
 
-typedef std::function<void(transaction_status_t, const Timestamp &)> ro_commit_callback;
+typedef std::function<void(int, const std::vector<PreparedTransaction> &, const Timestamp &)> ro_commit_callback;
 typedef std::function<void()> ro_commit_timeout_callback;
 
 typedef std::function<void(uint64_t)> wound_callback;
