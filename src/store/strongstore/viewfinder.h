@@ -22,13 +22,6 @@ class CommittedTransaction {
     bool committed;
 };
 
-class Value {
-   public:
-    uint64_t transaction_id;
-    std::string key;
-    std::string val;
-};
-
 enum SnapshotState {
     WAIT,
     COMMIT
@@ -48,12 +41,11 @@ class ViewFinder {
     void StartRO(uint64_t transaction_id, const std::set<int> &participants);
     void CommitRO(uint64_t transaction_id);
 
-    SnapshotResult ReceiveFastPath(uint64_t transaction_id, int shard_idx);
+    SnapshotResult ReceiveFastPath(uint64_t transaction_id, int shard_idx,
+                                   const std::vector<Value> &values,
+                                   const std::vector<PreparedTransaction> &prepares);
 
     SnapshotResult ReceiveSlowPath();
-
-    void FindCommittedKeys(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
-                           std::unordered_map<uint64_t, std::vector<Value>> &values);
 
     SnapshotResult FindSnapshot(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
                                 std::vector<CommittedTransaction> &committed);
@@ -61,6 +53,10 @@ class ViewFinder {
    private:
     uint64_t cur_transaction_id_;
     std::unordered_set<int> participants_;
+    std::vector<Value> values_;
+    std::unordered_map<uint64_t, PreparedTransaction> prepares_;
+
+    void FindCommittedKeys();
 };
 
 }  // namespace strongstore

@@ -138,6 +138,7 @@ class Client : public ::Client {
     void AbortCallback(uint64_t reqId);
 
     void ROCommitCallback(uint64_t reqId, int shard_idx,
+                          const std::vector<Value> &values,
                           const std::vector<PreparedTransaction> &prepares,
                           const Timestamp max_read_timestamp);
 
