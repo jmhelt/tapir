@@ -58,7 +58,11 @@ enum Mode {
     MODE_MVTSO
 };
 
-typedef std::function<void(int, const std::vector<PreparedTransaction> &, const Timestamp &)> ro_commit_callback;
+typedef std::function<void(int, const std::vector<Value> &,
+                           const std::vector<PreparedTransaction> &,
+                           const Timestamp &)>
+    ro_commit_callback;
+
 typedef std::function<void()> ro_commit_timeout_callback;
 
 typedef std::function<void(uint64_t)> wound_callback;

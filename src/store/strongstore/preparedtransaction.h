@@ -1,6 +1,7 @@
 #ifndef _STRONG_PREPARED_TRANSACTION_H_
 #define _STRONG_PREPARED_TRANSACTION_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,26 @@
 #include "store/strongstore/strong-proto.pb.h"
 
 namespace strongstore {
+
+class Value {
+   public:
+    Value(uint64_t transaction_id, const Timestamp &ts,
+          const std::string &key, const std::string &val);
+    Value(const proto::ReadReply &msg);
+    ~Value();
+
+    uint64_t
+    transaction_id() const { return transaction_id_; }
+    const Timestamp &ts() const { return ts_; }
+    const std::string key() const { return key_; }
+    const std::string val() const { return val_; }
+
+   private:
+    uint64_t transaction_id_;
+    Timestamp ts_;
+    std::string key_;
+    std::string val_;
+};
 
 class PreparedTransaction {
    public:
@@ -19,9 +40,15 @@ class PreparedTransaction {
 
     void serialize(proto::PreparedTransactionMessage *msg) const;
 
-    uint64_t transaction_id() const { return transaction_id_; }
     const Timestamp &prepare_ts() const { return prepare_ts_; }
+    void update_prepare_ts(const Timestamp &prepare_ts) { prepare_ts_ = std::max(prepare_ts_, prepare_ts); }
+
+    uint64_t transaction_id() const { return transaction_id_; }
+
     const std::unordered_map<std::string, std::string> &write_set() const { return write_set_; }
+    void add_write_set(const std::unordered_map<std::string, std::string> &write_set) {
+        write_set_.insert(write_set.begin(), write_set.end());
+    }
 
    private:
     uint64_t transaction_id_;

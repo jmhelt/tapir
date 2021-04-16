@@ -557,12 +557,14 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
         bclient[s.first]->ROCommit(
             t_id, s.second, commit_timestamp, min_read_timestamp_,
             std::bind(&Client::ROCommitCallback, this, req->id,
-                      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
+                      std::placeholders::_1, std::placeholders::_2,
+                      std::placeholders::_3, std::placeholders::_4),
             []() {}, timeout);
     }
 }
 
 void Client::ROCommitCallback(uint64_t reqId, int shard_idx,
+                              const std::vector<Value> &values,
                               const std::vector<PreparedTransaction> &prepares,
                               const Timestamp max_read_timestamp) {
     Debug("[%lu] ROCommit callback", t_id);
@@ -573,7 +575,7 @@ void Client::ROCommitCallback(uint64_t reqId, int shard_idx,
         return;
     }
 
-    SnapshotResult r = vf_.ReceiveFastPath(t_id, shard_idx);
+    SnapshotResult r = vf_.ReceiveFastPath(t_id, shard_idx, values, prepares);
     if (r.state == COMMIT) {
         PendingRequest *req = itr->second;
 
