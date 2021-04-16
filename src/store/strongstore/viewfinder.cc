@@ -56,6 +56,10 @@ void ViewFinder::FindCommittedKeys() {
         Debug("prepare: %lu", p.second.transaction_id());
     }
 
+    if (prepares_.size() == 0) {
+        return;
+    }
+
     for (Value &v : values_) {
         uint64_t transaction_id = v.transaction_id();
         auto search = prepares_.find(transaction_id);
