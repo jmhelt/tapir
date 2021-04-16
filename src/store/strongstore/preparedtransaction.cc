@@ -2,6 +2,15 @@
 
 namespace strongstore {
 
+Value::Value(uint64_t transaction_id, const Timestamp &ts,
+             const std::string &key, const std::string &val)
+    : transaction_id_{transaction_id}, ts_{ts}, key_{key}, val_{val} {}
+
+Value::Value(const proto::ReadReply &msg)
+    : transaction_id_{msg.transaction_id()}, ts_{msg.timestamp()}, key_{msg.key()}, val_{msg.val()} {}
+
+Value::~Value() {}
+
 PreparedTransaction::PreparedTransaction(uint64_t transaction_id, const Timestamp &prepare_ts,
                                          const std::unordered_map<std::string, std::string> &write_set)
     : transaction_id_{transaction_id}, prepare_ts_{prepare_ts}, write_set_{write_set} {}

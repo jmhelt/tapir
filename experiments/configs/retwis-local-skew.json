@@ -36,8 +36,8 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 1,
-  "client_processes_per_client_node": 1,
+  "client_total": 6,
+  "client_processes_per_client_node": 6,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
