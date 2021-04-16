@@ -49,7 +49,7 @@ class WoundWait {
    private:
     class Waiter {
        public:
-        Waiter() : write_{false} {}
+        Waiter() : first_waiter_{static_cast<uint64_t>(-1)}, write_{false} {}
         Waiter(bool r, bool w, uint64_t waiter, const Timestamp &ts)
             : waiters_{},
               write_{w},
@@ -63,7 +63,13 @@ class WoundWait {
         bool iswrite() const { return write_; }
         void set_write(bool w) { write_ = w; }
 
+        uint64_t first_waiter() const { return first_waiter_; }
+
         void add_waiter(uint64_t w, const Timestamp &ts) {
+            if (waiters_.empty()) {
+                first_waiter_ = w;
+            }
+
             waiters_[w] = ts;
         }
 
@@ -73,6 +79,7 @@ class WoundWait {
 
        private:
         std::unordered_map<uint64_t, Timestamp> waiters_;
+        uint64_t first_waiter_;
         bool write_;
         bool read_;
     };
@@ -110,11 +117,8 @@ class WoundWait {
         void AddWriteWaiter(uint64_t requester, const Timestamp &ts);
         void AddReadWriteWaiter(uint64_t requester, const Timestamp &ts);
 
-        bool PopWaiter();
+        void PopWaiter(std::unordered_set<uint64_t> &notify);
     };
-
-    bool Notify(const std::string &lock, uint64_t waiter);
-    void Notify(const std::string &lock, std::unordered_set<uint64_t> &notify);
 
     /* Global store which keep key -> (timestamp, value) list. */
     std::unordered_map<std::string, Lock> locks_;

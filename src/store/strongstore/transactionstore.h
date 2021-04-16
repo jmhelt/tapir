@@ -78,7 +78,7 @@ class TransactionStore {
 
     void AbortPrepare(uint64_t transaction_id);
     void PausePrepare(uint64_t transaction_id);
-    void ContinuePrepare(uint64_t transaction_id);
+    TransactionState ContinuePrepare(uint64_t transaction_id);
 
     TransactionState CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant_shard, const Timestamp &prepare_ts);
     TransactionState ParticipantReceivePrepareOK(uint64_t transaction_id);
