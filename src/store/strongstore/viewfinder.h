@@ -57,6 +57,7 @@ class ViewFinder {
     std::unordered_map<uint64_t, PreparedTransaction> prepares_;
 
     void FindCommittedKeys();
+    void CheckCommit();
 };
 
 }  // namespace strongstore
