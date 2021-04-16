@@ -33,6 +33,16 @@ void WoundWait::Lock::AddReadWriteWaiter(uint64_t requester, const Timestamp &ts
 
 bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
                                std::unordered_set<uint64_t> &wound) {
+    Debug("holders before:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters before");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
+
     auto search = waiters_.find(requester);
     if (search != waiters_.end()) {  // I already have a waiter
         std::shared_ptr<Waiter> w = search->second;
@@ -70,12 +80,6 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
     for (auto it = wait_q_.begin(); it != wait_q_.end();) {
         uint64_t h = *it;
 
-        // Already in wound set
-        if (wound.count(h) > 0) {
-            ++it;
-            continue;
-        }
-
         // Waiter already released lock
         auto search = waiters_.find(h);
         if (search == waiters_.end()) {
@@ -92,7 +96,8 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
         }
 
         for (auto w : waiter->waiters()) {
-            if (ts < w.second) {
+            Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
+            if (w.first != requester && ts < w.second) {
                 wound.insert(w.first);
             }
         }
@@ -102,9 +107,20 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
 
     // Wound holders
     for (auto w : holders_) {
+        Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
         if (w.first != requester && ts < w.second) {
             wound.insert(w.first);
         }
+    }
+
+    Debug("holders after:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters after");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
     }
 
     return true;
@@ -149,10 +165,8 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
     return REPLY_WAIT;
 }
 
-bool WoundWait::Lock::PopWaiter() {
-    bool modified = false;
-
-    for (std::size_t nh = holders_.size(); !wait_q_.empty() && nh < 2; nh = holders_.size()) {
+void WoundWait::Lock::PopWaiter(std::unordered_set<uint64_t> &notify) {
+    while (!wait_q_.empty()) {
         uint64_t next = wait_q_.front();
         auto search = waiters_.find(next);
         if (search == waiters_.end()) {
@@ -160,59 +174,94 @@ bool WoundWait::Lock::PopWaiter() {
             continue;
         }
 
-        if (nh == 1 && holders_.count(next) == 0) {
-            break;
-        }
-
-        wait_q_.pop_front();
-
+        std::size_t nh = holders_.size();
         std::shared_ptr<Waiter> w = search->second;
-
         bool isread = w->isread();
         bool iswrite = w->iswrite();
-        if (iswrite && holders_.count(next) > 0) {
-            state_ = LOCKED_FOR_READ_WRITE;
-        } else if (isread && iswrite) {
-            state_ = LOCKED_FOR_READ_WRITE;
-        } else if (iswrite) {
-            state_ = LOCKED_FOR_WRITE;
-        } else {
-            state_ = LOCKED_FOR_READ;
-        }
 
-        holders_ = std::move(w->waiters());
-        for (auto h : holders_) {
-            waiters_.erase(h.first);
+        if (nh == 0) {
+            wait_q_.pop_front();
+            if (isread && iswrite) {
+                state_ = LOCKED_FOR_READ_WRITE;
+            } else if (iswrite) {
+                state_ = LOCKED_FOR_WRITE;
+            } else {
+                state_ = LOCKED_FOR_READ;
+            }
+
+            holders_ = std::move(w->waiters());
+            waiters_.erase(search);  // If next not in waiters anymore
+            for (auto h : holders_) {
+                waiters_.erase(h.first);
+            }
+
+            for (auto h : holders_) {
+                notify.insert(h.first);
+            }
+        } else if (state_ == LOCKED_FOR_READ) {
+            if (nh == 1 && iswrite && holders_.count(next) > 0) {
+                wait_q_.pop_front();
+                waiters_.erase(search);
+                notify.insert(next);
+                // Merge into rw lock
+                state_ = LOCKED_FOR_READ_WRITE;
+            } else if (!iswrite) {
+                wait_q_.pop_front();
+                waiters_.erase(search);  // If next not in waiters anymore
+                for (auto h : w->waiters()) {
+                    holders_.insert(h);
+                    notify.insert(h.first);
+                    waiters_.erase(h.first);
+                }
+            } else {
+                break;
+            }
+        } else if (state_ == LOCKED_FOR_WRITE || state_ == LOCKED_FOR_READ_WRITE) {
+            break;
         }
-        modified = true;
     }
 
     if (holders_.size() == 0) {
         state_ = UNLOCKED;
     }
-
-    return modified;
 }
 
 void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64_t> &notify) {
+    Debug("holders before:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters before");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
+
     // Clean up waiter
     auto search = waiters_.find(holder);
     if (search != waiters_.end()) {
         std::shared_ptr<Waiter> w = search->second;
 
         if (w->iswrite()) {
+            Debug("downgrade waiter to w only");
             w->set_read(false);
         } else if (w->waiters().size() > 1) {
+            Debug("remove waiter");
             w->remove_waiter(holder);
-            waiters_.erase(search);
-        } else {
-            waiters_.erase(search);
-        }
-    }
+            for (auto w2 : w->waiters()) {
+                Debug("w2: %lu", w2.first);
+            }
 
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
+            if (holder != w->first_waiter()) {
+                Debug("erase self");
+                waiters_.erase(search);
+            }
+        } else {
+            uint64_t first_waiter = w->first_waiter();
+            Debug("erase self and first waiter: %lu", first_waiter);
+            waiters_.erase(search);
+            waiters_.erase(first_waiter);
+        }
     }
 
     if (holders_.count(holder) > 0 &&
@@ -224,22 +273,32 @@ void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64
         }
 
         holders_.erase(holder);
-
-        bool popped = PopWaiter();
-        if (popped) {
-            for (auto h : holders_) {
-                notify.insert(h.first);
-            }
-        }
     }
+
+    PopWaiter(notify);
 
     Debug("holders after:");
     for (auto h : holders_) {
         Debug("%lu", h.first);
     }
+
+    Debug("waiters after");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
 }
 
 void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint64_t> &notify) {
+    Debug("holders before:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters before");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
+
     // Clean up waiter
     auto search = waiters_.find(holder);
     if (search != waiters_.end()) {
@@ -247,14 +306,11 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
 
         if (w->isread()) {
             w->set_write(false);
+            Debug("downgrade waiter to r only");
         } else {
+            Debug("erase waiter");
             waiters_.erase(search);
         }
-    }
-
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
     }
 
     if (holders_.count(holder) > 0 &&
@@ -266,23 +322,33 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
         }
 
         holders_.erase(holder);
-
-        bool popped = PopWaiter();
-        if (popped) {
-            for (auto h : holders_) {
-                notify.insert(h.first);
-            }
-        }
     }
+
+    PopWaiter(notify);
 
     Debug("holders after:");
     for (auto h : holders_) {
         Debug("%lu", h.first);
     }
+
+    Debug("waiters after");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
 }
 
 bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
                                 std::unordered_set<uint64_t> &wound) {
+    Debug("holders before:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters before");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
+    }
+
     bool rw = false;
     auto search = waiters_.find(requester);
     if (search != waiters_.end()) {  // I already have a waiter
@@ -312,12 +378,6 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
     for (auto it = wait_q_.begin(); it != wait_q_.end();) {
         uint64_t h = *it;
 
-        // Already in wound set
-        if (wound.count(h) > 0) {
-            ++it;
-            continue;
-        }
-
         // Waiter already released lock
         auto search = waiters_.find(h);
         if (search == waiters_.end()) {
@@ -328,6 +388,7 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         std::shared_ptr<Waiter> waiter = search->second;
 
         for (auto w : waiter->waiters()) {
+            Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
             if (w.first != requester && ts < w.second) {
                 wound.insert(w.first);
             }
@@ -338,6 +399,7 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
 
     // Wound holders
     for (auto w : holders_) {
+        Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
         if (w.first != requester && ts < w.second) {
             wound.insert(w.first);
         }
@@ -348,6 +410,16 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         AddReadWriteWaiter(requester, ts);
     } else {
         AddWriteWaiter(requester, ts);
+    }
+
+    Debug("holders after:");
+    for (auto h : holders_) {
+        Debug("%lu", h.first);
+    }
+
+    Debug("waiters after");
+    for (uint64_t w : wait_q_) {
+        Debug("%lu", w);
     }
 
     return true;
@@ -387,10 +459,12 @@ bool WoundWait::Lock::isWriteNext() {
     while (!wait_q_.empty()) {
         auto search = waiters_.find(wait_q_.front());
         if (search == waiters_.end()) {
+            Debug("%lu gone", wait_q_.front());
             wait_q_.pop_front();
             continue;
         }
 
+        Debug("%lu found", wait_q_.front());
         return search->second->iswrite();
     }
 
@@ -449,26 +523,6 @@ int WoundWait::LockForWrite(const std::string &lock, uint64_t requester,
     return ret;
 }
 
-bool WoundWait::Notify(const std::string &lock, uint64_t waiter) {
-    waiting_[waiter].erase(lock);
-    if (waiting_[waiter].size() == 0) {
-        waiting_.erase(waiter);
-        return true;
-    }
-
-    return false;
-}
-
-void WoundWait::Notify(const std::string &lock, std::unordered_set<uint64_t> &notify) {
-    for (auto it = notify.begin(); it != notify.end();) {
-        if (Notify(lock, *it)) {
-            ++it;
-        } else {
-            it = notify.erase(it);
-        }
-    }
-}
-
 void WoundWait::ReleaseForRead(const std::string &lock, uint64_t holder,
                                std::unordered_set<uint64_t> &notify) {
     if (locks_.find(lock) == locks_.end()) {
@@ -478,9 +532,6 @@ void WoundWait::ReleaseForRead(const std::string &lock, uint64_t holder,
     Lock &l = locks_[lock];
 
     l.ReleaseReadLock(holder, notify);
-
-    Notify(lock, holder);
-    Notify(lock, notify);
 }
 
 void WoundWait::ReleaseForWrite(const std::string &lock, uint64_t holder,
@@ -492,8 +543,5 @@ void WoundWait::ReleaseForWrite(const std::string &lock, uint64_t holder,
     Lock &l = locks_[lock];
 
     l.ReleaseWriteLock(holder, notify);
-
-    Notify(lock, holder);
-    Notify(lock, notify);
 }
 };  // namespace strongstore

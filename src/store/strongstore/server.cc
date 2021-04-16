@@ -222,6 +222,8 @@ void Server::ContinueGet(uint64_t transaction_id) {
         value.first.serialize(get_reply_.mutable_timestamp());
 
         transport_->SendMessage(this, *remote, get_reply_);
+
+        transactions_.FinishGet(transaction_id, key);
     } else if (s == ABORTED) {  // Already aborted
         get_reply_.set_status(REPLY_FAIL);
         transport_->SendMessage(this, *remote, get_reply_);
@@ -232,8 +234,6 @@ void Server::ContinueGet(uint64_t transaction_id) {
     delete remote;
     delete reply;
     pending_get_replies_.erase(search);
-
-    transactions_.FinishGet(transaction_id, key);
 }
 
 const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
@@ -271,6 +271,7 @@ void Server::WoundPendingRWs(const std::unordered_set<uint64_t> &rws) {
 
 void Server::NotifyPendingRWs(const std::unordered_set<uint64_t> &rws) {
     for (uint64_t waiting_rw : rws) {
+        Debug("waiting_rw: %lu", waiting_rw);
         ContinueGet(waiting_rw);
         ContinueCoordinatorPrepare(waiting_rw);
         ContinueParticipantPrepare(waiting_rw);
@@ -464,47 +465,54 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
     uint64_t client_req_id = reply->rid.client_req_id();
     const TransportAddress *remote = reply->rid.addr();
 
-    transactions_.ContinuePrepare(transaction_id);
+    TransactionState s = transactions_.ContinuePrepare(transaction_id);
+    if (s == PREPARING) {
+        const Transaction &transaction = transactions_.GetTransaction(transaction_id);
+        LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
+        if (ar.status == LockStatus::ACQUIRED) {
+            ASSERT(ar.wound_rws.size() == 0);
+            const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
+            transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
+            const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
 
-    const Transaction &transaction = transactions_.GetTransaction(transaction_id);
-    LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
-    if (ar.status == LockStatus::ACQUIRED) {
-        ASSERT(ar.wound_rws.size() == 0);
-        const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
-        transactions_.FinishCoordinatorPrepare(transaction_id, prepare_ts);
-        const Timestamp &commit_ts = transactions_.GetRWCommitTimestamp(transaction_id);
+            const Timestamp &start_ts = transactions_.GetStartTimestamp(transaction_id);
+            const std::unordered_set<int> &participants = transactions_.GetParticipants(transaction_id);
+            const Timestamp &nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
 
-        const Timestamp &start_ts = transactions_.GetStartTimestamp(transaction_id);
-        const std::unordered_set<int> &participants = transactions_.GetParticipants(transaction_id);
-        const Timestamp &nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
+            // TODO: Handle timeout
+            replica_client_->CoordinatorCommit(
+                transaction_id, start_ts, shard_idx_,
+                participants, transaction, nonblock_ts, commit_ts,
+                std::bind(&Server::CommitCoordinatorCallback, this,
+                          transaction_id, std::placeholders::_1),
+                []() {}, COMMIT_TIMEOUT);
 
-        // TODO: Handle timeout
-        replica_client_->CoordinatorCommit(
-            transaction_id, start_ts, shard_idx_,
-            participants, transaction, nonblock_ts, commit_ts,
-            std::bind(&Server::CommitCoordinatorCallback, this,
-                      transaction_id, std::placeholders::_1),
-            []() {}, COMMIT_TIMEOUT);
+        } else if (ar.status == LockStatus::FAIL) {
+            ASSERT(ar.wound_rws.size() == 0);
+            Debug("[%lu] Coordinator prepare failed", transaction_id);
+            LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
-    } else if (ar.status == LockStatus::FAIL) {
-        ASSERT(ar.wound_rws.size() == 0);
-        Debug("[%lu] Coordinator prepare failed", transaction_id);
-        LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
+            SendRWCommmitCoordinatorReplyFail(*remote, client_id, client_req_id);
+            delete remote;
+            delete reply;
+            pending_rw_commit_c_replies_.erase(search);
 
-        SendRWCommmitCoordinatorReplyFail(*remote, client_id, client_req_id);
-        delete remote;
-        delete reply;
-        pending_rw_commit_c_replies_.erase(search);
+            NotifyPendingRWs(rr.notify_rws);
 
-        NotifyPendingRWs(rr.notify_rws);
+            transactions_.AbortPrepare(transaction_id);
+        } else if (ar.status == LockStatus::WAITING) {
+            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
-        transactions_.AbortPrepare(transaction_id);
-    } else if (ar.status == LockStatus::WAITING) {
-        Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            transactions_.PausePrepare(transaction_id);
 
-        transactions_.PausePrepare(transaction_id);
-
-        WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(ar.wound_rws);
+        } else {
+            NOT_REACHABLE();
+        }
+    } else if (s == PREPARED || s == COMMITTING || s == COMMITTED) {
+        Debug("[%lu] Already prepared", transaction_id);
+    } else if (s == ABORTED) {  // Already aborted
+        Debug("[%lu] Already aborted", transaction_id);
     } else {
         NOT_REACHABLE();
     }
@@ -733,55 +741,62 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
     uint64_t client_req_id = reply->rid.client_req_id();
     const TransportAddress *remote = reply->rid.addr();
 
-    transactions_.ContinuePrepare(transaction_id);
+    TransactionState s = transactions_.ContinuePrepare(transaction_id);
+    if (s == PREPARING) {
+        const int coordinator = transactions_.GetCoordinator(transaction_id);
+        const Transaction &transaction = transactions_.GetTransaction(transaction_id);
 
-    const int coordinator = transactions_.GetCoordinator(transaction_id);
-    const Transaction &transaction = transactions_.GetTransaction(transaction_id);
+        LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
+        if (ar.status == LockStatus::ACQUIRED) {
+            ASSERT(ar.wound_rws.size() == 0);
+            const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
 
-    LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
-    if (ar.status == LockStatus::ACQUIRED) {
-        ASSERT(ar.wound_rws.size() == 0);
-        const Timestamp prepare_ts = GetPrepareTimestamp(client_id);
+            transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
 
-        transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
+            const Timestamp &nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
 
-        const Timestamp &nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
+            // TODO: Handle timeout
+            replica_client_->Prepare(
+                transaction_id, transaction, prepare_ts,
+                coordinator, nonblock_ts,
+                std::bind(&Server::PrepareCallback, this, transaction_id,
+                          std::placeholders::_1, std::placeholders::_2),
+                [](int, Timestamp) {}, PREPARE_TIMEOUT);
 
-        // TODO: Handle timeout
-        replica_client_->Prepare(
-            transaction_id, transaction, prepare_ts,
-            coordinator, nonblock_ts,
-            std::bind(&Server::PrepareCallback, this, transaction_id,
-                      std::placeholders::_1, std::placeholders::_2),
-            [](int, Timestamp) {}, PREPARE_TIMEOUT);
+        } else if (ar.status == LockStatus::FAIL) {
+            ASSERT(ar.wound_rws.size() == 0);
+            Debug("[%lu] Participant prepare failed", transaction_id);
+            LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
-    } else if (ar.status == LockStatus::FAIL) {
-        ASSERT(ar.wound_rws.size() == 0);
-        Debug("[%lu] Participant prepare failed", transaction_id);
-        LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
+            // TODO: Handle timeout
+            shard_clients_[coordinator]->PrepareAbort(
+                transaction_id, shard_idx_,
+                std::bind(&Server::PrepareAbortCallback, this, transaction_id,
+                          placeholders::_1, placeholders::_2),
+                [](int, Timestamp) {}, PREPARE_TIMEOUT);
 
-        // TODO: Handle timeout
-        shard_clients_[coordinator]->PrepareAbort(
-            transaction_id, shard_idx_,
-            std::bind(&Server::PrepareAbortCallback, this, transaction_id,
-                      placeholders::_1, placeholders::_2),
-            [](int, Timestamp) {}, PREPARE_TIMEOUT);
+            // Reply to client
+            SendRWCommmitParticipantReplyFail(*remote, client_id, client_req_id);
+            delete remote;
+            delete reply;
+            pending_rw_commit_p_replies_.erase(search);
 
-        // Reply to client
-        SendRWCommmitParticipantReplyFail(*remote, client_id, client_req_id);
-        delete remote;
-        delete reply;
-        pending_rw_commit_p_replies_.erase(search);
+            NotifyPendingRWs(rr.notify_rws);
 
-        NotifyPendingRWs(rr.notify_rws);
+            transactions_.AbortPrepare(transaction_id);
+        } else if (ar.status == LockStatus::WAITING) {
+            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
 
-        transactions_.AbortPrepare(transaction_id);
-    } else if (ar.status == LockStatus::WAITING) {
-        Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            transactions_.PausePrepare(transaction_id);
 
-        transactions_.PausePrepare(transaction_id);
-
-        WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(ar.wound_rws);
+        } else {
+            NOT_REACHABLE();
+        }
+    } else if (s == PREPARED || s == COMMITTING || s == COMMITTED) {
+        Debug("[%lu] Already prepared", transaction_id);
+    } else if (s == ABORTED) {  // Already aborted
+        Debug("[%lu] Already aborted", transaction_id);
     } else {
         NOT_REACHABLE();
     }
