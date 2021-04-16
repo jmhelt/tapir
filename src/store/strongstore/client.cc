@@ -523,12 +523,15 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     Debug("commit_timestamp: %lu.%lu", commit_timestamp.getTimestamp(),
           commit_timestamp.getID());
 
+    participants_.clear();
     std::unordered_map<int, std::vector<std::string>> sharded_keys;
-
     for (auto &key : keys) {
         int i = (*part)(key, nshards_, -1, participants_);
         sharded_keys[i].push_back(key);
+        participants_.insert(i);
     }
+
+    vf_.StartRO(t_id, participants_);
 
     if (debug_stats_) {
         Latency_Start(&commit_lat_);
@@ -554,27 +557,26 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
         bclient[s.first]->ROCommit(
             t_id, s.second, commit_timestamp, min_read_timestamp_,
             std::bind(&Client::ROCommitCallback, this, req->id,
-                      std::placeholders::_1, std::placeholders::_2),
+                      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
             []() {}, timeout);
     }
 }
 
-void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status,
+void Client::ROCommitCallback(uint64_t reqId, int shard_idx,
+                              const std::vector<PreparedTransaction> &prepares,
                               const Timestamp max_read_timestamp) {
-    Debug("ROCommit [%lu] callback status %d", t_id, status);
+    Debug("[%lu] ROCommit callback", t_id);
 
     auto itr = this->pendingReqs.find(reqId);
     if (itr == this->pendingReqs.end()) {
-        Debug(
-            "ROCommitCallback for terminated request id %lu (txn already "
-            "committed or aborted.",
-            reqId);
+        Debug("ROCommitCallback for terminated request id %lu (txn already committed or aborted.", reqId);
         return;
     }
 
-    PendingRequest *req = itr->second;
-    --req->outstandingPrepares;
-    if (req->outstandingPrepares == 0) {
+    SnapshotResult r = vf_.ReceiveFastPath(t_id, shard_idx);
+    if (r.state == COMMIT) {
+        PendingRequest *req = itr->second;
+
         commit_callback ccb = req->ccb;
         pendingReqs.erase(reqId);
         delete req;
@@ -583,12 +585,17 @@ void Client::ROCommitCallback(uint64_t reqId, transaction_status_t status,
             Latency_End(&commit_lat_);
         }
 
+        vf_.CommitRO(t_id);
+
         // TODO: Implement full client-side RSS protocol
         min_read_timestamp_ = std::max(min_read_timestamp_, max_read_timestamp);
         Debug("min_read_timestamp_: %lu.%lu",
               min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
         Debug("[%lu] COMMIT OK", t_id);
         ccb(COMMITTED);
+
+    } else if (r.state == WAIT) {
+        Debug("[%lu] Waiting for more RO responses", t_id);
     }
 }
 

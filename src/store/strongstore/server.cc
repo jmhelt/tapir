@@ -267,6 +267,7 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
     const Timestamp min_ts{msg.min_timestamp()};
 
     TransactionState s = transactions_.StartRO(transaction_id, keys, min_ts, commit_ts);
+    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_ts);  // TODO: is this correct?
     if (s == PREPARE_WAIT) {
         Debug("[%lu] Waiting for prepared transactions", transaction_id);
         auto reply = new PendingROCommitReply(client_id, client_req_id, remote.clone());
@@ -288,12 +289,18 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
     for (auto &k : keys) {
         ASSERT(store_.get(k, commit_ts, value));
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
-        rreply->set_val(value.second.c_str());
+        rreply->set_transaction_id(transaction_id);  // TODO: Fix this
         value.first.serialize(rreply->mutable_timestamp());
+        rreply->set_key(k.c_str());
+        rreply->set_val(value.second.c_str());
     }
 
-    // TODO: is this correct?
-    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_ts);
+    std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+    for (auto &pt : skipped_prepares) {
+        Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+        proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
+        pt.serialize(ptm);
+    }
 
     transport_->SendMessage(this, remote, ro_commit_reply_);
 
@@ -326,12 +333,18 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
     for (auto &k : keys) {
         ASSERT(store_.get(k, commit_ts, value));
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
-        rreply->set_val(value.second.c_str());
+        rreply->set_transaction_id(transaction_id);  // TODO: Fix this
         value.first.serialize(rreply->mutable_timestamp());
+        rreply->set_key(k.c_str());
+        rreply->set_val(value.second.c_str());
     }
 
-    // TODO: is this correct?
-    min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_ts);
+    std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+    for (auto &pt : skipped_prepares) {
+        Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+        proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
+        pt.serialize(ptm);
+    }
 
     transport_->SendMessage(this, *remote, ro_commit_reply_);
 

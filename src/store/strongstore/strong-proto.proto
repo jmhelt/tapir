@@ -99,14 +99,23 @@ message ROCommit {
 }
 
 message ReadReply {
-    required TimestampMessage timestamp = 1;
-    required string val = 2;
+    required uint64 transaction_id = 1;
+    required TimestampMessage timestamp = 2;
+    required string key = 3;
+    required string val = 4;
+}
+
+message PreparedTransactionMessage {
+    required uint64 transaction_id = 1;
+    required TimestampMessage prepare_timestamp = 2;
+    repeated WriteMessage write_set = 3;
 }
 
 message ROCommitReply {
     required RequestIDMessage rid = 1;
     required uint64 transaction_id = 2;
     repeated ReadReply values = 3;
+    repeated PreparedTransactionMessage prepares = 4;
 }
 
 message Wound {

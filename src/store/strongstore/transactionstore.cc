@@ -423,11 +423,9 @@ TransactionState TransactionStore::StartRO(uint64_t transaction_id,
             Debug("[%lu] Not waiting for prepared transaction (nonblock): %lu < %lu",
                   transaction_id, commit_ts.getTimestamp(),
                   rw.nonblock_ts().getTimestamp());
-            continue;
-        } else {
-            Debug("min: %lu >= %lu", min_ts.getTimestamp(), rw.prepare_ts().getTimestamp());
 
-            Debug("nb: %lu >= %lu", commit_ts.getTimestamp(), rw.nonblock_ts().getTimestamp());
+            ro.add_skipped_rw(p.first);
+            continue;
         }
 
         const Transaction &transaction = rw.transaction();
@@ -453,6 +451,32 @@ void TransactionStore::ContinueRO(uint64_t transaction_id) {
     ASSERT(ro.state() == PREPARE_WAIT);
 
     ro.set_state(COMMITTING);
+}
+
+std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(uint64_t transaction_id) {
+    if (consistency_ != Consistency::RSS) {
+        return {};
+    }
+
+    PendingROTransaction &ro = pending_ro_[transaction_id];
+    ASSERT(ro.state() == COMMITTING);
+
+    std::vector<PreparedTransaction> skipped;
+
+    for (uint64_t r : ro.skipped_rws()) {
+        TransactionState s = GetTransactionState(r);
+        if (s == PREPARING && s == PREPARED && s == COMMITTING) {
+            auto search = pending_rw_.find(r);
+            ASSERT(search != pending_rw_.end());
+            PendingRWTransaction rw = search->second;
+
+            ASSERT(ro.min_ts() < rw.prepare_ts() && ro.commit_ts() < rw.nonblock_ts());
+
+            skipped.emplace_back(r, rw.prepare_ts(), rw.transaction().getWriteSet());
+        }
+    }
+
+    return skipped;
 }
 
 void TransactionStore::CommitRO(uint64_t transaction_id) {

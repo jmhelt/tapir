@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "lib/assert.h"
 #include "lib/message.h"
@@ -14,6 +15,7 @@
 #include "store/common/transaction.h"
 #include "store/common/truetime.h"
 #include "store/strongstore/common.h"
+#include "store/strongstore/preparedtransaction.h"
 
 namespace strongstore {
 
@@ -58,6 +60,7 @@ class TransactionStore {
                              const Timestamp &commit_ts);
     void ContinueRO(uint64_t transaction_id);
     void CommitRO(uint64_t transaction_id);
+    std::vector<PreparedTransaction> GetROSkippedRWTransactions(uint64_t transaction_id);
 
     void StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key);
     void FinishGet(uint64_t transaction_id, const std::string &key);
@@ -154,6 +157,10 @@ class TransactionStore {
         uint64_t n_conflicts() const { return n_conflicts_; }
         void decr_conflicts() { n_conflicts_ -= 1; }
 
+        const std::unordered_set<uint64_t> &skipped_rws() const { return skipped_rws_; }
+        void add_skipped_rw(uint64_t transaction_id) { skipped_rws_.insert(transaction_id); }
+
+        const Timestamp &min_ts() const { return min_ts_; }
         const Timestamp &commit_ts() const { return commit_ts_; }
         const std::unordered_set<std::string> &keys() const { return keys_; }
 
@@ -164,6 +171,7 @@ class TransactionStore {
 
        private:
         std::unordered_set<std::string> keys_;
+        std::unordered_set<uint64_t> skipped_rws_;
         Timestamp min_ts_;
         Timestamp commit_ts_;
         uint64_t n_conflicts_;
