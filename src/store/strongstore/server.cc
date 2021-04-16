@@ -1,35 +1,3 @@
-// -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
-/***********************************************************************
- *
- * store/strongstore/server.cc:
- *   Implementation of a single transactional key-value server with strong
- *consistency.
- *
- * Copyright 2015 Irene Zhang <iyzhang@cs.washington.edu>
- *                Naveen Kr. Sharma <naveenks@cs.washington.edu>
- *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- **********************************************************************/
-
 #include "store/strongstore/server.h"
 
 #include <algorithm>
@@ -173,7 +141,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
         LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
         transactions_.AbortGet(transaction_id, key);
 
-        NotifyPendingRWs(rr.notify_rws);
+        NotifyPendingRWs(transaction_id, rr.notify_rws);
     } else if (r.status == LockStatus::WAITING) {
         auto reply = new PendingGetReply(client_id, client_req_id, remote.clone());
         reply->key = key;
@@ -182,7 +150,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
 
         transactions_.PauseGet(transaction_id, key);
 
-        WoundPendingRWs(r.wound_rws);
+        WoundPendingRWs(transaction_id, r.wound_rws);
     } else {
         NOT_REACHABLE();
     }
@@ -244,34 +212,36 @@ const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
     return prepare_timestamp;
 }
 
-void Server::WoundPendingRWs(const std::unordered_set<uint64_t> &rws) {
-    for (uint64_t transaction_id : rws) {
-        Debug("Wounding %lu", transaction_id);
-        TransactionState s = transactions_.GetTransactionState(transaction_id);
+void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws) {
+    for (uint64_t rw : rws) {
+        ASSERT(transaction_id != rw);
+        Debug("[%lu] Wounding %lu", transaction_id, rw);
+        TransactionState s = transactions_.GetTransactionState(rw);
         ASSERT(s != NOT_FOUND);
 
         if (s == READING || s == READ_WAIT) {
             // Send wound to client
-            std::shared_ptr<TransportAddress> remote = transactions_.GetClientAddr(transaction_id);
-            wound_.set_transaction_id(transaction_id);
+            std::shared_ptr<TransportAddress> remote = transactions_.GetClientAddr(rw);
+            wound_.set_transaction_id(rw);
             transport_->SendMessage(this, *remote, wound_);
         } else if (s == PREPARING || s == WAIT_PARTICIPANTS || s == PREPARE_WAIT || s == PREPARED) {
             // Send wound to coordinator
-            int coordinator = transactions_.GetCoordinator(transaction_id);
+            int coordinator = transactions_.GetCoordinator(rw);
             ASSERT(coordinator >= 0);
-            shard_clients_[coordinator]->Wound(transaction_id);
+            shard_clients_[coordinator]->Wound(rw);
 
         } else if (s == COMMITTING || s == COMMITTED || s == ABORTED) {
-            Debug("[%lu] Not wounding. Will complete soon", transaction_id);
+            Debug("[%lu] Not wounding. Will complete soon", rw);
         } else {
             NOT_REACHABLE();
         }
     }
 }
 
-void Server::NotifyPendingRWs(const std::unordered_set<uint64_t> &rws) {
+void Server::NotifyPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws) {
     for (uint64_t waiting_rw : rws) {
-        Debug("waiting_rw: %lu", waiting_rw);
+        ASSERT(transaction_id != waiting_rw);
+        Debug("[%lu] continuing %lu", transaction_id, waiting_rw);
         ContinueGet(waiting_rw);
         ContinueCoordinatorPrepare(waiting_rw);
         ContinueParticipantPrepare(waiting_rw);
@@ -419,7 +389,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
 
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
@@ -430,7 +400,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
             transactions_.PausePrepare(transaction_id);
 
-            WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(transaction_id, ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -497,7 +467,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
             delete reply;
             pending_rw_commit_c_replies_.erase(search);
 
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
@@ -505,7 +475,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 
             transactions_.PausePrepare(transaction_id);
 
-            WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(transaction_id, ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -702,7 +672,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
             // Reply to client
             SendRWCommmitParticipantReplyFail(remote, client_id, client_req_id);
 
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
@@ -713,7 +683,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
 
             transactions_.PausePrepare(transaction_id);
 
-            WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(transaction_id, ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -781,7 +751,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
             delete reply;
             pending_rw_commit_p_replies_.erase(search);
 
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
@@ -789,7 +759,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
             transactions_.PausePrepare(transaction_id);
 
-            WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(transaction_id, ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -859,7 +829,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status, Timestamp co
             std::bind(&Server::AbortParticipantCallback, this, transaction_id),
             []() {}, ABORT_TIMEOUT);
 
-        NotifyPendingRWs(rr.notify_rws);
+        NotifyPendingRWs(transaction_id, rr.notify_rws);
         NotifyPendingROs(fr.notify_ros);
 
     } else {
@@ -957,7 +927,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
             pending_rw_commit_c_replies_.erase(transaction_id);
 
             // Notify waiting RW transactions
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == WAITING) {
@@ -965,7 +935,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 
             transactions_.PausePrepare(transaction_id);
 
-            WoundPendingRWs(ar.wound_rws);
+            WoundPendingRWs(transaction_id, ar.wound_rws);
         } else {
             NOT_REACHABLE();
         }
@@ -1051,7 +1021,7 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
     prepare_abort_reply_.set_status(REPLY_OK);
     transport_->SendMessage(this, remote, prepare_abort_reply_);
 
-    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingRWs(transaction_id, rr.notify_rws);
 
     transactions_.Abort(transaction_id);
 }
@@ -1112,7 +1082,7 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
     TransactionFinishResult fr;
 
     // Coordinator may not yet know about this transaction
-    // If so, not locks to release.
+    // If so, no locks to release.
     if (state != NOT_FOUND) {
         const Transaction &transaction = transactions_.GetTransaction(transaction_id);
         rr = locks_.ReleaseLocks(transaction_id, transaction);
@@ -1120,7 +1090,7 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 
     fr = transactions_.Abort(transaction_id);
 
-    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingRWs(transaction_id, rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
 }
 
@@ -1132,10 +1102,10 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 
     TransactionState state = transactions_.GetTransactionState(transaction_id);
-    if (state == NOT_FOUND) {
-        Debug("[%lu] Transaction not in progress", transaction_id);
 
-        abort_reply_.set_status(REPLY_FAIL);
+    if (state == ABORTED) {
+        Debug("[%lu] Transaction already aborted", transaction_id);
+        abort_reply_.set_status(REPLY_OK);
         transport_->SendMessage(this, remote, abort_reply_);
         return;
     }
@@ -1147,17 +1117,17 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
         return;
     }
 
-    if (state == ABORTED) {
-        Debug("[%lu] Transaction already aborted", transaction_id);
-        abort_reply_.set_status(REPLY_OK);
-        transport_->SendMessage(this, remote, abort_reply_);
-        return;
+    LockReleaseResult rr;
+    TransactionFinishResult fr;
+
+    // Participant may not yet know about this transaction
+    // If so, no locks to release.
+    if (state != NOT_FOUND) {
+        const Transaction &transaction = transactions_.GetTransaction(transaction_id);
+        rr = locks_.ReleaseLocks(transaction_id, transaction);
     }
 
-    const Transaction &transaction = transactions_.GetTransaction(transaction_id);
-
-    LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
-    TransactionFinishResult fr = transactions_.Abort(transaction_id);
+    fr = transactions_.Abort(transaction_id);
 
     if (state == PREPARING || state == PREPARED) {
         // TODO: Handle timeout
@@ -1173,7 +1143,7 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     // Reply to client for any ongoing GETs
     ContinueGet(transaction_id);
 
-    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingRWs(transaction_id, rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
 }
 
@@ -1212,7 +1182,7 @@ void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timesta
     SendPrepareOKRepliesOK(transaction_id, commit_ts);
 
     // Continue waiting RW transactions
-    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingRWs(transaction_id, rr.notify_rws);
 
     // Continue waiting RO transactions
     NotifyPendingROs(fr.notify_ros);
@@ -1235,7 +1205,7 @@ void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timesta
     TransactionFinishResult fr = transactions_.Commit(transaction_id);
 
     // Continue waiting RW transactions
-    NotifyPendingRWs(rr.notify_rws);
+    NotifyPendingRWs(transaction_id, rr.notify_rws);
 
     // Continue waiting RO transactions
     NotifyPendingROs(fr.notify_ros);
@@ -1363,7 +1333,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
             TransactionFinishResult fr = transactions_.Abort(transaction_id);
 
-            NotifyPendingRWs(rr.notify_rws);
+            NotifyPendingRWs(transaction_id, rr.notify_rws);
             NotifyPendingROs(fr.notify_ros);
         }
     } else {

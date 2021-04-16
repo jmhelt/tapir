@@ -208,9 +208,9 @@ class Server : public TransportReceiver,
     void CommitParticipantCallback(uint64_t transaction_id, transaction_status_t status);
     void AbortParticipantCallback(uint64_t transaction_id);
 
-    void WoundPendingRWs(const std::unordered_set<uint64_t> &rws);
+    void WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws);
 
-    void NotifyPendingRWs(const std::unordered_set<uint64_t> &rws);
+    void NotifyPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws);
     void ContinueGet(uint64_t transaction_id);
     void ContinueCoordinatorPrepare(uint64_t transaction_id);
     void ContinueParticipantPrepare(uint64_t transaction_id);
