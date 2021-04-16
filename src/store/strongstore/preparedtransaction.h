@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "store/common/timestamp.h"
 #include "store/strongstore/strong-proto.pb.h"
@@ -33,8 +34,7 @@ class Value {
 
 class PreparedTransaction {
    public:
-    PreparedTransaction(uint64_t transaction_id, const Timestamp &prepare_ts,
-                        const std::unordered_map<std::string, std::string> &write_set);
+    PreparedTransaction(uint64_t transaction_id, const Timestamp &prepare_ts);
     PreparedTransaction(const proto::PreparedTransactionMessage &msg);
     ~PreparedTransaction();
 
@@ -48,6 +48,9 @@ class PreparedTransaction {
     const std::unordered_map<std::string, std::string> &write_set() const { return write_set_; }
     void add_write_set(const std::unordered_map<std::string, std::string> &write_set) {
         write_set_.insert(write_set.begin(), write_set.end());
+    }
+    void add_write_set(const std::pair<std::string, std::string> &w) {
+        write_set_.insert(w);
     }
 
    private:

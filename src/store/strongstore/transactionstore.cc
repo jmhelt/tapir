@@ -471,11 +471,22 @@ std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(ui
         if (s == PREPARING || s == PREPARED || s == COMMITTING) {
             auto search = pending_rw_.find(r);
             ASSERT(search != pending_rw_.end());
-            PendingRWTransaction rw = search->second;
+            PendingRWTransaction &rw = search->second;
 
             ASSERT(ro.min_ts() < rw.prepare_ts() && ro.commit_ts() < rw.nonblock_ts());
 
-            skipped.emplace_back(r, rw.prepare_ts(), rw.transaction().getWriteSet());
+            const std::unordered_set<std::string> &keys = ro.keys();
+            bool first = true;
+            for (auto &w : rw.transaction().getWriteSet()) {
+                if (keys.count(w.first) > 0) {
+                    if (first) {
+                        skipped.emplace_back(r, rw.prepare_ts());
+                        first = false;
+                    }
+
+                    skipped.back().add_write_set(w);
+                }
+            }
         }
     }
 
