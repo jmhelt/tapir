@@ -1062,10 +1062,6 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
     Debug("[%lu] Received Wound request", transaction_id);
 
     TransactionState state = transactions_.GetTransactionState(transaction_id);
-    if (state == NOT_FOUND) {
-        Debug("[%lu] Transaction not in progress", transaction_id);
-        return;
-    }
 
     if (state == ABORTED) {
         Debug("[%lu] Transaction already aborted", transaction_id);
@@ -1112,9 +1108,17 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
         SendAbortParticipants(transaction_id, participants);
     }
 
-    const Transaction &transaction = transactions_.GetTransaction(transaction_id);
-    LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
-    TransactionFinishResult fr = transactions_.Abort(transaction_id);
+    LockReleaseResult rr;
+    TransactionFinishResult fr;
+
+    // Coordinator may not yet know about this transaction
+    // If so, not locks to release.
+    if (state != NOT_FOUND) {
+        const Transaction &transaction = transactions_.GetTransaction(transaction_id);
+        rr = locks_.ReleaseLocks(transaction_id, transaction);
+    }
+
+    fr = transactions_.Abort(transaction_id);
 
     NotifyPendingRWs(rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
