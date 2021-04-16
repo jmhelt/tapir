@@ -468,7 +468,7 @@ std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(ui
         TransactionState s = GetTransactionState(r);
         Debug("rw: %lu", r);
         Debug("s: %d", static_cast<int>(s));
-        if (s == PREPARING && s == PREPARED && s == COMMITTING) {
+        if (s == PREPARING || s == PREPARED || s == COMMITTING) {
             auto search = pending_rw_.find(r);
             ASSERT(search != pending_rw_.end());
             PendingRWTransaction rw = search->second;
