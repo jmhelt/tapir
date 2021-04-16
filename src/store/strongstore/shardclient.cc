@@ -274,9 +274,14 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
     pendingROCommits.erase(itr);
     delete req;
 
+    std::vector<PreparedTransaction> prepares;
+    for (auto &p : reply.prepares()) {
+        prepares.emplace_back(p);
+    }
+
     const Timestamp max_ts{FindMaxReadTimestamp(reply)};
 
-    ccb(COMMITTED, max_ts);
+    ccb(shard_idx_, prepares, max_ts);
 }
 
 void ShardClient::RWCommitCoordinator(

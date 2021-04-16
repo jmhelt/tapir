@@ -62,8 +62,6 @@ class BufferClient : public ::BufferClient {
                              prepare_callback pcb,
                              prepare_timeout_callback ptcb, uint32_t timeout);
 
-    void AddReadSet(const std::string &key, const Timestamp &timestamp);
-
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,
                   const Timestamp &min_read_timestamp, ro_commit_callback ccb,

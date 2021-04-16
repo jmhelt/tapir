@@ -52,6 +52,7 @@
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
 #include "store/strongstore/strongbufferclient.h"
+#include "store/strongstore/viewfinder.h"
 
 namespace strongstore {
 
@@ -136,7 +137,8 @@ class Client : public ::Client {
 
     void AbortCallback(uint64_t reqId);
 
-    void ROCommitCallback(uint64_t reqId, transaction_status_t status,
+    void ROCommitCallback(uint64_t reqId, int shard_idx,
+                          const std::vector<PreparedTransaction> &prepares,
                           const Timestamp max_read_timestamp);
 
     void HandleWound(uint64_t transaction_id);
@@ -147,6 +149,8 @@ class Client : public ::Client {
 
     // Choose nonblock time
     Timestamp ChooseNonBlockTimestamp();
+
+    ViewFinder vf_;
 
     std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
     std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;
