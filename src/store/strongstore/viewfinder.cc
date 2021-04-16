@@ -41,6 +41,7 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
 
     if (participants_.size() == 0) {  // Received all fast path responses
         FindCommittedKeys();
+        CheckCommit();
         return {COMMIT};
     } else {
         return {WAIT};
@@ -53,7 +54,7 @@ void ViewFinder::FindCommittedKeys() {
     }
 
     for (auto &p : prepares_) {
-        Debug("prepare: %lu", p.second.transaction_id());
+        Debug("prepare: %lu %lu.%lu", p.second.transaction_id(), p.second.prepare_ts().getTimestamp(), p.second.prepare_ts().getID());
     }
 
     if (prepares_.size() == 0) {
@@ -75,8 +76,30 @@ void ViewFinder::FindCommittedKeys() {
     }
 }
 
+void ViewFinder::CheckCommit() {
+    // Find min prepare ts
+    Timestamp min_ts = Timestamp::MAX;
+    for (auto &p : prepares_) {
+        PreparedTransaction &pt = p.second;
+        if (pt.prepare_ts() < min_ts) {
+            min_ts = pt.prepare_ts();
+        }
+    }
+
+    // Find max commit ts
+    Timestamp max_ts{0, 0};
+    for (Value &v : values_) {
+        if (max_ts < v.ts()) {
+            max_ts = v.ts();
+        }
+    }
+
+    Debug("min prepare ts: %lu.%lu", min_ts.getTimestamp(), min_ts.getID());
+    Debug("max commit ts: %lu.%lu", max_ts.getTimestamp(), max_ts.getID());
+    Debug("can commit: %d", max_ts < min_ts);
+}
+
 SnapshotResult ViewFinder::ReceiveSlowPath() {
     return {};
 }
-
 };  // namespace strongstore
