@@ -112,7 +112,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
     if (r.status == LockStatus::ACQUIRED) {
         ASSERT(r.wound_rws.size() == 0);
 
-        std::pair<Timestamp, std::string> value;
+        std::pair<TimestampID, std::string> value;
         ASSERT(store_.get(key, value));
 
         get_reply_.Clear();
@@ -121,7 +121,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
         get_reply_.set_key(msg.key());
 
         get_reply_.set_val(value.second);
-        value.first.serialize(get_reply_.mutable_timestamp());
+        value.first.timestamp.serialize(get_reply_.mutable_timestamp());
 
         transport_->SendMessage(this, remote, get_reply_);
 
@@ -181,13 +181,13 @@ void Server::ContinueGet(uint64_t transaction_id) {
     if (s == READING) {
         ASSERT(locks_.HasReadLock(transaction_id, key));
 
-        std::pair<Timestamp, std::string> value;
+        std::pair<TimestampID, std::string> value;
         ASSERT(store_.get(key, value));
 
         get_reply_.set_status(REPLY_OK);
         get_reply_.set_val(value.second);
 
-        value.first.serialize(get_reply_.mutable_timestamp());
+        value.first.timestamp.serialize(get_reply_.mutable_timestamp());
 
         transport_->SendMessage(this, *remote, get_reply_);
 
@@ -285,12 +285,12 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
     ro_commit_reply_.mutable_rid()->set_client_req_id(client_req_id);
     ro_commit_reply_.set_transaction_id(transaction_id);
 
-    std::pair<Timestamp, std::string> value;
+    std::pair<TimestampID, std::string> value;
     for (auto &k : keys) {
-        ASSERT(store_.get(k, commit_ts, value));
+        ASSERT(store_.get(k, {commit_ts, transaction_id}, value));
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
-        rreply->set_transaction_id(transaction_id);  // TODO: Fix this
-        value.first.serialize(rreply->mutable_timestamp());
+        rreply->set_transaction_id(value.first.transaction_id);
+        value.first.timestamp.serialize(rreply->mutable_timestamp());
         rreply->set_key(k.c_str());
         rreply->set_val(value.second.c_str());
     }
@@ -329,12 +329,12 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
     ro_commit_reply_.mutable_rid()->set_client_req_id(client_req_id);
     ro_commit_reply_.set_transaction_id(transaction_id);
 
-    std::pair<Timestamp, std::string> value;
+    std::pair<TimestampID, std::string> value;
     for (auto &k : keys) {
-        ASSERT(store_.get(k, commit_ts, value));
+        ASSERT(store_.get(k, {commit_ts, transaction_id}, value));
         proto::ReadReply *rreply = ro_commit_reply_.add_values();
-        rreply->set_transaction_id(transaction_id);  // TODO: Fix this
-        value.first.serialize(rreply->mutable_timestamp());
+        rreply->set_transaction_id(value.first.transaction_id);
+        value.first.timestamp.serialize(rreply->mutable_timestamp());
         rreply->set_key(k.c_str());
         rreply->set_val(value.second.c_str());
     }
@@ -1178,7 +1178,7 @@ void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timesta
     // Commit writes
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
     for (auto &write : transaction.getWriteSet()) {
-        store_.put(write.first, write.second, commit_ts);
+        store_.put(write.first, write.second, {commit_ts, transaction_id});
     }
 
     if (transaction.getWriteSet().size() > 0) {
@@ -1207,7 +1207,7 @@ void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timesta
     // Commit writes
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
     for (auto &write : transaction.getWriteSet()) {
-        store_.put(write.first, write.second, commit_ts);
+        store_.put(write.first, write.second, {commit_ts, transaction_id});
     }
 
     if (transaction.getWriteSet().size() > 0) {
@@ -1363,7 +1363,7 @@ void Server::UnloggedUpcall(const string &op, string &response) {
 
 void Server::Load(const string &key, const string &value,
                   const Timestamp timestamp) {
-    store_.put(key, value, timestamp);
+    store_.put(key, value, {timestamp, 0});
 }
 
 }  // namespace strongstore

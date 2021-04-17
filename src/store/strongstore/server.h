@@ -162,6 +162,20 @@ class Server : public TransportReceiver,
         std::string key;
     };
 
+    struct TimestampID {
+        Timestamp timestamp;
+        uint64_t transaction_id;
+
+        friend bool operator>(const TimestampID &t1,
+                              const TimestampID &t2) {
+            return t1.timestamp > t2.timestamp;
+        };
+        friend bool operator<(const TimestampID &t1,
+                              const TimestampID &t2) {
+            return t1.timestamp < t2.timestamp;
+        };
+    };
+
     void HandleGet(const TransportAddress &remote, proto::Get &msg);
 
     void HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg);
@@ -225,7 +239,7 @@ class Server : public TransportReceiver,
     const TrueTime &tt_;
     TransactionStore transactions_;
     LockTable locks_;
-    VersionedKVStore<Timestamp, std::string> store_;
+    VersionedKVStore<TimestampID, std::string> store_;
 
     const transport::Configuration &shard_config_;
     const transport::Configuration &replica_config_;
