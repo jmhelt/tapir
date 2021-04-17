@@ -50,11 +50,11 @@ p <- ggplot(
         y = percentile,
         color = protocol
     )) +
-    geom_line(size = 1.5) +
+    geom_line(size = 2) +
     scale_x_continuous(
-        limits = c(0, 355),
+        limits = c(0, 465),
         labels = comma,
-        breaks = pretty_breaks(n = 8),
+        breaks = pretty_breaks(n = 10),
         expand = c(0, 0),
     ) +
     scale_y_continuous(
