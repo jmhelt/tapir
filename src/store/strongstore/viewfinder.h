@@ -2,6 +2,7 @@
 #define _STRONG_VIEW_FINDER_H_
 
 #include <cstdint>
+#include <list>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -11,6 +12,7 @@
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "store/common/transaction.h"
+#include "store/strongstore/common.h"
 #include "store/strongstore/preparedtransaction.h"
 
 namespace strongstore {
@@ -35,7 +37,7 @@ struct SnapshotResult {
 
 class ViewFinder {
    public:
-    ViewFinder();
+    ViewFinder(Consistency consistency);
     ~ViewFinder();
 
     void StartRO(uint64_t transaction_id, const std::set<int> &participants);
@@ -53,8 +55,11 @@ class ViewFinder {
    private:
     uint64_t cur_transaction_id_;
     std::unordered_set<int> participants_;
-    std::vector<Value> values_;
+    std::unordered_map<std::string, std::list<Value>> values_;
     std::unordered_map<uint64_t, PreparedTransaction> prepares_;
+    Consistency consistency_;
+
+    void AddValues(const std::vector<Value> &values);
 
     void FindCommittedKeys();
     void CheckCommit();

@@ -2,7 +2,9 @@
 
 namespace strongstore {
 
-ViewFinder::ViewFinder() : cur_transaction_id_{static_cast<uint64_t>(-1)} {}
+ViewFinder::ViewFinder(Consistency consistency)
+    : cur_transaction_id_{static_cast<uint64_t>(-1)}, consistency_{consistency} {}
+
 ViewFinder::~ViewFinder() {}
 
 void ViewFinder::StartRO(uint64_t transaction_id, const std::set<int> &participants) {
@@ -14,6 +16,7 @@ void ViewFinder::StartRO(uint64_t transaction_id, const std::set<int> &participa
 }
 
 void ViewFinder::CommitRO(uint64_t transaction_id) {
+    cur_transaction_id_ = static_cast<uint64_t>(-1);
     return;
 }
 
@@ -25,7 +28,7 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
     ASSERT(participants_.count(shard_idx) > 0);
     participants_.erase(shard_idx);
 
-    values_.insert(values_.end(), values.begin(), values.end());
+    AddValues(values);
 
     for (auto &p : prepares) {
         auto search = prepares_.find(p.transaction_id());
@@ -40,40 +43,71 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
     }
 
     if (participants_.size() == 0) {  // Received all fast path responses
+
+        // TODO: Implement RSS slow path
         FindCommittedKeys();
         CheckCommit();
+
         return {COMMIT};
     } else {
         return {WAIT};
     }
 }
 
+void ViewFinder::AddValues(const std::vector<Value> &values) {
+    for (auto &v : values) {
+        std::list<Value> &l = values_[v.key()];
+
+        for (auto it = l.begin(); it != l.end(); ++it) {
+            Value &v2 = *it;
+            if (v2.ts() < v.ts()) {
+                l.insert(it, v);
+                break;
+            }
+        }
+    }
+}
+
 void ViewFinder::FindCommittedKeys() {
-    for (auto &v : values_) {
-        Debug("value: %lu %lu.%lu %s %s", v.transaction_id(), v.ts().getTimestamp(), v.ts().getID(), v.key().c_str(), v.val().c_str());
+    for (auto &kv : values_) {
+        Debug("key: %s", kv.first.c_str());
+        std::list<Value> &l = kv.second;
+        for (Value &v : l) {
+            Debug("value: %lu %lu.%lu %s", v.transaction_id(), v.ts().getTimestamp(), v.ts().getID(), v.val().c_str());
+        }
     }
 
     for (auto &p : prepares_) {
         Debug("prepare: %lu %lu.%lu", p.second.transaction_id(), p.second.prepare_ts().getTimestamp(), p.second.prepare_ts().getID());
+        for (auto &write : p.second.write_set()) {
+            Debug("write: %s %s", write.first.c_str(), write.second.c_str());
+        }
     }
 
     if (prepares_.size() == 0) {
         return;
     }
 
-    for (Value &v : values_) {
-        uint64_t transaction_id = v.transaction_id();
-        auto search = prepares_.find(transaction_id);
-        if (search != prepares_.end()) {
-            PreparedTransaction &pt = search->second;
+    std::vector<Value> to_add;
+    for (auto &kv : values_) {
+        std::list<Value> &l = kv.second;
+        for (Value &v : l) {
+            uint64_t transaction_id = v.transaction_id();
+            auto search = prepares_.find(transaction_id);
+            if (search != prepares_.end()) {
+                PreparedTransaction &pt = search->second;
+                Debug("adding writes from prepared transaction: %lu", transaction_id);
 
-            for (auto &write : pt.write_set()) {
-                values_.emplace_back(transaction_id, v.ts(), write.first, write.second);
+                for (auto &write : pt.write_set()) {
+                    to_add.emplace_back(transaction_id, v.ts(), write.first, write.second);
+                }
+
+                prepares_.erase(search);
             }
-
-            prepares_.erase(search);
         }
     }
+
+    AddValues(to_add);
 }
 
 void ViewFinder::CheckCommit() {
@@ -88,9 +122,12 @@ void ViewFinder::CheckCommit() {
 
     // Find max commit ts
     Timestamp max_ts{0, 0};
-    for (Value &v : values_) {
-        if (max_ts < v.ts()) {
-            max_ts = v.ts();
+    for (auto &kv : values_) {
+        const std::list<Value> &l = kv.second;
+        for (const Value &v : l) {
+            if (max_ts < v.ts()) {
+                max_ts = v.ts();
+            }
         }
     }
 

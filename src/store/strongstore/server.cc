@@ -295,11 +295,13 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
         rreply->set_val(value.second.c_str());
     }
 
-    std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
-    for (auto &pt : skipped_prepares) {
-        Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
-        proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
-        pt.serialize(ptm);
+    if (consistency_ == RSS) {
+        std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+        for (auto &pt : skipped_prepares) {
+            Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+            proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
+            pt.serialize(ptm);
+        }
     }
 
     transport_->SendMessage(this, remote, ro_commit_reply_);
@@ -339,11 +341,13 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
         rreply->set_val(value.second.c_str());
     }
 
-    std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
-    for (auto &pt : skipped_prepares) {
-        Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
-        proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
-        pt.serialize(ptm);
+    if (consistency_ == RSS) {
+        std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+        for (auto &pt : skipped_prepares) {
+            Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+            proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
+            pt.serialize(ptm);
+        }
     }
 
     transport_->SendMessage(this, *remote, ro_commit_reply_);
