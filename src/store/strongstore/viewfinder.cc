@@ -148,7 +148,7 @@ void ViewFinder::CalculateSnapshotTimestamp() {
 }
 
 SnapshotResult ViewFinder::CheckCommit() {
-    if (participants_.size() == 0) {
+    if (participants_.size() > 0) {
         return {WAIT};
     }
 
