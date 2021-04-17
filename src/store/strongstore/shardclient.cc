@@ -81,6 +81,9 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == ro_commit_reply_.GetTypeName()) {
         ro_commit_reply_.ParseFromString(data);
         HandleROCommitReply(ro_commit_reply_);
+    } else if (type == ro_commit_slow_reply_.GetTypeName()) {
+        ro_commit_slow_reply_.ParseFromString(data);
+        HandleROCommitSlowReply(ro_commit_slow_reply_);
     } else if (type == abort_reply_.GetTypeName()) {
         abort_reply_.ParseFromString(data);
         HandleAbortReply(abort_reply_);
@@ -211,6 +214,7 @@ void ShardClient::ROCommit(uint64_t transaction_id,
                            const Timestamp &commit_timestamp,
                            const Timestamp &min_read_timestamp,
                            ro_commit_callback ccb,
+                           ro_commit_slow_callback cscb,
                            ro_commit_timeout_callback ctcb, uint32_t timeout) {
     Debug("[shard %i] Sending ROCommit [%lu]", shard_idx_, transaction_id);
 
@@ -218,7 +222,9 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     PendingROCommit *pendingROCommit = new PendingROCommit(reqId);
     pendingROCommits[reqId] = pendingROCommit;
     pendingROCommit->ccb = ccb;
+    pendingROCommit->cscb = cscb;
     pendingROCommit->ctcb = ctcb;
+    pendingROCommit->n_slow_replies = 0;
 
     // TODO: Setup timeout
     ro_commit_.mutable_rid()->set_client_id(client_id_);
@@ -237,27 +243,31 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     transport_->SendMessageToReplica(this, shard_idx_, replica_, ro_commit_);
 }
 
-const TimestampMessage &ShardClient::FindMaxReadTimestamp(
-    const proto::ROCommitReply &reply) {
-    ASSERT(reply.values().size() > 0);
+void ShardClient::HandleROCommitSlowReply(const proto::ROCommitSlowReply &reply) {
+    uint64_t req_id = reply.rid().client_req_id();
 
-    const TimestampMessage &first = reply.values().begin()->timestamp();
-    uint64_t max_timestamp = first.timestamp();
-    uint64_t max_id = first.id();
-    int max_i = 0;
-
-    for (int i = 0; i < reply.values().size(); i++) {
-        auto v = reply.values()[i];
-        const TimestampMessage &t = v.timestamp();
-        if (t.timestamp() > max_timestamp ||
-            (t.timestamp() == max_timestamp && t.id() > max_id)) {
-            max_timestamp = t.timestamp();
-            max_id = t.id();
-            max_i = i;
-        }
+    auto itr = pendingROCommits.find(req_id);
+    if (itr == pendingROCommits.end()) {
+        Debug("[%d][%lu] ROCommitReply for stale request.", shard_idx_, req_id);
+        return;  // stale request
     }
 
-    return reply.values()[max_i].timestamp();
+    PendingROCommit *req = itr->second;
+    ASSERT(req->n_slow_replies > 0);
+
+    ro_commit_slow_callback cscb = req->cscb;
+
+    uint64_t transaction_id = reply.transaction_id();
+    const Timestamp commit_ts{reply.commit_timestamp()};
+    bool is_commit = reply.is_commit();
+
+    req->n_slow_replies -= 1;
+    if (req->n_slow_replies == 0) {
+        pendingROCommits.erase(itr);
+        delete req;
+    }
+
+    cscb(shard_idx_, transaction_id, commit_ts, is_commit);
 }
 
 void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
@@ -271,8 +281,7 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
 
     PendingROCommit *req = itr->second;
     ro_commit_callback ccb = req->ccb;
-    pendingROCommits.erase(itr);
-    delete req;
+    ASSERT(req->n_slow_replies == 0);
 
     std::vector<Value> values;
     for (auto &v : reply.values()) {
@@ -284,9 +293,15 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
         prepares.emplace_back(p);
     }
 
-    const Timestamp max_ts{FindMaxReadTimestamp(reply)};
+    uint64_t n_prepares = prepares.size();
+    if (n_prepares == 0) {
+        pendingROCommits.erase(itr);
+        delete req;
+    } else {
+        req->n_slow_replies = n_prepares;
+    }
 
-    ccb(shard_idx_, values, prepares, max_ts);
+    ccb(shard_idx_, values, prepares);
 }
 
 void ShardClient::RWCommitCoordinator(

@@ -64,7 +64,8 @@ class BufferClient : public ::BufferClient {
 
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,
-                  const Timestamp &min_read_timestamp, ro_commit_callback ccb,
+                  const Timestamp &min_read_timestamp,
+                  ro_commit_callback ccb, ro_commit_slow_callback cscb,
                   ro_commit_timeout_callback ctcb, uint32_t timeout);
 
    private:

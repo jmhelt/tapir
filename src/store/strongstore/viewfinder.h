@@ -47,6 +47,9 @@ class ViewFinder {
                                    const std::vector<Value> &values,
                                    const std::vector<PreparedTransaction> &prepares);
 
+    SnapshotResult ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
+                                   bool is_commit, const Timestamp &commit_ts);
+
     SnapshotResult ReceiveSlowPath();
 
     SnapshotResult FindSnapshot(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
@@ -66,7 +69,7 @@ class ViewFinder {
     void ReceivedAllFastPaths();
     void FindCommittedKeys();
     void CalculateSnapshotTimestamp();
-    void CheckCommit();
+    SnapshotResult CheckCommit();
 };
 
 }  // namespace strongstore
