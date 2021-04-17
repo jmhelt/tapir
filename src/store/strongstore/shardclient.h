@@ -186,7 +186,6 @@ class ShardClient : public TxnClient,
     std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
     std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
     std::unordered_map<uint64_t, PendingROCommit *> pendingROCommits;
-    Latency_t opLat;
 
     proto::Get get_;
     proto::RWCommitCoordinator rw_commit_c_;

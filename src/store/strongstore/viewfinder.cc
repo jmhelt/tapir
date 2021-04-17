@@ -189,8 +189,4 @@ SnapshotResult ViewFinder::CheckCommit() {
         return {WAIT};
     }
 }
-
-SnapshotResult ViewFinder::ReceiveSlowPath() {
-    return {};
-}
 };  // namespace strongstore
