@@ -58,10 +58,9 @@ enum Mode {
     MODE_MVTSO
 };
 
-typedef std::function<void(int, const std::vector<Value> &,
-                           const std::vector<PreparedTransaction> &,
-                           const Timestamp &)>
-    ro_commit_callback;
+typedef std::function<void(int, const std::vector<Value> &, const std::vector<PreparedTransaction> &)> ro_commit_callback;
+
+typedef std::function<void(int, uint64_t, const Timestamp &, bool)> ro_commit_slow_callback;
 
 typedef std::function<void()> ro_commit_timeout_callback;
 
@@ -92,7 +91,8 @@ class ShardClient : public TxnClient,
 
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,
-                  const Timestamp &min_read_timestamp, ro_commit_callback ccb,
+                  const Timestamp &min_read_timestamp,
+                  ro_commit_callback ccb, ro_commit_slow_callback cscb,
                   ro_commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitCoordinator(uint64_t transaction_id,
@@ -155,7 +155,9 @@ class ShardClient : public TxnClient,
     struct PendingROCommit : public PendingRequest {
         PendingROCommit(uint64_t reqId) : PendingRequest(reqId) {}
         ro_commit_callback ccb;
+        ro_commit_slow_callback cscb;
         ro_commit_timeout_callback ctcb;
+        uint64_t n_slow_replies;
     };
 
     void HandleGetReply(const proto::GetReply &reply);
@@ -166,11 +168,9 @@ class ShardClient : public TxnClient,
     void HandlePrepareOKReply(const proto::PrepareOKReply &reply);
     void HandlePrepareAbortReply(const proto::PrepareAbortReply &reply);
     void HandleROCommitReply(const proto::ROCommitReply &reply);
+    void HandleROCommitSlowReply(const proto::ROCommitSlowReply &reply);
     void HandleAbortReply(const proto::AbortReply &reply);
     void HandleWound(const proto::Wound &wound);
-
-    const TimestampMessage &FindMaxReadTimestamp(
-        const proto::ROCommitReply &reply);
 
     const transport::Configuration &config_;
     Transport *transport_;  // Transport layer.
@@ -203,6 +203,7 @@ class ShardClient : public TxnClient,
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    proto::ROCommitSlowReply ro_commit_slow_reply_;
     proto::AbortReply abort_reply_;
     PingMessage ping_;
 };
