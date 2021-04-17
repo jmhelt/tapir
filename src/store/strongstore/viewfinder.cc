@@ -31,19 +31,12 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
     AddValues(values);
     AddPrepares(prepares);
 
-    if (participants_.size() == 0) {  // Received all fast path responses
+    // Received all fast path responses
+    if (participants_.size() == 0) {
         ReceivedAllFastPaths();
-
-        if (consistency_ == SS) {
-            return {COMMIT, snapshot_ts_};
-        } else if (consistency_ == RSS) {
-            return CheckCommit();
-        } else {
-            NOT_REACHABLE();
-        }
-    } else {
-        return {WAIT};
     }
+
+    return CheckCommit();
 }
 
 SnapshotResult ViewFinder::ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
@@ -64,7 +57,7 @@ SnapshotResult ViewFinder::ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_
 
         std::vector<Value> values;
         for (auto &write : pt.write_set()) {
-            values.emplace_back(transaction_id, commit_ts, write.first, write.second);
+            values.emplace_back(rw_transaction_id, commit_ts, write.first, write.second);
         }
 
         AddValues(values);
@@ -155,6 +148,14 @@ void ViewFinder::CalculateSnapshotTimestamp() {
 }
 
 SnapshotResult ViewFinder::CheckCommit() {
+    if (participants_.size() == 0) {
+        return {WAIT};
+    }
+
+    if (consistency_ == SS) {
+        return {COMMIT, snapshot_ts_};
+    }
+
     for (auto &kv : values_) {
         Debug("key: %s", kv.first.c_str());
         std::list<Value> &l = kv.second;
