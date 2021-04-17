@@ -151,6 +151,7 @@ class Server : public TransportReceiver,
                              TransportAddress *remote)
             : rid{client_id, client_req_id, remote} {}
         RequestID rid;
+        uint64_t n_slow_path_replies;
         Latency_Frame_t wait_lat;
     };
     class PendingGetReply {
@@ -232,6 +233,11 @@ class Server : public TransportReceiver,
     void NotifyPendingROs(const std::unordered_set<uint64_t> &ros);
     void ContinueROCommit(uint64_t transaction_id);
 
+    void NotifySlowPathROs(const std::unordered_set<uint64_t> &ros, uint64_t rw_transaction_id,
+                           bool is_commit, const Timestamp &commit_ts = Timestamp());
+    void SendROSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
+                        bool is_commit, const Timestamp &commit_ts);
+
     const Timestamp GetPrepareTimestamp(uint64_t client_id);
     void CoordinatorCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
     void ParticipantCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts);
@@ -271,6 +277,7 @@ class Server : public TransportReceiver,
     proto::PrepareOKReply prepare_ok_reply_;
     proto::PrepareAbortReply prepare_abort_reply_;
     proto::ROCommitReply ro_commit_reply_;
+    proto::ROCommitSlowReply ro_commit_slow_reply_;
     proto::AbortReply abort_reply_;
     PingMessage ping_;
     proto::Wound wound_;

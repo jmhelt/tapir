@@ -33,9 +33,8 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
 
     if (participants_.size() == 0) {  // Received all fast path responses
 
-        ReceivedAllFastPaths();
         // TODO: Implement RSS slow path
-        FindCommittedKeys();
+        ReceivedAllFastPaths();
         CheckCommit();
 
         return {COMMIT};

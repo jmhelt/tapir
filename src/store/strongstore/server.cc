@@ -254,6 +254,48 @@ void Server::NotifyPendingROs(const std::unordered_set<uint64_t> &ros) {
     }
 }
 
+void Server::NotifySlowPathROs(const std::unordered_set<uint64_t> &ros, uint64_t rw_transaction_id,
+                               bool is_commit, const Timestamp &commit_ts) {
+    for (uint64_t ro : ros) {
+        SendROSlowPath(ro, rw_transaction_id, is_commit, commit_ts);
+    }
+}
+
+void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_id,
+                            bool is_commit, const Timestamp &commit_ts) {
+    ASSERT(consistency_ == RSS);
+    auto search = pending_ro_commit_replies_.find(ro_transaction_id);
+    ASSERT(search != pending_ro_commit_replies_.end());
+
+    Debug("[%lu] Send slow path reply for %lu", ro_transaction_id, rw_transaction_id);
+
+    PendingROCommitReply *reply = search->second;
+
+    uint64_t client_id = reply->rid.client_id();
+    uint64_t client_req_id = reply->rid.client_req_id();
+    const TransportAddress *remote = reply->rid.addr();
+
+    uint64_t n_slow_path_replies = reply->n_slow_path_replies;
+    ASSERT(n_slow_path_replies > 0);
+
+    ro_commit_slow_reply_.mutable_rid()->set_client_id(client_id);
+    ro_commit_slow_reply_.mutable_rid()->set_client_req_id(client_req_id);
+    ro_commit_slow_reply_.set_transaction_id(rw_transaction_id);
+    ro_commit_slow_reply_.set_is_commit(is_commit);
+    commit_ts.serialize(ro_commit_slow_reply_.mutable_commit_timestamp());
+
+    transport_->SendMessage(this, *remote, ro_commit_slow_reply_);
+
+    n_slow_path_replies -= 1;
+    if (n_slow_path_replies == 0) {
+        delete remote;
+        delete reply;
+        pending_ro_commit_replies_.erase(search);
+    } else {
+        reply->n_slow_path_replies = n_slow_path_replies;
+    }
+}
+
 void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg) {
     uint64_t client_id = msg.rid().client_id();
     uint64_t client_req_id = msg.rid().client_req_id();
@@ -266,11 +308,13 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
     const Timestamp commit_ts{msg.commit_timestamp()};
     const Timestamp min_ts{msg.min_timestamp()};
 
-    TransactionState s = transactions_.StartRO(transaction_id, keys, min_ts, commit_ts);
     min_prepare_timestamp_ = std::max(min_prepare_timestamp_, commit_ts);  // TODO: is this correct?
+
+    TransactionState s = transactions_.StartRO(transaction_id, keys, min_ts, commit_ts);
     if (s == PREPARE_WAIT) {
         Debug("[%lu] Waiting for prepared transactions", transaction_id);
         auto reply = new PendingROCommitReply(client_id, client_req_id, remote.clone());
+        reply->n_slow_path_replies = 0;
         pending_ro_commit_replies_[transaction_id] = reply;
 
         if (debug_stats_) {
@@ -295,18 +339,28 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
         rreply->set_val(value.second.c_str());
     }
 
-    if (consistency_ == RSS) {
-        std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+    if (consistency_ == RSS && transactions_.GetRONumberSkipped(transaction_id) > 0) {
+        const std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+
+        // Add for slow replies
+        auto reply = new PendingROCommitReply(client_id, client_req_id, remote.clone());
+        reply->n_slow_path_replies = skipped_prepares.size();
+        pending_ro_commit_replies_[transaction_id] = reply;
+
         for (auto &pt : skipped_prepares) {
             Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
             proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
             pt.serialize(ptm);
         }
+
+        transport_->SendMessage(this, remote, ro_commit_reply_);
+
+        transactions_.StartROSlowPath(transaction_id);
+    } else {
+        transport_->SendMessage(this, remote, ro_commit_reply_);
+
+        transactions_.CommitRO(transaction_id);
     }
-
-    transport_->SendMessage(this, remote, ro_commit_reply_);
-
-    transactions_.CommitRO(transaction_id);
 }
 
 void Server::ContinueROCommit(uint64_t transaction_id) {
@@ -341,22 +395,29 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
         rreply->set_val(value.second.c_str());
     }
 
-    if (consistency_ == RSS) {
-        std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+    if (consistency_ == RSS && transactions_.GetRONumberSkipped(transaction_id) > 0) {
+        const std::vector<PreparedTransaction> skipped_prepares = transactions_.GetROSkippedRWTransactions(transaction_id);
+        // Add for slow replies
+        reply->n_slow_path_replies = skipped_prepares.size();
+
         for (auto &pt : skipped_prepares) {
             Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
             proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
             pt.serialize(ptm);
         }
+
+        transport_->SendMessage(this, *remote, ro_commit_reply_);
+
+        transactions_.StartROSlowPath(transaction_id);
+    } else {
+        transport_->SendMessage(this, *remote, ro_commit_reply_);
+
+        delete remote;
+        delete reply;
+        pending_ro_commit_replies_.erase(search);
+
+        transactions_.CommitRO(transaction_id);
     }
-
-    transport_->SendMessage(this, *remote, ro_commit_reply_);
-
-    delete remote;
-    delete reply;
-    pending_ro_commit_replies_.erase(search);
-
-    transactions_.CommitRO(transaction_id);
 }
 
 void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RWCommitCoordinator &msg) {
@@ -848,6 +909,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status, Timestamp co
 
         NotifyPendingRWs(transaction_id, rr.notify_rws);
         NotifyPendingROs(fr.notify_ros);
+        NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, false);
 
     } else {
         NOT_REACHABLE();
@@ -988,6 +1050,7 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
 
         TransactionFinishResult fr = transactions_.Abort(transaction_id);
         ASSERT(fr.notify_ros.size() == 0);
+        ASSERT(fr.notify_slow_path_ros.size() == 0);
         return;
     }
 
@@ -1109,6 +1172,7 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 
     NotifyPendingRWs(transaction_id, rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
+    NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, false);
 }
 
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
@@ -1162,6 +1226,7 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
 
     NotifyPendingRWs(transaction_id, rr.notify_rws);
     NotifyPendingROs(fr.notify_ros);
+    NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, false);
 }
 
 void Server::SendAbortParticipants(uint64_t transaction_id, const std::unordered_set<int> &participants) {
@@ -1203,6 +1268,7 @@ void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timesta
 
     // Continue waiting RO transactions
     NotifyPendingROs(fr.notify_ros);
+    NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, true, commit_ts);
 }
 
 void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts) {
@@ -1226,6 +1292,7 @@ void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timesta
 
     // Continue waiting RO transactions
     NotifyPendingROs(fr.notify_ros);
+    NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, true, commit_ts);
 }
 
 void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
@@ -1352,6 +1419,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
             NotifyPendingRWs(transaction_id, rr.notify_rws);
             NotifyPendingROs(fr.notify_ros);
+            NotifySlowPathROs(fr.notify_slow_path_ros, transaction_id, false);
         }
     } else {
         NOT_REACHABLE();

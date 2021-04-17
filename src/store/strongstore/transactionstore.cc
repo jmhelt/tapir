@@ -366,6 +366,8 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
     r.notify_ros = std::move(pt.waiting_ros());
     NotifyROs(r.notify_ros);
 
+    r.notify_slow_path_ros = std::move(pt.slow_path_ros());
+
     pending_rw_.erase(transaction_id);
     committed_.insert(transaction_id);
 
@@ -385,6 +387,8 @@ TransactionFinishResult TransactionStore::Abort(uint64_t transaction_id) {
     r.notify_ros = std::move(pt.waiting_ros());
     NotifyROs(r.notify_ros);
 
+    r.notify_slow_path_ros = std::move(pt.slow_path_ros());
+
     pending_rw_.erase(transaction_id);
     aborted_.insert(transaction_id);
 
@@ -398,6 +402,7 @@ TransactionState TransactionStore::StartRO(uint64_t transaction_id,
     PendingROTransaction &ro = pending_ro_[transaction_id];
     ASSERT(ro.state() == PREPARING);
 
+    uint64_t n_skipped = 0;
     uint64_t n_conflicts = 0;
 
     ASSERT(min_ts < commit_ts);
@@ -418,23 +423,24 @@ TransactionState TransactionStore::StartRO(uint64_t transaction_id,
             continue;
         }
 
-        if (consistency_ == Consistency::RSS &&
-            min_ts < rw.prepare_ts() && commit_ts < rw.nonblock_ts()) {
-            Debug("[%lu] Not waiting for prepared transaction (nonblock): %lu < %lu",
-                  transaction_id, commit_ts.getTimestamp(),
-                  rw.nonblock_ts().getTimestamp());
-
-            ro.add_skipped_rw(p.first);
-            continue;
-        }
-
         const Transaction &transaction = rw.transaction();
-
         for (auto &w : transaction.getWriteSet()) {
             if (keys.count(w.first) != 0) {
                 Debug("%lu conflicts with %lu", transaction_id, p.first);
-                rw.add_waiting_ro(transaction_id);
-                n_conflicts += 1;
+                if (consistency_ == Consistency::RSS &&
+                    min_ts < rw.prepare_ts() && commit_ts < rw.nonblock_ts()) {
+                    Debug("[%lu] Not waiting for prepared transaction (nonblock): %lu < %lu",
+                          transaction_id, commit_ts.getTimestamp(),
+                          rw.nonblock_ts().getTimestamp());
+
+                    ro.add_skipped_rw(p.first);
+                    rw.add_slow_path_ro(transaction_id);
+                    n_skipped += 1;
+                } else {
+                    rw.add_waiting_ro(transaction_id);
+                    n_conflicts += 1;
+                }
+
                 break;
             }
         }
@@ -453,10 +459,15 @@ void TransactionStore::ContinueRO(uint64_t transaction_id) {
     ro.set_state(COMMITTING);
 }
 
+uint64_t TransactionStore::GetRONumberSkipped(uint64_t transaction_id) {
+    PendingROTransaction &ro = pending_ro_[transaction_id];
+    ASSERT(ro.state() == COMMITTING);
+
+    return ro.skipped_rws().size();
+}
+
 std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(uint64_t transaction_id) {
-    if (consistency_ != Consistency::RSS) {
-        return {};
-    }
+    ASSERT(consistency_ == RSS);
 
     PendingROTransaction &ro = pending_ro_[transaction_id];
     ASSERT(ro.state() == COMMITTING);
@@ -491,6 +502,15 @@ std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(ui
     }
 
     return skipped;
+}
+
+void TransactionStore::StartROSlowPath(uint64_t transaction_id) {
+    ASSERT(consistency_ == RSS);
+
+    PendingROTransaction &ro = pending_ro_[transaction_id];
+    ASSERT(ro.state() == COMMITTING);
+
+    ro.set_state(SLOW_PATH);
 }
 
 void TransactionStore::CommitRO(uint64_t transaction_id) {
