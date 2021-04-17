@@ -48,11 +48,11 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
 
 SnapshotResult ViewFinder::ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
                                            bool is_commit, const Timestamp &commit_ts) {
-    Debug("[%lu] Received fast path RO response", transaction_id);
+    Debug("[%lu] Received slow path RO response", transaction_id);
     ASSERT(transaction_id == cur_transaction_id_);
     ASSERT(consistency_ == RSS);
 
-    auto search = prepares_.find(transaction_id);
+    auto search = prepares_.find(rw_transaction_id);
     if (search == prepares_.end()) {
         Debug("[%lu] already received commit decision for %lu", transaction_id, rw_transaction_id);
         return {WAIT};
@@ -140,14 +140,14 @@ void ViewFinder::FindCommittedKeys() {
 }
 
 void ViewFinder::CalculateSnapshotTimestamp() {
-    // Find snapshot ts
+    // Find snapshot ts, the minimum timestamp we can use to read all keys
     Timestamp snapshot_ts{0, 0};
     for (auto &kv : values_) {
         const std::list<Value> &l = kv.second;
-        for (const Value &v : l) {
-            if (snapshot_ts < v.ts()) {
-                snapshot_ts = v.ts();
-            }
+        ASSERT(l.size() > 0);
+        const Value &v = l.back();
+        if (snapshot_ts < v.ts()) {
+            snapshot_ts = v.ts();
         }
     }
 
