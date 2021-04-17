@@ -51,18 +51,13 @@ ShardClient::ShardClient(const transport::Configuration &config,
 
     // TODO: Remove hardcoding
     replica_ = 0;
-    _Latency_Init(&opLat, "op_lat_server");
 }
 
-ShardClient::~ShardClient() { Latency_Dump(&opLat); }
+ShardClient::~ShardClient() {}
 
 void ShardClient::ReceiveMessage(const TransportAddress &remote,
                                  const std::string &type,
                                  const std::string &data, void *meta_data) {
-    if (type != ping_.GetTypeName() && type != wound_.GetTypeName()) {
-        Latency_End(&opLat);
-    }
-
     if (type == get_reply_.GetTypeName()) {
         get_reply_.ParseFromString(data);
         HandleGetReply(get_reply_);
@@ -143,8 +138,6 @@ void ShardClient::Get(uint64_t transaction_id, const std::string &key,
     get_.set_transaction_id(transaction_id);
     get_.set_key(key);
 
-    Latency_Start(&opLat);
-
     transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
 }
 
@@ -168,8 +161,6 @@ void ShardClient::Get(uint64_t transaction_id, const std::string &key,
     get_.set_transaction_id(transaction_id);
     timestamp.serialize(get_.mutable_timestamp());
     get_.set_key(key);
-
-    Latency_Start(&opLat);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
 }
@@ -237,8 +228,6 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     for (auto &k : keys) {
         ro_commit_.add_keys(k.c_str());
     }
-
-    Latency_Start(&opLat);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, ro_commit_);
 }
@@ -329,8 +318,6 @@ void ShardClient::RWCommitCoordinator(
         rw_commit_c_.add_participants(p);
     }
 
-    Latency_Start(&opLat);
-
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_c_);
 }
 
@@ -377,8 +364,6 @@ void ShardClient::RWCommitParticipant(
     rw_commit_p_.set_coordinator_shard(coordinator_shard);
     nonblock_timestamp.serialize((rw_commit_p_.mutable_nonblock_timestamp()));
 
-    Latency_Start(&opLat);
-
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_p_);
 }
 
@@ -419,8 +404,6 @@ void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
     prepare_ok_.set_transaction_id(transaction_id);
     prepare_ok_.set_participant_shard(participant_shard);
     prepare_timestamp.serialize(prepare_ok_.mutable_prepare_timestamp());
-
-    Latency_Start(&opLat);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, prepare_ok_);
 }
@@ -464,8 +447,6 @@ void ShardClient::PrepareAbort(uint64_t transaction_id, int participant_shard,
     prepare_abort_.set_transaction_id(transaction_id);
     prepare_abort_.set_participant_shard(participant_shard);
 
-    Latency_Start(&opLat);
-
     transport_->SendMessageToReplica(this, shard_idx_, replica_,
                                      prepare_abort_);
 }
@@ -508,8 +489,6 @@ void ShardClient::Abort(uint64_t transaction_id, const Transaction &transaction,
     abort_.set_transaction_id(transaction_id);
     transaction.serialize(abort_.mutable_transaction());
 
-    Latency_Start(&opLat);
-
     transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
 }
 
@@ -528,8 +507,6 @@ void ShardClient::Abort(uint64_t transaction_id, abort_callback acb,
     abort_.mutable_rid()->set_client_id(client_id_);
     abort_.mutable_rid()->set_client_req_id(reqId);
     abort_.set_transaction_id(transaction_id);
-
-    Latency_Start(&opLat);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
 }
