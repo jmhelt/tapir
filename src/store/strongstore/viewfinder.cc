@@ -29,21 +29,11 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
     participants_.erase(shard_idx);
 
     AddValues(values);
-
-    for (auto &p : prepares) {
-        auto search = prepares_.find(p.transaction_id());
-        if (search == prepares_.end()) {
-            prepares_.insert(search, {p.transaction_id(), p});
-        } else {
-            PreparedTransaction &pt = search->second;
-            ASSERT(pt.transaction_id() == p.transaction_id());
-            pt.update_prepare_ts(p.prepare_ts());
-            pt.add_write_set(p.write_set());
-        }
-    }
+    AddPrepares(prepares);
 
     if (participants_.size() == 0) {  // Received all fast path responses
 
+        ReceivedAllFastPaths();
         // TODO: Implement RSS slow path
         FindCommittedKeys();
         CheckCommit();
@@ -68,6 +58,25 @@ void ViewFinder::AddValues(const std::vector<Value> &values) {
 
         l.insert(it, v);
     }
+}
+
+void ViewFinder::AddPrepares(const std::vector<PreparedTransaction> &prepares) {
+    for (auto &p : prepares) {
+        auto search = prepares_.find(p.transaction_id());
+        if (search == prepares_.end()) {
+            prepares_.insert(search, {p.transaction_id(), p});
+        } else {
+            PreparedTransaction &pt = search->second;
+            ASSERT(pt.transaction_id() == p.transaction_id());
+            pt.update_prepare_ts(p.prepare_ts());
+            pt.add_write_set(p.write_set());
+        }
+    }
+}
+
+void ViewFinder::ReceivedAllFastPaths() {
+    FindCommittedKeys();
+    CalculateSnapshotTimestamp();
 }
 
 void ViewFinder::FindCommittedKeys() {
@@ -112,6 +121,21 @@ void ViewFinder::FindCommittedKeys() {
     AddValues(to_add);
 }
 
+void ViewFinder::CalculateSnapshotTimestamp() {
+    // Find snapshot ts
+    Timestamp snapshot_ts{0, 0};
+    for (auto &kv : values_) {
+        const std::list<Value> &l = kv.second;
+        for (const Value &v : l) {
+            if (snapshot_ts < v.ts()) {
+                snapshot_ts = v.ts();
+            }
+        }
+    }
+
+    snapshot_ts_ = snapshot_ts;
+}
+
 void ViewFinder::CheckCommit() {
     // Find min prepare ts
     Timestamp min_ts = Timestamp::MAX;
@@ -122,20 +146,9 @@ void ViewFinder::CheckCommit() {
         }
     }
 
-    // Find max commit ts
-    Timestamp max_ts{0, 0};
-    for (auto &kv : values_) {
-        const std::list<Value> &l = kv.second;
-        for (const Value &v : l) {
-            if (max_ts < v.ts()) {
-                max_ts = v.ts();
-            }
-        }
-    }
-
     Debug("min prepare ts: %lu.%lu", min_ts.getTimestamp(), min_ts.getID());
-    Debug("max commit ts: %lu.%lu", max_ts.getTimestamp(), max_ts.getID());
-    Debug("can commit: %d", max_ts < min_ts);
+    Debug("snapshot ts: %lu.%lu", snapshot_ts_.getTimestamp(), snapshot_ts_.getID());
+    Debug("can commit: %d", snapshot_ts_ < min_ts);
 }
 
 SnapshotResult ViewFinder::ReceiveSlowPath() {

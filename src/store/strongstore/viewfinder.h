@@ -54,14 +54,18 @@ class ViewFinder {
 
    private:
     uint64_t cur_transaction_id_;
+    Timestamp snapshot_ts_;
     std::unordered_set<int> participants_;
     std::unordered_map<std::string, std::list<Value>> values_;
     std::unordered_map<uint64_t, PreparedTransaction> prepares_;
     Consistency consistency_;
 
     void AddValues(const std::vector<Value> &values);
+    void AddPrepares(const std::vector<PreparedTransaction> &prepares);
 
+    void ReceivedAllFastPaths();
     void FindCommittedKeys();
+    void CalculateSnapshotTimestamp();
     void CheckCommit();
 };
 
