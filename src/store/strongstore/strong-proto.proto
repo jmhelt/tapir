@@ -118,6 +118,13 @@ message ROCommitReply {
     repeated PreparedTransactionMessage prepares = 4;
 }
 
+message ROCommitSlowReply {
+    required RequestIDMessage rid = 1;
+    required uint64 transaction_id = 2;
+    required TimestampMessage commit_timestamp = 3;
+    required bool is_commit = 4;
+}
+
 message Wound {
     required uint64 transaction_id = 1;
 }

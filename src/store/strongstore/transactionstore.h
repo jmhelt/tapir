@@ -29,11 +29,13 @@ enum TransactionState {
     PREPARED,
     COMMITTING,
     COMMITTED,
-    ABORTED
+    ABORTED,
+    SLOW_PATH
 };
 
 struct TransactionFinishResult {
     std::unordered_set<uint64_t> notify_ros;
+    std::unordered_set<uint64_t> notify_slow_path_ros;
 };
 
 class TransactionStore {
@@ -60,7 +62,10 @@ class TransactionStore {
                              const Timestamp &commit_ts);
     void ContinueRO(uint64_t transaction_id);
     void CommitRO(uint64_t transaction_id);
+
+    void StartROSlowPath(uint64_t transaction_id);
     std::vector<PreparedTransaction> GetROSkippedRWTransactions(uint64_t transaction_id);
+    uint64_t GetRONumberSkipped(uint64_t transaction_id);
 
     void StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key);
     void FinishGet(uint64_t transaction_id, const std::string &key);
@@ -115,6 +120,11 @@ class TransactionStore {
             waiting_ros_.insert(transaction_id);
         }
 
+        const std::unordered_set<uint64_t> &slow_path_ros() const { return slow_path_ros_; }
+        void add_slow_path_ro(uint64_t transaction_id) {
+            slow_path_ros_.insert(transaction_id);
+        }
+
         void StartGet(const TransportAddress &remote, const std::string &key);
 
         void StartCoordinatorPrepare(const Timestamp &start_ts, int coordinator,
@@ -137,6 +147,7 @@ class TransactionStore {
         std::unordered_set<int> participants_;
         std::unordered_set<int> ok_participants_;
         std::unordered_set<uint64_t> waiting_ros_;
+        std::unordered_set<uint64_t> slow_path_ros_;
         Timestamp start_ts_;
         Timestamp nonblock_ts_;
         Timestamp prepare_ts_;
