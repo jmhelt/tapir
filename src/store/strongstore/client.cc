@@ -584,7 +584,7 @@ void Client::ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard
         PendingRequest *req = itr->second;
 
         commit_callback ccb = req->ccb;
-        pendingReqs.erase(reqId);
+        pendingReqs.erase(itr);
         delete req;
 
         if (debug_stats_) {
@@ -618,23 +618,23 @@ void Client::ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int s
         PendingRequest *req = itr->second;
 
         commit_callback ccb = req->ccb;
-        pendingReqs.erase(reqId);
+        pendingReqs.erase(itr);
         delete req;
 
         if (debug_stats_) {
             Latency_End(&commit_lat_);
         }
 
-        vf_.CommitRO(t_id);
+        vf_.CommitRO(transaction_id);
 
         min_read_timestamp_ = std::max(min_read_timestamp_, r.max_read_ts);
         Debug("min_read_timestamp_: %lu.%lu",
               min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
-        Debug("[%lu] COMMIT OK", t_id);
+        Debug("[%lu] COMMIT OK", transaction_id);
         ccb(COMMITTED);
 
     } else if (r.state == WAIT) {
-        Debug("[%lu] Waiting for more RO responses", t_id);
+        Debug("[%lu] Waiting for more RO responses", transaction_id);
     }
 }
 
