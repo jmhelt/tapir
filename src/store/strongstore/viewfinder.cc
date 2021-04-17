@@ -58,13 +58,15 @@ void ViewFinder::AddValues(const std::vector<Value> &values) {
     for (auto &v : values) {
         std::list<Value> &l = values_[v.key()];
 
-        for (auto it = l.begin(); it != l.end(); ++it) {
+        std::list<Value>::iterator it = l.begin();
+        for (; it != l.end(); ++it) {
             Value &v2 = *it;
             if (v2.ts() < v.ts()) {
-                l.insert(it, v);
                 break;
             }
         }
+
+        l.insert(it, v);
     }
 }
 
