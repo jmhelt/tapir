@@ -50,8 +50,6 @@ class ViewFinder {
     SnapshotResult ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
                                    bool is_commit, const Timestamp &commit_ts);
 
-    SnapshotResult ReceiveSlowPath();
-
     SnapshotResult FindSnapshot(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
                                 std::vector<CommittedTransaction> &committed);
 
