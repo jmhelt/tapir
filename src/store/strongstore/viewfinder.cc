@@ -49,7 +49,7 @@ SnapshotResult ViewFinder::ReceiveFastPath(uint64_t transaction_id, int shard_id
 SnapshotResult ViewFinder::ReceiveSlowPath(uint64_t transaction_id, uint64_t rw_transaction_id,
                                            bool is_commit, const Timestamp &commit_ts) {
     Debug("[%lu] Received fast path RO response", transaction_id);
-    ASSERT(transaction_id != cur_transaction_id_);
+    ASSERT(transaction_id == cur_transaction_id_);
     ASSERT(consistency_ == RSS);
 
     auto search = prepares_.find(transaction_id);
