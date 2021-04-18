@@ -17,9 +17,9 @@
     "eu-west-1-0",
     "eu-west-1-1",
     "eu-west-1-2",
-    "ap-northeast-1-0",
-    "ap-northeast-1-1",
-    "ap-northeast-1-2"
+    "us-west-1-0",
+    "us-west-1-1",
+    "us-west-1-2"
   ],
   "consistency": [
     "ss",
@@ -34,15 +34,15 @@
     [
       "us-east-1-0",
       "eu-west-1-0",
-      "ap-northeast-1-0"
+      "us-west-1-0"
     ],
     [
       "eu-west-1-1",
-      "ap-northeast-1-1",
+      "us-west-1-1",
       "us-east-1-1"
     ],
     [
-      "ap-northeast-1-2",
+      "us-west-1-2",
       "us-east-1-2",
       "eu-west-1-2"
     ]
@@ -68,10 +68,10 @@
       "eu-west-1-2",
       "client-1-0"
     ],
-    "ap-northeast-1": [
-      "ap-northeast-1-0",
-      "ap-northeast-1-1",
-      "ap-northeast-1-2",
+    "us-west-1": [
+      "us-west-1-0",
+      "us-west-1-1",
+      "us-west-1-2",
       "client-2-0"
     ]
   },
@@ -100,7 +100,7 @@
     "txn_groups",
     "commit_branch"
   ],
-  "experiment_name": "jhelt-QV95426",
+  "experiment_name": "jhelt-QV96657",
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
@@ -108,10 +108,10 @@
   "server_debug_output": true,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "client_experiment_length": 300,
+  "client_experiment_length": 360,
   "client_rand_sleep": 0,
-  "client_ramp_down": 10,
-  "client_ramp_up": 10,
+  "client_ramp_down": 15,
+  "client_ramp_up": 15,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
