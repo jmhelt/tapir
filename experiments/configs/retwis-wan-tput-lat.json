@@ -183,7 +183,7 @@
   "server_emulate_wan": true,
   "plots": [
     {
-      "name": "tput-lat",
+      "name": "tput-p50",
       "font": "DejaVu Sans,12",
       "height": 600,
       "width": 800,
@@ -196,10 +196,37 @@
       "y_var": [
         "run_stats",
         "combined",
-        "mean",
-        "mean"
+        "p50",
+        "p50"
       ],
-      "y_label": "Latency (Mean)",
+      "y_label": "p50 Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
+    },
+    {
+      "name": "tput-p90",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner",
+        "Spanner-VSS"
+      ],
+      "x_var_is_config": false,
+      "y_var": [
+        "run_stats",
+        "combined",
+        "p90",
+        "p50"
+      ],
+      "y_label": "p90 Latency",
       "x_label": "Throughput (txn/s)",
       "x_indep_vars_idx": 1,
       "x_var": [
@@ -221,7 +248,7 @@
       ],
       "x_var_is_config": true,
       "x_var": [
-        "clients"
+        "clients_total"
       ],
       "x_label": "Clients",
       "y_label": "Latency (p90)",
@@ -245,7 +272,7 @@
       ],
       "x_var_is_config": true,
       "x_var": [
-        "clients"
+        "clients_total"
       ],
       "x_label": "Clients",
       "y_label": "Throughput (txn/s)",
