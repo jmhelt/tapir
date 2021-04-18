@@ -248,7 +248,7 @@
       ],
       "x_var_is_config": true,
       "x_var": [
-        "clients_total"
+        "client_total"
       ],
       "x_label": "Clients",
       "y_label": "Latency (p90)",
@@ -272,7 +272,7 @@
       ],
       "x_var_is_config": true,
       "x_var": [
-        "clients_total"
+        "client_total"
       ],
       "x_label": "Clients",
       "y_label": "Throughput (txn/s)",
