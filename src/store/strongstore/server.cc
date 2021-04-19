@@ -1354,7 +1354,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             transactions_.SetParticipantPrepareTimestamp(transaction_id, prepare_ts);
 
             transactions_.FinishParticipantPrepare(transaction_id);
-        } else if (s == PREPARING) {
+        } else if (s == PREPARING || s == PREPARED) {
             Debug("[%lu] Already prepared", transaction_id);
         } else {
             NOT_REACHABLE();
