@@ -43,7 +43,9 @@ class TransactionStore {
     TransactionStore(int this_shard, Consistency consistency);
     ~TransactionStore();
 
-    TransactionState GetTransactionState(uint64_t transaction_id);
+    TransactionState GetRWTransactionState(uint64_t transaction_id);
+    TransactionState GetROTransactionState(uint64_t transaction_id);
+
     const Transaction &GetTransaction(uint64_t transaction_id);
     const Timestamp &GetPrepareTimestamp(uint64_t transaction_id);
     const Timestamp &GetRWCommitTimestamp(uint64_t transaction_id);
