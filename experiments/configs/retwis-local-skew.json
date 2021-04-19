@@ -72,7 +72,7 @@
   },
   "server_port": 7087,
   "truetime_error": 0,
-  "client_num_keys": 10,
+  "client_num_keys": 10000000,
   "benchmark_name": "retwis",
   "client_key_selector": [
     "uniform"
