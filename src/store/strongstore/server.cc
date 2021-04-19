@@ -270,9 +270,11 @@ void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_
     Debug("[%lu] Sending slow path reply for %lu", ro_transaction_id, rw_transaction_id);
 
     PendingROCommitReply *reply = search->second;
+    ASSERT(reply->n_slow_path_replies > 0);
 
     if (transactions_.GetTransactionState(ro_transaction_id) != SLOW_PATH) {
         Debug("[%lu] Fast path reply not yet sent", ro_transaction_id);
+        Debug("s: %d", static_cast<int>(transactions_.GetTransactionState(ro_transaction_id)));
         reply->n_slow_path_replies -= 1;
         return;
     }
@@ -280,9 +282,6 @@ void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_
     uint64_t client_id = reply->rid.client_id();
     uint64_t client_req_id = reply->rid.client_req_id();
     const TransportAddress *remote = reply->rid.addr();
-
-    uint64_t n_slow_path_replies = reply->n_slow_path_replies;
-    ASSERT(n_slow_path_replies > 0);
 
     ro_commit_slow_reply_.mutable_rid()->set_client_id(client_id);
     ro_commit_slow_reply_.mutable_rid()->set_client_req_id(client_req_id);
@@ -292,7 +291,7 @@ void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_
 
     transport_->SendMessage(this, *remote, ro_commit_slow_reply_);
 
-    n_slow_path_replies -= 1;
+    uint64_t n_slow_path_replies = reply->n_slow_path_replies - 1;
     if (n_slow_path_replies == 0) {
         delete remote;
         delete reply;
