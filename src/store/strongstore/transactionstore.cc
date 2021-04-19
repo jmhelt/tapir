@@ -212,7 +212,7 @@ TransactionState TransactionStore::FinishParticipantPrepare(uint64_t transaction
     return pt.state();
 }
 
-TransactionState TransactionStore::GetTransactionState(uint64_t transaction_id) {
+TransactionState TransactionStore::GetRWTransactionState(uint64_t transaction_id) {
     if (committed_.count(transaction_id) > 0) {
         return COMMITTED;
     }
@@ -223,6 +223,21 @@ TransactionState TransactionStore::GetTransactionState(uint64_t transaction_id) 
 
     auto search = pending_rw_.find(transaction_id);
     if (search == pending_rw_.end()) {
+        return NOT_FOUND;
+    } else {
+        return search->second.state();
+    }
+}
+
+TransactionState TransactionStore::GetROTransactionState(uint64_t transaction_id) {
+    if (committed_.count(transaction_id) > 0) {
+        return COMMITTED;
+    }
+
+    ASSERT(aborted_.count(transaction_id) == 0);
+
+    auto search = pending_ro_.find(transaction_id);
+    if (search == pending_ro_.end()) {
         return NOT_FOUND;
     } else {
         return search->second.state();
@@ -475,23 +490,23 @@ std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(ui
     std::vector<PreparedTransaction> skipped;
 
     Debug("[%lu] skipped rws:", transaction_id);
-    for (uint64_t r : ro.skipped_rws()) {
-        TransactionState s = GetTransactionState(r);
-        Debug("rw: %lu", r);
+    for (uint64_t rw : ro.skipped_rws()) {
+        TransactionState s = GetRWTransactionState(rw);
+        Debug("rw: %lu", rw);
         Debug("s: %d", static_cast<int>(s));
         if (s == PREPARING || s == PREPARED || s == COMMITTING) {
-            auto search = pending_rw_.find(r);
+            auto search = pending_rw_.find(rw);
             ASSERT(search != pending_rw_.end());
-            PendingRWTransaction &rw = search->second;
+            PendingRWTransaction &prw = search->second;
 
-            ASSERT(ro.min_ts() < rw.prepare_ts() && ro.commit_ts() < rw.nonblock_ts());
+            ASSERT(ro.min_ts() < prw.prepare_ts() && ro.commit_ts() < prw.nonblock_ts());
 
             const std::unordered_set<std::string> &keys = ro.keys();
             bool first = true;
-            for (auto &w : rw.transaction().getWriteSet()) {
+            for (auto &w : prw.transaction().getWriteSet()) {
                 if (keys.count(w.first) > 0) {
                     if (first) {
-                        skipped.emplace_back(r, rw.prepare_ts());
+                        skipped.emplace_back(rw, prw.prepare_ts());
                         first = false;
                     }
 

@@ -216,7 +216,7 @@ void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<u
     for (uint64_t rw : rws) {
         ASSERT(transaction_id != rw);
         Debug("[%lu] Wounding %lu", transaction_id, rw);
-        TransactionState s = transactions_.GetTransactionState(rw);
+        TransactionState s = transactions_.GetRWTransactionState(rw);
         ASSERT(s != NOT_FOUND);
 
         if (s == READING || s == READ_WAIT) {
@@ -272,9 +272,9 @@ void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_
     PendingROCommitReply *reply = search->second;
     ASSERT(reply->n_slow_path_replies > 0);
 
-    if (transactions_.GetTransactionState(ro_transaction_id) != SLOW_PATH) {
+    if (transactions_.GetROTransactionState(ro_transaction_id) != SLOW_PATH) {
         Debug("[%lu] Fast path reply not yet sent", ro_transaction_id);
-        Debug("s: %d", static_cast<int>(transactions_.GetTransactionState(ro_transaction_id)));
+        Debug("s: %d", static_cast<int>(transactions_.GetROTransactionState(ro_transaction_id)));
         reply->n_slow_path_replies -= 1;
         return;
     }
@@ -895,7 +895,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status, Timestamp co
             []() {}, COMMIT_TIMEOUT);
 
     } else if (status == REPLY_FAIL) {
-        TransactionState s = transactions_.GetTransactionState(transaction_id);
+        TransactionState s = transactions_.GetRWTransactionState(transaction_id);
         if (s == ABORTED) {
             Debug("[%lu] Already aborted", transaction_id);
             return;
@@ -1048,7 +1048,7 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
 
     prepare_abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 
-    TransactionState state = transactions_.GetTransactionState(transaction_id);
+    TransactionState state = transactions_.GetRWTransactionState(transaction_id);
     if (state == NOT_FOUND) {
         Debug("[%lu] Transaction not in progress", transaction_id);
 
@@ -1118,7 +1118,7 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 
     Debug("[%lu] Received Wound request", transaction_id);
 
-    TransactionState state = transactions_.GetTransactionState(transaction_id);
+    TransactionState state = transactions_.GetRWTransactionState(transaction_id);
 
     if (state == ABORTED) {
         Debug("[%lu] Transaction already aborted", transaction_id);
@@ -1189,7 +1189,7 @@ void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
 
     abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 
-    TransactionState state = transactions_.GetTransactionState(transaction_id);
+    TransactionState state = transactions_.GetRWTransactionState(transaction_id);
 
     if (state == ABORTED) {
         Debug("[%lu] Transaction already aborted", transaction_id);
@@ -1341,7 +1341,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     if (request.op() == strongstore::proto::Request::PREPARE) {
         Debug("[%lu] Received PREPARE", transaction_id);
 
-        TransactionState s = transactions_.GetTransactionState(transaction_id);
+        TransactionState s = transactions_.GetRWTransactionState(transaction_id);
         Debug("state: %d", static_cast<int>(s));
         if (s == ABORTED) {
             Debug("[%lu] Already aborted", transaction_id);
@@ -1374,7 +1374,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
         if (request.has_prepare()) {  // Coordinator commit
             Debug("[%lu] Coordinator commit", transaction_id);
 
-            if (transactions_.GetTransactionState(transaction_id) != COMMITTING) {
+            if (transactions_.GetRWTransactionState(transaction_id) != COMMITTING) {
                 const Timestamp start_ts{request.prepare().timestamp()};
                 int coordinator = request.prepare().coordinator();
                 const std::unordered_set<int> participants{request.prepare().participants().begin(),
@@ -1408,7 +1408,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
             transport_->Timer(commit_wait_ms, std::bind(&Server::CoordinatorCommitTransaction, this, transaction_id, commit_ts));
         } else {  // Participant commit
             Debug("[%lu] Participant commit", transaction_id);
-            if (transactions_.GetTransactionState(transaction_id) != COMMITTING) {
+            if (transactions_.GetRWTransactionState(transaction_id) != COMMITTING) {
                 transactions_.ParticipantReceivePrepareOK(transaction_id);
             }
 
@@ -1418,7 +1418,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     } else if (request.op() == strongstore::proto::Request::ABORT) {
         Debug("[%lu] Received ABORT", transaction_id);
 
-        if (transactions_.GetTransactionState(transaction_id) != ABORTED) {  // replica abort
+        if (transactions_.GetRWTransactionState(transaction_id) != ABORTED) {  // replica abort
             const Transaction &transaction = transactions_.GetTransaction(transaction_id);
 
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
