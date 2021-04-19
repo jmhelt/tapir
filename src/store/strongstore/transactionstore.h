@@ -64,6 +64,7 @@ class TransactionStore {
     void CommitRO(uint64_t transaction_id);
 
     void StartROSlowPath(uint64_t transaction_id);
+    void FinishROSlowPath(uint64_t transaction_id);
     std::vector<PreparedTransaction> GetROSkippedRWTransactions(uint64_t transaction_id);
     uint64_t GetRONumberSkipped(uint64_t transaction_id);
 
