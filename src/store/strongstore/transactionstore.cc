@@ -461,7 +461,7 @@ void TransactionStore::ContinueRO(uint64_t transaction_id) {
 
 uint64_t TransactionStore::GetRONumberSkipped(uint64_t transaction_id) {
     PendingROTransaction &ro = pending_ro_[transaction_id];
-    ASSERT(ro.state() == COMMITTING);
+    ASSERT(ro.state() == PREPARE_WAIT || ro.state() == COMMITTING);
 
     return ro.skipped_rws().size();
 }
@@ -511,6 +511,17 @@ void TransactionStore::StartROSlowPath(uint64_t transaction_id) {
     ASSERT(ro.state() == COMMITTING);
 
     ro.set_state(SLOW_PATH);
+}
+
+void TransactionStore::FinishROSlowPath(uint64_t transaction_id) {
+    ASSERT(consistency_ == RSS);
+
+    PendingROTransaction &ro = pending_ro_[transaction_id];
+    ASSERT(ro.state() == SLOW_PATH);
+
+    ro.set_state(COMMITTED);
+    pending_ro_.erase(transaction_id);
+    committed_.insert(transaction_id);
 }
 
 void TransactionStore::CommitRO(uint64_t transaction_id) {
