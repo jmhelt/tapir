@@ -346,9 +346,6 @@ int main(int argc, char **argv) {
     switch (proto) {
         case PROTO_TAPIR: {
             server = new tapirstore::Server(FLAGS_tapir_linearizable);
-            replica = new replication::ir::IRReplica(
-                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport,
-                dynamic_cast<replication::ir::IRAppReplica *>(server));
             break;
         }
         case PROTO_WEAK: {
@@ -362,16 +359,13 @@ int main(int argc, char **argv) {
                                              replica_config, FLAGS_server_id,
                                              FLAGS_group_idx, FLAGS_replica_idx,
                                              tport, tt, FLAGS_debug_stats);
-            replica = new replication::vr::VRReplica(
-                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
-                dynamic_cast<replication::AppReplica *>(server),
-                FLAGS_debug_stats);
             break;
         }
         default: {
             NOT_REACHABLE();
         }
     }
+    Debug("Created server");
 
     // parse keys
     size_t loaded = 0;
@@ -449,6 +443,29 @@ int main(int argc, char **argv) {
         in.close();
     }
     Notice("Done loading server.");
+
+    switch (proto) {
+        case PROTO_TAPIR: {
+            replica = new replication::ir::IRReplica(
+                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport,
+                dynamic_cast<replication::ir::IRAppReplica *>(server));
+            break;
+        }
+        case PROTO_WEAK:
+            break;
+
+        case PROTO_STRONG: {
+            replica = new replication::vr::VRReplica(
+                replica_config, FLAGS_group_idx, FLAGS_replica_idx, tport, 1,
+                dynamic_cast<replication::AppReplica *>(server),
+                FLAGS_debug_stats);
+            break;
+        }
+        default: {
+            NOT_REACHABLE();
+        }
+    }
+    Debug("Created replica");
 
     std::signal(SIGKILL, Cleanup);
     std::signal(SIGTERM, Cleanup);
