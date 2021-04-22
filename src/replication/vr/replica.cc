@@ -276,6 +276,8 @@ void VRReplica::SendNullCommit() {
     if (!(transport->SendMessageToAll(this, cm))) {
         RWarning("Failed to send null COMMIT message to all replicas");
     }
+
+    nullCommitTimeout->Reset();
 }
 
 void VRReplica::UpdateClientTable(const Request &req) {
