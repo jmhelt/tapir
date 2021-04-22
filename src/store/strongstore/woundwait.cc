@@ -33,15 +33,15 @@ void WoundWait::Lock::AddReadWriteWaiter(uint64_t requester, const Timestamp &ts
 
 bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
                                std::unordered_set<uint64_t> &wound) {
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders before:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters before");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters before");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     auto search = waiters_.find(requester);
     if (search != waiters_.end()) {  // I already have a waiter
@@ -96,7 +96,7 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
         }
 
         for (auto w : waiter->waiters()) {
-            Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
+            // Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
             if (w.first != requester && ts < w.second) {
                 wound.insert(w.first);
             }
@@ -107,21 +107,21 @@ bool WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
 
     // Wound holders
     for (auto w : holders_) {
-        Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
+        // Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
         if (w.first != requester && ts < w.second) {
             wound.insert(w.first);
         }
     }
 
-    Debug("holders after:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders after:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters after");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters after");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     return true;
 }
@@ -130,7 +130,7 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
                                         std::unordered_set<uint64_t> &wound) {
     // Lock is free
     if (state_ == UNLOCKED) {
-        Debug("[%lu] unlocked", requester);
+        // Debug("[%lu] unlocked", requester);
         ASSERT(holders_.size() == 0);
 
         state_ = LOCKED_FOR_READ;
@@ -141,10 +141,10 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
 
     // I already hold the lock
     if (holders_.find(requester) != holders_.end()) {
-        Debug("[%lu] already hold lock", requester);
+        // Debug("[%lu] already hold lock", requester);
         if (state_ == LOCKED_FOR_WRITE) {
             state_ = LOCKED_FOR_READ_WRITE;
-            Debug("[%lu] upgrade to rw lock", requester);
+            // Debug("[%lu] upgrade to rw lock", requester);
         }
 
         return REPLY_OK;
@@ -154,13 +154,13 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
     if (state_ == LOCKED_FOR_READ && !isWriteNext()) {
         holders_[requester] = ts;
 
-        Debug("[%lu] adding myself as reader: %lu", requester, holders_.size());
+        // Debug("[%lu] adding myself as reader: %lu", requester, holders_.size());
 
         return REPLY_OK;
     }
 
     // Wait (and possibly wound)
-    Debug("[%lu] Waiting on lock", requester);
+    // Debug("[%lu] Waiting on lock", requester);
     ReadWait(requester, ts, wound);
     return REPLY_WAIT;
 }
@@ -227,15 +227,15 @@ void WoundWait::Lock::PopWaiter(std::unordered_set<uint64_t> &notify) {
 }
 
 void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64_t> &notify) {
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders before:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters before");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters before");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     // Clean up waiter
     auto search = waiters_.find(holder);
@@ -243,22 +243,22 @@ void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64
         std::shared_ptr<Waiter> w = search->second;
 
         if (w->iswrite()) {
-            Debug("downgrade waiter to w only");
+            // Debug("downgrade waiter to w only");
             w->set_read(false);
         } else if (w->waiters().size() > 1) {
-            Debug("remove waiter");
+            // Debug("remove waiter");
             w->remove_waiter(holder);
-            for (auto w2 : w->waiters()) {
-                Debug("w2: %lu", w2.first);
-            }
+            // for (auto w2 : w->waiters()) {
+            //     Debug("w2: %lu", w2.first);
+            // }
 
-            if (holder != w->first_waiter()) {
-                Debug("erase self");
-                waiters_.erase(search);
-            }
+            // if (holder != w->first_waiter()) {
+            //     Debug("erase self");
+            //     waiters_.erase(search);
+            // }
         } else {
             uint64_t first_waiter = w->first_waiter();
-            Debug("erase self and first waiter: %lu", first_waiter);
+            // Debug("erase self and first waiter: %lu", first_waiter);
             waiters_.erase(search);
             waiters_.erase(first_waiter);
         }
@@ -267,7 +267,7 @@ void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64
     if (holders_.count(holder) > 0 &&
         (state_ == LOCKED_FOR_READ || state_ == LOCKED_FOR_READ_WRITE)) {
         if (state_ == LOCKED_FOR_READ_WRITE) {
-            Debug("[%lu] downgrade to w lock", holder);
+            // Debug("[%lu] downgrade to w lock", holder);
             state_ = LOCKED_FOR_WRITE;
             return;
         }
@@ -277,27 +277,27 @@ void WoundWait::Lock::ReleaseReadLock(uint64_t holder, std::unordered_set<uint64
 
     PopWaiter(notify);
 
-    Debug("holders after:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders after:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters after");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters after");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 }
 
 void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint64_t> &notify) {
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders before:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters before");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters before");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     // Clean up waiter
     auto search = waiters_.find(holder);
@@ -306,9 +306,9 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
 
         if (w->isread()) {
             w->set_write(false);
-            Debug("downgrade waiter to r only");
+            // Debug("downgrade waiter to r only");
         } else {
-            Debug("erase waiter");
+            // Debug("erase waiter");
             waiters_.erase(search);
         }
     }
@@ -316,7 +316,7 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
     if (holders_.count(holder) > 0 &&
         (state_ == LOCKED_FOR_WRITE || state_ == LOCKED_FOR_READ_WRITE)) {
         if (state_ == LOCKED_FOR_READ_WRITE) {
-            Debug("[%lu] downgrade to r lock", holder);
+            // Debug("[%lu] downgrade to r lock", holder);
             state_ = LOCKED_FOR_READ;
             return;
         }
@@ -326,28 +326,28 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder, std::unordered_set<uint6
 
     PopWaiter(notify);
 
-    Debug("holders after:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders after:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters after");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters after");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 }
 
 bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
                                 std::unordered_set<uint64_t> &wound) {
-    Debug("holders before:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders before:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters before");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters before");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     bool rw = false;
     auto search = waiters_.find(requester);
@@ -364,7 +364,7 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
             w->set_write(true);
             return true;
         } else if (isread) {
-            Debug("wait as read-write");
+            // Debug("wait as read-write");
             // Wait as read-write
             w->remove_waiter(requester);
             waiters_.erase(search);
@@ -388,7 +388,7 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         std::shared_ptr<Waiter> waiter = search->second;
 
         for (auto w : waiter->waiters()) {
-            Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
+            // Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
             if (w.first != requester && ts < w.second) {
                 wound.insert(w.first);
             }
@@ -399,7 +399,7 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
 
     // Wound holders
     for (auto w : holders_) {
-        Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
+        // Debug("[%lu] wound?: %lu %lu <? %lu", requester, w.first, ts.getTimestamp(), w.second.getTimestamp());
         if (w.first != requester && ts < w.second) {
             wound.insert(w.first);
         }
@@ -412,15 +412,15 @@ bool WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         AddWriteWaiter(requester, ts);
     }
 
-    Debug("holders after:");
-    for (auto h : holders_) {
-        Debug("%lu", h.first);
-    }
+    // Debug("holders after:");
+    // for (auto h : holders_) {
+    //     Debug("%lu", h.first);
+    // }
 
-    Debug("waiters after");
-    for (uint64_t w : wait_q_) {
-        Debug("%lu", w);
-    }
+    // Debug("waiters after");
+    // for (uint64_t w : wait_q_) {
+    //     Debug("%lu", w);
+    // }
 
     return true;
 }
@@ -429,7 +429,7 @@ int WoundWait::Lock::TryAcquireWriteLock(uint64_t requester, const Timestamp &ts
                                          std::unordered_set<uint64_t> &wound) {
     // Lock is free
     if (state_ == UNLOCKED) {
-        Debug("[%lu] unlocked", requester);
+        // Debug("[%lu] unlocked", requester);
         ASSERT(holders_.size() == 0);
 
         state_ = LOCKED_FOR_WRITE;
@@ -440,9 +440,9 @@ int WoundWait::Lock::TryAcquireWriteLock(uint64_t requester, const Timestamp &ts
 
     // I already hold the lock
     if (holders_.size() == 1 && holders_.count(requester) > 0) {
-        Debug("[%lu] already hold lock", requester);
+        // Debug("[%lu] already hold lock", requester);
         if (state_ == LOCKED_FOR_READ) {
-            Debug("[%lu] upgrade to rw lock", requester);
+            // Debug("[%lu] upgrade to rw lock", requester);
             state_ = LOCKED_FOR_READ_WRITE;
         }
 
@@ -450,7 +450,7 @@ int WoundWait::Lock::TryAcquireWriteLock(uint64_t requester, const Timestamp &ts
     }
 
     // Wait (and possibly wound)
-    Debug("[%lu] Waiting on lock", requester);
+    // Debug("[%lu] Waiting on lock", requester);
     WriteWait(requester, ts, wound);
     return REPLY_WAIT;
 }
@@ -459,12 +459,12 @@ bool WoundWait::Lock::isWriteNext() {
     while (!wait_q_.empty()) {
         auto search = waiters_.find(wait_q_.front());
         if (search == waiters_.end()) {
-            Debug("%lu gone", wait_q_.front());
+            // Debug("%lu gone", wait_q_.front());
             wait_q_.pop_front();
             continue;
         }
 
-        Debug("%lu found", wait_q_.front());
+        // Debug("%lu found", wait_q_.front());
         return search->second->iswrite();
     }
 
@@ -498,7 +498,7 @@ int WoundWait::LockForRead(const std::string &lock, uint64_t requester,
                            const Timestamp &ts,
                            std::unordered_set<uint64_t> &wound) {
     Lock &l = locks_[lock];
-    Debug("[%lu] Lock for Read: %s", requester, lock.c_str());
+    // Debug("[%lu] Lock for Read: %s", requester, lock.c_str());
 
     int ret = l.TryAcquireReadLock(requester, ts, wound);
     if (ret == REPLY_WAIT) {
@@ -513,7 +513,7 @@ int WoundWait::LockForWrite(const std::string &lock, uint64_t requester,
                             std::unordered_set<uint64_t> &wound) {
     Lock &l = locks_[lock];
 
-    Debug("[%lu] Lock for Write: %s", requester, lock.c_str());
+    // Debug("[%lu] Lock for Write: %s", requester, lock.c_str());
 
     int ret = l.TryAcquireWriteLock(requester, ts, wound);
     if (ret == REPLY_WAIT) {

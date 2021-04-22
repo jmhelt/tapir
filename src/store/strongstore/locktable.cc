@@ -31,7 +31,7 @@ bool LockTable::HasReadLock(uint64_t transaction_id, const std::string &key) {
 
 LockAcquireResult LockTable::AcquireLocks(uint64_t transaction_id, const Transaction &transaction) {
     const Timestamp &start_ts = transaction.start_time();
-    Debug("[%lu] start_time: %lu.%lu", transaction_id, start_ts.getTimestamp(), start_ts.getID());
+    // Debug("[%lu] start_time: %lu.%lu", transaction_id, start_ts.getTimestamp(), start_ts.getID());
 
     LockAcquireResult r;
     int ret = REPLY_OK;
