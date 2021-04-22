@@ -1342,7 +1342,6 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
         Debug("[%lu] Received PREPARE", transaction_id);
 
         TransactionState s = transactions_.GetRWTransactionState(transaction_id);
-        Debug("state: %d", static_cast<int>(s));
         if (s == ABORTED) {
             Debug("[%lu] Already aborted", transaction_id);
             status = REPLY_FAIL;
@@ -1386,13 +1385,11 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
                 TransactionState s = transactions_.StartCoordinatorPrepare(transaction_id, start_ts, coordinator,
                                                                            participants, transaction, nonblock_ts);
-                Debug("s: %d", static_cast<int>(s));
                 for (int p : participants) {
                     if (p != coordinator) {
                         s = transactions_.CoordinatorReceivePrepareOK(transaction_id, p, commit_ts);
                     }
                 }
-                Debug("s: %d", static_cast<int>(s));
                 ASSERT(s == PREPARING);
 
                 LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);

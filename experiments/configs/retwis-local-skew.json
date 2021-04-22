@@ -46,8 +46,8 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 6,
-  "client_processes_per_client_node": 6,
+  "client_total": 1,
+  "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
@@ -104,10 +104,11 @@
   "server_debug_output": true,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "client_experiment_length": 10,
+  "server_load_time": 20,
+  "client_experiment_length": 30,
   "client_rand_sleep": 0,
-  "client_ramp_down": 0,
-  "client_ramp_up": 0,
+  "client_ramp_down": 10,
+  "client_ramp_up": 10,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
