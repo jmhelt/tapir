@@ -340,7 +340,6 @@ TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transact
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    Debug("s: %d", static_cast<int>(pt.state()));
     ASSERT(pt.state() == WAIT_PARTICIPANTS);
     pt.ReceivePrepareOK(this_shard_, participant, prepare_ts);
 
@@ -371,7 +370,7 @@ void TransactionStore::NotifyROs(std::unordered_set<uint64_t> &ros) {
 }
 
 TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
-    Debug("[%lu] COMMIT", transaction_id);
+    // Debug("[%lu] COMMIT", transaction_id);
 
     TransactionFinishResult r;
 
@@ -390,7 +389,7 @@ TransactionFinishResult TransactionStore::Commit(uint64_t transaction_id) {
 }
 
 TransactionFinishResult TransactionStore::Abort(uint64_t transaction_id) {
-    Debug("[%lu] ABORT", transaction_id);
+    // Debug("[%lu] ABORT", transaction_id);
 
     TransactionFinishResult r;
 
@@ -489,11 +488,8 @@ std::vector<PreparedTransaction> TransactionStore::GetROSkippedRWTransactions(ui
 
     std::vector<PreparedTransaction> skipped;
 
-    Debug("[%lu] skipped rws:", transaction_id);
     for (uint64_t rw : ro.skipped_rws()) {
         TransactionState s = GetRWTransactionState(rw);
-        Debug("rw: %lu", rw);
-        Debug("s: %d", static_cast<int>(s));
         if (s == PREPARING || s == PREPARED || s == COMMITTING) {
             auto search = pending_rw_.find(rw);
             ASSERT(search != pending_rw_.end());
