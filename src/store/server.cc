@@ -45,7 +45,10 @@
 #include "store/tapirstore/server.h"
 #include "store/weakstore/server.h"
 
-enum protocol_t { PROTO_UNKNOWN, PROTO_TAPIR, PROTO_WEAK, PROTO_STRONG };
+enum protocol_t { PROTO_UNKNOWN,
+                  PROTO_TAPIR,
+                  PROTO_WEAK,
+                  PROTO_STRONG };
 
 enum transmode_t {
     TRANS_UNKNOWN,
@@ -383,12 +386,13 @@ int main(int argc, char **argv) {
                     string value = "";
                     if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx,
                                 txnGroups) == FLAGS_group_idx) {
-                        if (i % 10000 == 0) {
-                            Debug("Loaded key %s", key.c_str());
-                        }
                         server->Load(key, value, Timestamp());
                         ++stored;
                     }
+                    if (i % 100000 == 0) {
+                        Debug("Loaded key %s", key.c_str());
+                    }
+
                     ++loaded;
                 }
             }
