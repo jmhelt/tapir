@@ -266,6 +266,7 @@ void VRReplica::StartViewChange(view_t newview) {
 }
 
 void VRReplica::SendNullCommit() {
+    Debug("Sending null commit");
     CommitMessage cm;
     cm.set_view(this->view);
     cm.set_opnum(this->lastCommitted);
