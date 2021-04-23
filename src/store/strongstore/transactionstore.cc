@@ -28,7 +28,7 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
     transaction_.add_read_write_sets(transaction);
     transaction_.set_start_time(transaction.start_time());
     nonblock_ts_ = nonblock_ts;
-    commit_ts_ = std::max(commit_ts_, start_ts);
+    prepare_ts_ = std::max(prepare_ts_, start_ts);
 
     if (coordinator_ == -1) {
         coordinator_ = coordinator;
@@ -161,7 +161,7 @@ TransactionState TransactionStore::StartCoordinatorPrepare(uint64_t transaction_
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.state() == READING);
+    ASSERT(pt.state() == READING || pt.state() == WAIT_PARTICIPANTS);
 
     Debug("[%lu] Coordinator: StartTransaction %lu.%lu", transaction_id, start_ts.getTimestamp(), start_ts.getID());
 
@@ -340,7 +340,7 @@ TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transact
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
-    ASSERT(pt.state() == WAIT_PARTICIPANTS);
+    ASSERT(pt.state() == READING || pt.state() == WAIT_PARTICIPANTS);
     pt.ReceivePrepareOK(this_shard_, participant, prepare_ts);
 
     return pt.state();
