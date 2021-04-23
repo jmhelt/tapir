@@ -4,8 +4,8 @@
       "consistency"
     ],
     [
-      "client_key_selector",
-      "client_zipf_coefficient"
+      "client_total",
+      "client_processes_per_client_node"
     ]
   ],
   "replication_protocol": "strong",
@@ -22,8 +22,7 @@
     "us-west-1-2"
   ],
   "consistency": [
-    "ss",
-    "rss"
+    "ss"
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
@@ -47,8 +46,22 @@
       "eu-west-1-2"
     ]
   ],
-  "client_total": 180,
-  "client_processes_per_client_node": 60,
+  "client_total": [
+    6,
+    12,
+    18,
+    24,
+    30,
+    36
+  ],
+  "client_processes_per_client_node": [
+    2,
+    4,
+    6,
+    8,
+    10,
+    12
+  ],
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0",
@@ -79,12 +92,8 @@
   "truetime_error": 10,
   "client_num_keys": 10000000,
   "benchmark_name": "retwis",
-  "client_key_selector": [
-    "zipf"
-  ],
-  "client_zipf_coefficient": [
-    0.5
-  ],
+  "client_key_selector": "zipf",
+  "client_zipf_coefficient": 0.9,
   "rw_num_ops_txn": 1,
   "server_load_time": 20,
   "server_preload_keys": true,
@@ -109,10 +118,10 @@
   "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "client_experiment_length": 600,
-  "client_rand_sleep": 0,
-  "client_ramp_down": 30,
-  "client_ramp_up": 30,
+  "client_experiment_length": 360,
+  "client_rand_sleep": 200,
+  "client_ramp_down": 15,
+  "client_ramp_up": 15,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
@@ -170,73 +179,133 @@
   "server_emulate_wan": true,
   "plots": [
     {
-      "name": "lat-skew-combined",
+      "name": "tput-p50",
       "font": "DejaVu Sans,12",
       "height": 600,
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-RSS"
+        "Spanner-VSS"
       ],
-      "x_var_is_config": true,
-      "x_indep_vars_idx": 1,
-      "x_var": [
-        "client_zipf_coefficient"
-      ],
+      "x_var_is_config": false,
       "y_var": [
-        "aggregate",
+        "run_stats",
         "combined",
+        "p50",
         "p50"
       ],
-      "y_label": "p50 Latency (ms)",
-      "x_label": "Zipf Coefficient"
+      "y_label": "p50 Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
     },
     {
-      "name": "lat-skew-ro",
+      "name": "tput-p90",
       "font": "DejaVu Sans,12",
       "height": 600,
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-RSS"
+        "Spanner-VSS"
       ],
-      "x_var_is_config": true,
-      "x_indep_vars_idx": 1,
-      "x_var": [
-        "client_zipf_coefficient"
-      ],
+      "x_var_is_config": false,
       "y_var": [
-        "aggregate",
-        "ro",
+        "run_stats",
+        "combined",
+        "p90",
         "p50"
       ],
-      "y_label": "p50 Latency (ms)",
-      "x_label": "Zipf Coefficient"
+      "y_label": "p90 Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
     },
     {
-      "name": "lat-skew-rw",
+      "name": "tput-p99",
       "font": "DejaVu Sans,12",
       "height": 600,
       "width": 800,
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-RSS"
+        "Spanner-VSS"
       ],
-      "x_var_is_config": true,
-      "x_indep_vars_idx": 1,
-      "x_var": [
-        "client_zipf_coefficient"
-      ],
+      "x_var_is_config": false,
       "y_var": [
-        "aggregate",
-        "rw",
+        "run_stats",
+        "combined",
+        "p99",
         "p50"
       ],
-      "y_label": "p50 Latency (ms)",
-      "x_label": "Zipf Coefficient"
+      "y_label": "p99 Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
+    },
+    {
+      "name": "lat-clients",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner",
+        "Spanner-VSS"
+      ],
+      "x_var_is_config": true,
+      "x_var": [
+        "client_total"
+      ],
+      "x_label": "Clients",
+      "y_label": "Latency (p90)",
+      "x_indep_vars_idx": 1,
+      "y_var": [
+        "run_stats",
+        "combined",
+        "p90",
+        "p50"
+      ]
+    },
+    {
+      "name": "tput-clients",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner",
+        "Spanner-VSS"
+      ],
+      "x_var_is_config": true,
+      "x_var": [
+        "client_total"
+      ],
+      "x_label": "Clients",
+      "y_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "y_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
     }
   ],
   "cdf_plots": {

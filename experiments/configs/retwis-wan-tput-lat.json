@@ -22,8 +22,7 @@
     "us-west-1-2"
   ],
   "consistency": [
-    "ss",
-    "rss"
+    "ss"
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
@@ -48,24 +47,10 @@
     ]
   ],
   "client_total": [
-    3,
-    6,
-    13,
-    18,
-    24,
-    30,
-    36,
-    42
+    240
   ],
   "client_processes_per_client_node": [
-    1,
-    2,
-    4,
-    6,
-    8,
-    10,
-    12,
-    14
+    80
   ],
   "client_threads_per_process": 1,
   "clients": [
@@ -95,11 +80,12 @@
   },
   "server_port": 7087,
   "truetime_error": 10,
-  "client_num_keys": 1000000,
+  "client_num_keys": 10000000,
   "benchmark_name": "retwis",
   "client_key_selector": "zipf",
-  "client_zipf_coefficient": 0.75,
+  "client_zipf_coefficient": 0.5,
   "rw_num_ops_txn": 1,
+  "server_load_time": 20,
   "server_preload_keys": true,
   "client_abort_backoff": 1,
   "client_retry_aborted": true,
@@ -227,6 +213,33 @@
         "p50"
       ],
       "y_label": "p90 Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
+    },
+    {
+      "name": "tput-p99",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner",
+        "Spanner-VSS"
+      ],
+      "x_var_is_config": false,
+      "y_var": [
+        "run_stats",
+        "combined",
+        "p99",
+        "p50"
+      ],
+      "y_label": "p99 Latency",
       "x_label": "Throughput (txn/s)",
       "x_indep_vars_idx": 1,
       "x_var": [
