@@ -150,8 +150,8 @@ def get_ip_for_server_name(server_name, remote_user, remote_host):
 
 def remove_delays(remote_user, remote_host):
     iface = get_exp_net_interface(remote_user, remote_host)
-    run_remote_command_sync('sudo tc qdisc del dev %s root' % server_interface,
-                            config['emulab_user'], server_host)
+    run_remote_command_sync('sudo tc qdisc del dev %s root' %
+                            iface, remote_user, remote_host)
 
 
 def get_iface_add_delays(ip_to_delay, max_bandwidth, remote_user, remote_host):
@@ -191,6 +191,7 @@ def get_name_to_ip_map(config, remote_user, remote_host):
 
     return name_to_ip
 
+
 def get_ip_to_delay(config, name_to_ip, server_name, delay_to_clients=False):
     ip_to_delay = {}
     region = None
@@ -213,4 +214,3 @@ def get_ip_to_delay(config, name_to_ip, server_name, delay_to_clients=False):
                         ip_to_delay[name_to_ip[name]] = delay
 
     return ip_to_delay
-
