@@ -406,14 +406,14 @@ class RssCodebase(ExperimentCodebase):
                 'region_rtt_latencies': {'localhost': {'localhost': 0}}
             }
         elif "server_emulate_wan" in config and not config["server_emulate_wan"]:
-            zero_rtts = {}
+            rtts = {}
             for r1, lats in config['region_rtt_latencies'].items():
-                rtss[r1] = dict.fromkeys(lats.iterkeys(), 0)
+                rtts[r1] = dict.fromkeys(lats.keys(), 0)
 
-            print(zero_rtts)
+            print(rtts)
             network_data = {
                 'server_regions': config['server_regions'],
-                'region_rtt_latencies': zero_rtts
+                'region_rtt_latencies': rtts
             }
         else:
             network_data = {
