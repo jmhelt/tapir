@@ -30,7 +30,7 @@ Server::Server(Consistency consistency,
       debug_stats_{debug_stats} {
     transport_->Register(this, shard_config_, shard_idx_, replica_idx_);
 
-    for (int i = 0; i < shard_config_.n; i++) {
+    for (int i = 0; i < shard_config_.g; i++) {
         shard_clients_.push_back(new ShardClient(shard_config_, transport, server_id_, i));
     }
 

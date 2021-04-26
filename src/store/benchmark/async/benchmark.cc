@@ -46,7 +46,9 @@ enum benchmode_t {
     BENCH_RETWIS,
 };
 
-enum keysmode_t { KEYS_UNKNOWN, KEYS_UNIFORM, KEYS_ZIPF };
+enum keysmode_t { KEYS_UNKNOWN,
+                  KEYS_UNIFORM,
+                  KEYS_ZIPF };
 
 enum transmode_t {
     TRANS_UNKNOWN,
@@ -91,18 +93,18 @@ DEFINE_string(trans_protocol, trans_args[0],
               " passing messages");
 DEFINE_validator(trans_protocol, &ValidateTransMode);
 
-const std::string protocol_args[] = {"txn-l", "txn-s",    "qw",        "occ",
-                                     "lock",  "span-occ", "span-lock", "mvtso"};
-const protomode_t protomodes[]{PROTO_TAPIR,  PROTO_TAPIR,  PROTO_WEAK,
+const std::string protocol_args[] = {"txn-l", "txn-s", "qw", "occ",
+                                     "lock", "span-occ", "span-lock", "mvtso"};
+const protomode_t protomodes[]{PROTO_TAPIR, PROTO_TAPIR, PROTO_WEAK,
                                PROTO_STRONG, PROTO_STRONG, PROTO_STRONG,
                                PROTO_STRONG, PROTO_STRONG};
 const strongstore::Mode strongmodes[]{
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_OCC,
-    strongstore::Mode::MODE_LOCK,      strongstore::Mode::MODE_SPAN_OCC,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_OCC,
+    strongstore::Mode::MODE_LOCK, strongstore::Mode::MODE_SPAN_OCC,
     strongstore::Mode::MODE_SPAN_LOCK, strongstore::Mode::MODE_MVTSO,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN};
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN};
 static bool ValidateProtocolMode(const char *flagname,
                                  const std::string &value) {
     int n = sizeof(protocol_args);
@@ -579,7 +581,7 @@ int main(int argc, char **argv) {
         switch (mode) {
             case PROTO_TAPIR: {
                 client = new tapirstore::Client(
-                    &replica_config, clientId, FLAGS_num_shards,
+                    &replica_config, FLAGS_client_id, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part, FLAGS_ping_replicas,
                     FLAGS_tapir_sync_commit, tt);
                 break;
@@ -591,13 +593,11 @@ int main(int argc, char **argv) {
             //     break;
             // }
             case PROTO_STRONG: {
-                strongstore::NetworkConfiguration net_config{shard_config,
-                                                             net_config_stream};
-                const std::string &client_region =
-                    net_config.GetRegion(FLAGS_client_host);
+                strongstore::NetworkConfiguration net_config{shard_config, net_config_stream};
+                const std::string &client_region = net_config.GetRegion(FLAGS_client_host);
                 client = new strongstore::Client(
                     consistency, net_config, client_region, shard_config,
-                    clientId, FLAGS_num_shards, FLAGS_closest_replica, tport,
+                    FLAGS_client_id, FLAGS_num_shards, FLAGS_closest_replica, tport,
                     part, tt, FLAGS_debug_stats, FLAGS_nb_time_alpha);
                 break;
             }
