@@ -177,7 +177,7 @@ void Client::CalculateCoordinatorChoices() {
         // Not in wide area, pick random coordinator
         if (min_lat == 0) {
             std::size_t coord_idx = (client_id_ % shards.count()) + 1;
-            Debug("coord_idx: %lu", coord_idx);
+
             // Find coord
             std::size_t n_test = 0;
             for (std::size_t i = 0; i < MAX_SHARDS; i++) {
@@ -433,8 +433,7 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
         ms = tt_.TimeToWaitUntilMS(nonblock_timestamp.getTimestamp());
         Debug("Waiting for nonblock time: %lu", ms);
         min_read_timestamp_ = std::max(min_read_timestamp_, respTs);
-        Debug("min_read_timestamp_: %lu.%lu",
-              min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
+        Debug("min_read_timestamp_: %lu.%lu", min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
     }
 
     transport_->Timer(ms, [this, ccb, tstatus] {
@@ -530,10 +529,6 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
     state_ = COMMITTING;
     t_id++;
 
-    const Timestamp commit_timestamp{tt_.Now().latest(), client_id_};
-    Debug("commit_timestamp: %lu.%lu", commit_timestamp.getTimestamp(),
-          commit_timestamp.getID());
-
     participants_.clear();
     std::unordered_map<int, std::vector<std::string>> sharded_keys;
     for (auto &key : keys) {
@@ -563,10 +558,24 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
 
     ASSERT(sharded_keys.size() > 0);
 
+    Timestamp min_ts{};
+    Timestamp commit_ts{tt_.Now().latest(), client_id_};
+    if (consistency_ == RSS) {
+        min_ts = min_read_timestamp_;
+
+        // Hack to make RSS work with zero TrueTime error despite clock skew
+        // (for throughput experiments)
+        if (min_ts >= commit_ts) {
+            commit_ts.setTimestamp(min_ts.getTimestamp() + 1);
+        }
+    }
+
+    Debug("commit_ts: %lu.%lu", commit_ts.getTimestamp(), commit_ts.getID());
+
     for (auto &s : sharded_keys) {
         // TODO: Handle timeout
         bclient[s.first]->ROCommit(
-            t_id, s.second, commit_timestamp, min_read_timestamp_,
+            t_id, s.second, commit_ts, min_ts,
             std::bind(&Client::ROCommitCallback, this, t_id, req->id,
                       std::placeholders::_1, std::placeholders::_2,
                       std::placeholders::_3),
