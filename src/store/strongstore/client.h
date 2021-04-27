@@ -94,7 +94,7 @@ class Client : public ::Client {
                   uint32_t timeout) override;
 
    private:
-    const static std::size_t MAX_SHARDS = 8;
+    const static std::size_t MAX_SHARDS = 16;
 
     enum State {
         EXECUTING,

@@ -128,9 +128,9 @@ void Client::CalculateCoordinatorChoices() {
         commit_lats[i] = commit_lat;
     }
 
-    uint8_t s_max = (1 << config_.g) - 1;
+    uint16_t s_max = (1 << config_.g) - 1;
 
-    for (uint8_t s = 1; s != 0 && s <= s_max; s++) {
+    for (uint16_t s = 1; s != 0 && s <= s_max; s++) {
         std::bitset<MAX_SHARDS> shards{s};
 
         uint16_t min_lat = static_cast<uint16_t>(-1);
