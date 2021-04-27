@@ -28,8 +28,18 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 8,
+  "num_shards": 10,
   "shards": [
+    [
+      "us-east-1-0",
+      "eu-west-1-0",
+      "us-west-1-0"
+    ],
+    [
+      "us-east-1-0",
+      "eu-west-1-0",
+      "us-west-1-0"
+    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
