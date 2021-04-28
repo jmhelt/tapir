@@ -76,16 +76,15 @@ def copy_path_to_remote_host(local_path, remote_user,
     subprocess.call(args)
 
 
-def copy_remote_directory_to_local(local_directory, remote_user, remote_host, remote_directory):
+def copy_remote_directory_to_local(local_directory, remote_user, remote_host, remote_directory, tar_file='logs.tar', file_filter='.'):
     os.makedirs(local_directory, exist_ok=True)
-    print(local_directory)
-    tar_file = 'logs.tar'
+    print("{} -> {}".format(remote_directory, local_directory))
     tar_file_path = os.path.join(remote_directory, tar_file)
-    run_remote_command_sync('tar -C %s -cf %s .' % (remote_directory,
-                                                    tar_file_path), remote_user, remote_host)
+    run_remote_command_sync('cd %s && tar -czf %s %s' % (remote_directory, tar_file_path, file_filter),
+                            remote_user, remote_host)
     subprocess.call(["scp", "-r", "-p", '%s@%s:%s' %
                      (remote_user, remote_host, tar_file_path), local_directory])
-    subprocess.call(['tar', '-xf', os.path.join(local_directory, tar_file),
+    subprocess.call(['tar', '-xzf', os.path.join(local_directory, tar_file),
                      '-C', local_directory])
     subprocess.call(['rm', '-rf', os.path.join(local_directory, tar_file)])
 
