@@ -29,11 +29,10 @@ def collect_exp_data(config, remote_exp_directory, local_directory_base, executo
         for replica_idx in range(len(shard)):
             replica = shard[replica_idx]
             server_host = get_server_host(config, replica)
-            # download_futures.append(executor.submit(copy_remote_directory_to_local, os.path.join(
-            #     local_directory_base, 'server-%d' % shard_idx), config['emulab_user'], server_host, remote_directory))
-            # TODO: Parallelize
-            copy_remote_directory_to_local(os.path.join(
-                local_directory_base, 'server-%d' % shard_idx), config['emulab_user'], server_host, remote_directory)
+            download_futures.append(executor.submit(copy_remote_directory_to_local, os.path.join(
+                local_directory_base, 'server-%d' % shard_idx), config['emulab_user'], server_host, remote_directory,
+                tar_file="server-{}-{}.tar".format(shard_idx, replica_idx),
+                file_filter="server-{}-{}-*.*".format(shard_idx, replica_idx)))
 
     for client in config['clients']:
         client_host = get_client_host(config, client)
