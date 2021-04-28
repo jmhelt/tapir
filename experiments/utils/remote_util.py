@@ -78,7 +78,6 @@ def copy_path_to_remote_host(local_path, remote_user,
 
 def copy_remote_directory_to_local(local_directory, remote_user, remote_host, remote_directory, tar_file='logs.tar', file_filter='.'):
     os.makedirs(local_directory, exist_ok=True)
-    print("{} -> {}".format(remote_directory, local_directory))
     tar_file_path = os.path.join(remote_directory, tar_file)
     run_remote_command_sync('cd %s && tar -czf %s %s' % (remote_directory, tar_file_path, file_filter),
                             remote_user, remote_host)
