@@ -22,7 +22,8 @@
     "us-west-1-2"
   ],
   "consistency": [
-    "ss"
+    "ss",
+    "rss"
   ],
   "shard_config": "shard.config",
   "replica_config": "replica.config",
@@ -82,10 +83,28 @@
     ]
   ],
   "client_total": [
-    20
+    6,
+    12,
+    18,
+    24,
+    30,
+    36,
+    42,
+    48,
+    54,
+    60
   ],
   "client_processes_per_client_node": [
-    10
+    3,
+    6,
+    9,
+    12,
+    15,
+    18,
+    21,
+    24,
+    27,
+    30
   ],
   "client_threads_per_process": 1,
   "clients": [
@@ -142,10 +161,10 @@
   "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "client_experiment_length": 60,
+  "client_experiment_length": 180,
   "client_rand_sleep": 0,
-  "client_ramp_down": 15,
-  "client_ramp_up": 15,
+  "client_ramp_down": 30,
+  "client_ramp_up": 30,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
