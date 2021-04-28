@@ -336,8 +336,8 @@ def collect_and_calculate(config, client_config_idx, remote_exp_directory, local
     stats, op_latencies, op_times, client_op_latencies, client_op_times = calculate_statistics(
         config, local_out_directory)
     generate_cdf_plots(config, local_out_directory, stats, executor)
-    generate_ot_plots(config, local_out_directory, stats, op_latencies,
-                      op_times, client_op_latencies, client_op_times, executor)
+    #generate_ot_plots(config, local_out_directory, stats, op_latencies,
+    #                  op_times, client_op_latencies, client_op_times, executor)
     return local_out_directory
 
 
