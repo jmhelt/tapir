@@ -322,7 +322,7 @@ class RssCodebase(ExperimentCodebase):
             replica_command = config['server_wrap_command'] % replica_command
 
         if 'pin_server_processes' in config and isinstance(config['pin_server_processes'], list) and len(config['pin_server_processes']) > 0:
-            core = config['pin_server_processes'][replica_idx %
+            core = config['pin_server_processes'][server_id %
                                                   len(config['pin_server_processes'])]
             replica_command = 'taskset 0x%x %s' % (1 << core, replica_command)
 
