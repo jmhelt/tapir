@@ -292,7 +292,9 @@ void TCPTransport::ConnectTCP(
         PPanic("Failed to get socket name");
     }
     TCPTransportAddress *addr = new TCPTransportAddress(sin);
-    dstSrc.second->SetAddress(addr);
+    if (dstSrc.second->GetAddress() == nullptr) {
+      dstSrc.second->SetAddress(addr);
+    }
 
 
     Debug("Opened TCP connection to %s:%d from %s:%d",
