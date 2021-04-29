@@ -116,7 +116,7 @@ def wait_for_clients_to_terminate(config, client_ssh_threads):
     cond = threading.Condition()
     timeout_thread = threading.Thread(
         target=terminate_clients_on_timeout,
-        args=(config['client_experiment_length'] + 30,
+        args=(config['client_experiment_length'] + 40,
               cond,
               client_ssh_threads))
     timeout_thread.daemon = True
@@ -499,6 +499,8 @@ def run_experiment(config_file, client_config_idx, executor):
             client_threads = start_clients(config, local_exp_directory,
                                            remote_exp_directory, i)
             wait_for_clients_to_terminate(config, client_threads)
+            print("Waiting %d seconds for clients to finish", 5)
+            time.sleep(5)
             kill_clients(config, executor)
             time.sleep(1)
             kill_servers(config, executor, ' -15')

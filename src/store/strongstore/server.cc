@@ -104,7 +104,7 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
     const std::string &key = msg.key();
     const Timestamp timestamp{msg.timestamp()};
 
-    Debug("[%lu] Received GET request: %s", transaction_id, key.c_str());
+    //Debug("[%lu] Received GET request: %s", transaction_id, key.c_str());
 
     transactions_.StartGet(transaction_id, remote, key);
 
@@ -170,7 +170,7 @@ void Server::ContinueGet(uint64_t transaction_id) {
 
     const std::string &key = reply->key;
 
-    Debug("[%lu] Continuing GET request %s", transaction_id, key.c_str());
+    //Debug("[%lu] Continuing GET request %s", transaction_id, key.c_str());
 
     get_reply_.Clear();
     get_reply_.mutable_rid()->set_client_id(client_id);
@@ -215,7 +215,7 @@ const Timestamp Server::GetPrepareTimestamp(uint64_t client_id) {
 void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws) {
     for (uint64_t rw : rws) {
         ASSERT(transaction_id != rw);
-        Debug("[%lu] Wounding %lu", transaction_id, rw);
+        //Debug("[%lu] Wounding %lu", transaction_id, rw);
         TransactionState s = transactions_.GetRWTransactionState(rw);
         ASSERT(s != NOT_FOUND);
 
@@ -231,7 +231,7 @@ void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<u
             shard_clients_[coordinator]->Wound(rw);
 
         } else if (s == COMMITTING || s == COMMITTED || s == ABORTED) {
-            Debug("[%lu] Not wounding. Will complete soon", rw);
+            //Debug("[%lu] Not wounding. Will complete soon", rw);
         } else {
             NOT_REACHABLE();
         }
@@ -241,7 +241,7 @@ void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<u
 void Server::NotifyPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws) {
     for (uint64_t waiting_rw : rws) {
         ASSERT(transaction_id != waiting_rw);
-        Debug("[%lu] continuing %lu", transaction_id, waiting_rw);
+        //Debug("[%lu] continuing %lu", transaction_id, waiting_rw);
         ContinueGet(waiting_rw);
         ContinueCoordinatorPrepare(waiting_rw);
         ContinueParticipantPrepare(waiting_rw);
@@ -267,14 +267,14 @@ void Server::SendROSlowPath(uint64_t ro_transaction_id, uint64_t rw_transaction_
     auto search = pending_ro_commit_replies_.find(ro_transaction_id);
     ASSERT(search != pending_ro_commit_replies_.end());
 
-    Debug("[%lu] Sending slow path reply for %lu", ro_transaction_id, rw_transaction_id);
+    //Debug("[%lu] Sending slow path reply for %lu", ro_transaction_id, rw_transaction_id);
 
     PendingROCommitReply *reply = search->second;
     ASSERT(reply->n_slow_path_replies > 0);
 
     if (transactions_.GetROTransactionState(ro_transaction_id) != SLOW_PATH) {
-        Debug("[%lu] Fast path reply not yet sent", ro_transaction_id);
-        Debug("s: %d", static_cast<int>(transactions_.GetROTransactionState(ro_transaction_id)));
+        //Debug("[%lu] Fast path reply not yet sent", ro_transaction_id);
+        //Debug("s: %d", static_cast<int>(transactions_.GetROTransactionState(ro_transaction_id)));
         reply->n_slow_path_replies -= 1;
         return;
     }
@@ -308,7 +308,7 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
     uint64_t client_req_id = msg.rid().client_req_id();
     uint64_t transaction_id = msg.transaction_id();
 
-    Debug("[%lu] Received ROCommit request", transaction_id);
+    //Debug("[%lu] Received ROCommit request", transaction_id);
 
     std::unordered_set<std::string> keys{msg.keys().begin(), msg.keys().end()};
 
@@ -319,7 +319,7 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
 
     TransactionState s = transactions_.StartRO(transaction_id, keys, min_ts, commit_ts);
     if (s == PREPARE_WAIT) {
-        Debug("[%lu] Waiting for prepared transactions", transaction_id);
+        //Debug("[%lu] Waiting for prepared transactions", transaction_id);
         auto reply = new PendingROCommitReply(client_id, client_req_id, remote.clone());
         reply->n_slow_path_replies = transactions_.GetRONumberSkipped(transaction_id);
         pending_ro_commit_replies_[transaction_id] = reply;
@@ -355,7 +355,7 @@ void Server::HandleROCommit(const TransportAddress &remote, proto::ROCommit &msg
         pending_ro_commit_replies_[transaction_id] = reply;
 
         for (auto &pt : skipped_prepares) {
-            Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+            //Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
             proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
             pt.serialize(ptm);
         }
@@ -380,7 +380,7 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
     uint64_t client_req_id = reply->rid.client_req_id();
     const TransportAddress *remote = reply->rid.addr();
 
-    Debug("[%lu] Continuing RO commit", transaction_id);
+    //Debug("[%lu] Continuing RO commit", transaction_id);
 
     transactions_.ContinueRO(transaction_id);
 
@@ -408,7 +408,7 @@ void Server::ContinueROCommit(uint64_t transaction_id) {
         reply->n_slow_path_replies = skipped_prepares.size();
 
         for (auto &pt : skipped_prepares) {
-            Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
+            //Debug("[%lu] replying with skipped prepare: %lu", transaction_id, pt.transaction_id());
             proto::PreparedTransactionMessage *ptm = ro_commit_reply_.add_prepares();
             pt.serialize(ptm);
         }
@@ -439,7 +439,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
     const Transaction transaction{msg.transaction()};
     const Timestamp nonblock_ts{msg.nonblock_timestamp()};
 
-    Debug("[%lu] Coordinator for transaction", transaction_id);
+    //Debug("[%lu] Coordinator for transaction", transaction_id);
 
     const TrueTimeInterval now = tt_.Now();
     const Timestamp start_ts{now.latest(), client_id};
@@ -447,7 +447,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
                                                                participants, transaction, nonblock_ts);
 
     if (s == PREPARING) {
-        Debug("[%lu] Coordinator preparing", transaction_id);
+        //Debug("[%lu] Coordinator preparing", transaction_id);
 
         LockAcquireResult ar = locks_.AcquireLocks(transaction_id, transaction);
         if (ar.status == LockStatus::ACQUIRED) {
@@ -469,7 +469,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
         } else if (ar.status == LockStatus::FAIL) {
             ASSERT(ar.wound_rws.size() == 0);
-            Debug("[%lu] Coordinator prepare failed", transaction_id);
+            //Debug("[%lu] Coordinator prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
             SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
@@ -478,7 +478,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
-            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            Debug("[%lu] Waiting", transaction_id);
 
             auto reply = new PendingRWCommitCoordinatorReply(client_id, client_req_id, remote.clone());
             pending_rw_commit_c_replies_[transaction_id] = reply;
@@ -491,14 +491,14 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
         }
 
     } else if (s == ABORTED) {
-        Debug("[%lu] Already aborted", transaction_id);
+        //Debug("[%lu] Already aborted", transaction_id);
 
         SendRWCommmitCoordinatorReplyFail(remote, client_id, client_req_id);
 
         SendAbortParticipants(transaction_id, participants);
 
     } else if (s == WAIT_PARTICIPANTS) {
-        Debug("[%lu] Waiting for other participants", transaction_id);
+        //Debug("[%lu] Waiting for other participants", transaction_id);
 
         auto reply = new PendingRWCommitCoordinatorReply(client_id, client_req_id, remote.clone());
         pending_rw_commit_c_replies_[transaction_id] = reply;
@@ -512,7 +512,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
     if (search == pending_rw_commit_c_replies_.end()) {
         return;
     }
-    Debug("[%lu] Continuing coordinator prepare", transaction_id);
+    Debug("[%lu] Cont coord prep", transaction_id);
 
     PendingRWCommitCoordinatorReply *reply = search->second;
 
@@ -544,7 +544,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 
         } else if (ar.status == LockStatus::FAIL) {
             ASSERT(ar.wound_rws.size() == 0);
-            Debug("[%lu] Coordinator prepare failed", transaction_id);
+            //Debug("[%lu] Coordinator prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
             SendRWCommmitCoordinatorReplyFail(*remote, client_id, client_req_id);
@@ -556,7 +556,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
-            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            Debug("[%lu] Waiting", transaction_id);
 
             transactions_.PausePrepare(transaction_id);
 
@@ -565,9 +565,9 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
             NOT_REACHABLE();
         }
     } else if (s == PREPARED || s == COMMITTING || s == COMMITTED) {
-        Debug("[%lu] Already prepared", transaction_id);
+        //Debug("[%lu] Already prepared", transaction_id);
     } else if (s == ABORTED) {  // Already aborted
-        Debug("[%lu] Already aborted", transaction_id);
+        //Debug("[%lu] Already aborted", transaction_id);
     } else {
         NOT_REACHABLE();
     }
@@ -576,7 +576,7 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
 void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts) {
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     if (search == pending_rw_commit_c_replies_.end()) {
-        Debug("[%lu] No pending commit coordinator reply found", transaction_id);
+        //Debug("[%lu] No pending commit coordinator reply found", transaction_id);
         return;
     }
 
@@ -612,7 +612,7 @@ void Server::SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
 void Server::SendPrepareOKRepliesOK(uint64_t transaction_id, const Timestamp &commit_ts) {
     auto search = pending_prepare_ok_replies_.find(transaction_id);
     if (search == pending_prepare_ok_replies_.end()) {
-        Debug("[%lu] No pending prepare ok reply found", transaction_id);
+        //Debug("[%lu] No pending prepare ok reply found", transaction_id);
         return;
     }
     PendingPrepareOKReply *reply = search->second;
@@ -656,7 +656,7 @@ void Server::SendPrepareOKRepliesFail(PendingPrepareOKReply *reply) {
 void Server::CommitCoordinatorCallback(uint64_t transaction_id, transaction_status_t status) {
     ASSERT(status == REPLY_OK);
 
-    Debug("[%lu] COMMIT callback: %d", transaction_id, status);
+    //Debug("[%lu] COMMIT callback: %d", transaction_id, status);
 }
 
 void Server::SendRWCommmitParticipantReplyOK(uint64_t transaction_id) {
@@ -721,7 +721,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
     const Transaction transaction{msg.transaction()};
     const Timestamp nonblock_ts{msg.nonblock_timestamp()};
 
-    Debug("[%lu] Participant for transaction", transaction_id);
+    //Debug("[%lu] Participant for transaction", transaction_id);
 
     TransactionState s = transactions_.StartParticipantPrepare(transaction_id, coordinator, transaction, nonblock_ts);
     if (s == PREPARING) {
@@ -744,7 +744,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
                 [](int, Timestamp) {}, PREPARE_TIMEOUT);
         } else if (ar.status == LockStatus::FAIL) {
             ASSERT(ar.wound_rws.size() == 0);
-            Debug("[%lu] Participant prepare failed", transaction_id);
+            //Debug("[%lu] Participant prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
             // TODO: Handle timeout
@@ -761,7 +761,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
-            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            Debug("[%lu] Waiting", transaction_id);
 
             auto reply = new PendingRWCommitParticipantReply(client_id, client_req_id, remote.clone());
             pending_rw_commit_p_replies_[transaction_id] = reply;
@@ -773,7 +773,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
             NOT_REACHABLE();
         }
     } else if (s == ABORTED) {
-        Debug("[%lu] Already aborted", transaction_id);
+        //Debug("[%lu] Already aborted", transaction_id);
 
         // Reply to client
         SendRWCommmitParticipantReplyFail(remote, client_id, client_req_id);
@@ -789,7 +789,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
         return;
     }
 
-    Debug("[%lu] Continuing participant prepare", transaction_id);
+    Debug("[%lu] Cont part prep", transaction_id);
     PendingRWCommitParticipantReply *reply = search->second;
 
     uint64_t client_id = reply->rid.client_id();
@@ -820,7 +820,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
         } else if (ar.status == LockStatus::FAIL) {
             ASSERT(ar.wound_rws.size() == 0);
-            Debug("[%lu] Participant prepare failed", transaction_id);
+            //Debug("[%lu] Participant prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
             // TODO: Handle timeout
@@ -840,7 +840,7 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == LockStatus::WAITING) {
-            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            Debug("[%lu] Waiting", transaction_id);
 
             transactions_.PausePrepare(transaction_id);
 
@@ -849,9 +849,9 @@ void Server::ContinueParticipantPrepare(uint64_t transaction_id) {
             NOT_REACHABLE();
         }
     } else if (s == PREPARED || s == COMMITTING || s == COMMITTED) {
-        Debug("[%lu] Already prepared", transaction_id);
+        //Debug("[%lu] Already prepared", transaction_id);
     } else if (s == ABORTED) {  // Already aborted
-        Debug("[%lu] Already aborted", transaction_id);
+        //Debug("[%lu] Already aborted", transaction_id);
     } else {
         NOT_REACHABLE();
     }
@@ -882,7 +882,7 @@ void Server::PrepareCallback(uint64_t transaction_id, int status, Timestamp time
 }
 
 void Server::PrepareOKCallback(uint64_t transaction_id, int status, Timestamp commit_ts) {
-    Debug("[%lu] Received PREPARE_OK callback: %d %d", transaction_id, shard_idx_, status);
+    //Debug("[%lu] Received PREPARE_OK callback: %d %d", transaction_id, shard_idx_, status);
 
     if (status == REPLY_OK) {
         TransactionState s = transactions_.ParticipantReceivePrepareOK(transaction_id);
@@ -897,7 +897,7 @@ void Server::PrepareOKCallback(uint64_t transaction_id, int status, Timestamp co
     } else if (status == REPLY_FAIL) {
         TransactionState s = transactions_.GetRWTransactionState(transaction_id);
         if (s == ABORTED) {
-            Debug("[%lu] Already aborted", transaction_id);
+            //Debug("[%lu] Already aborted", transaction_id);
             return;
         }
 
@@ -927,17 +927,17 @@ void Server::PrepareAbortCallback(uint64_t transaction_id, int status,
                                   Timestamp timestamp) {
     ASSERT(status == REPLY_OK);
 
-    Debug("[%lu] Received PREPARE_ABORT callback: %d %d", transaction_id, shard_idx_, status);
+    //Debug("[%lu] Received PREPARE_ABORT callback: %d %d", transaction_id, shard_idx_, status);
 }
 
 void Server::CommitParticipantCallback(uint64_t transaction_id, transaction_status_t status) {
     ASSERT(status == REPLY_OK);
 
-    Debug("[%lu] Received COMMIT participant callback: %d %d", transaction_id, status, shard_idx_);
+    //Debug("[%lu] Received COMMIT participant callback: %d %d", transaction_id, status, shard_idx_);
 }
 
 void Server::AbortParticipantCallback(uint64_t transaction_id) {
-    Debug("[%lu] Received ABORT participant callback: %d", transaction_id, shard_idx_);
+    //Debug("[%lu] Received ABORT participant callback: %d", transaction_id, shard_idx_);
 }
 
 void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &msg) {
@@ -949,7 +949,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
     int participant_shard = msg.participant_shard();
     const Timestamp prepare_ts{msg.prepare_timestamp()};
 
-    Debug("[%lu] Received Prepare OK", transaction_id);
+    //Debug("[%lu] Received Prepare OK", transaction_id);
 
     PendingPrepareOKReply *reply = nullptr;
     auto search = pending_prepare_ok_replies_.find(transaction_id);
@@ -967,7 +967,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 
     TransactionState s = transactions_.CoordinatorReceivePrepareOK(transaction_id, participant_shard, prepare_ts);
     if (s == PREPARING) {
-        Debug("[%lu] Coordinator preparing", transaction_id);
+        //Debug("[%lu] Coordinator preparing", transaction_id);
 
         const std::unordered_set<int> &participants = transactions_.GetParticipants(transaction_id);
         const Transaction &transaction = transactions_.GetTransaction(transaction_id);
@@ -991,7 +991,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
                 []() {}, COMMIT_TIMEOUT);
         } else if (ar.status == FAIL) {
             ASSERT(ar.wound_rws.size() == 0);
-            Debug("[%lu] Coordinator prepare failed", transaction_id);
+            //Debug("[%lu] Coordinator prepare failed", transaction_id);
             LockReleaseResult rr = locks_.ReleaseLocks(transaction_id, transaction);
 
             // Reply to participants
@@ -1017,7 +1017,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 
             transactions_.AbortPrepare(transaction_id);
         } else if (ar.status == WAITING) {
-            Debug("[%lu] Waiting for conflicting transactions", transaction_id);
+            Debug("[%lu] Waiting", transaction_id);
 
             transactions_.PausePrepare(transaction_id);
 
@@ -1027,7 +1027,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
         }
 
     } else if (s == ABORTED) {  // Already aborted
-        Debug("[%lu] Already aborted", transaction_id);
+        //Debug("[%lu] Already aborted", transaction_id);
 
         // Reply to participants
         SendPrepareOKRepliesFail(reply);
@@ -1035,7 +1035,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
         pending_prepare_ok_replies_.erase(transaction_id);
 
     } else if (s == WAIT_PARTICIPANTS) {
-        Debug("[%lu] Waiting for other participants", transaction_id);
+        //Debug("[%lu] Waiting for other participants", transaction_id);
     } else {
         NOT_REACHABLE();
     }
@@ -1044,13 +1044,13 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAbort &msg) {
     uint64_t transaction_id = msg.transaction_id();
 
-    Debug("[%lu] Received Prepare ABORT", transaction_id);
+    //Debug("[%lu] Received Prepare ABORT", transaction_id);
 
     prepare_abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 
     TransactionState state = transactions_.GetRWTransactionState(transaction_id);
     if (state == NOT_FOUND) {
-        Debug("[%lu] Transaction not in progress", transaction_id);
+        //Debug("[%lu] Transaction not in progress", transaction_id);
 
         prepare_abort_reply_.set_status(REPLY_OK);
         transport_->SendMessage(this, remote, prepare_abort_reply_);
@@ -1062,7 +1062,7 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
     }
 
     if (state == ABORTED) {  // Already aborted
-        Debug("[%lu] Transaction already aborted", transaction_id);
+        //Debug("[%lu] Transaction already aborted", transaction_id);
 
         prepare_abort_reply_.set_status(REPLY_OK);
         transport_->SendMessage(this, remote, prepare_abort_reply_);
@@ -1116,17 +1116,17 @@ void Server::HandlePrepareAbort(const TransportAddress &remote, proto::PrepareAb
 void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
     uint64_t transaction_id = msg.transaction_id();
 
-    Debug("[%lu] Received Wound request", transaction_id);
+    //Debug("[%lu] Received Wound request", transaction_id);
 
     TransactionState state = transactions_.GetRWTransactionState(transaction_id);
 
     if (state == ABORTED) {
-        Debug("[%lu] Transaction already aborted", transaction_id);
+        //Debug("[%lu] Transaction already aborted", transaction_id);
         return;
     }
 
     if (state == COMMITTING || state == COMMITTED) {
-        Debug("[%lu] Transaction already committing", transaction_id);
+        //Debug("[%lu] Transaction already committing", transaction_id);
         return;
     }
 
@@ -1185,21 +1185,21 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     uint64_t transaction_id = msg.transaction_id();
 
-    Debug("[%lu] Received Abort request", transaction_id);
+    //Debug("[%lu] Received Abort request", transaction_id);
 
     abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 
     TransactionState state = transactions_.GetRWTransactionState(transaction_id);
 
     if (state == ABORTED) {
-        Debug("[%lu] Transaction already aborted", transaction_id);
+        //Debug("[%lu] Transaction already aborted", transaction_id);
         abort_reply_.set_status(REPLY_OK);
         transport_->SendMessage(this, remote, abort_reply_);
         return;
     }
 
     if (state == COMMITTING || state == COMMITTED) {
-        Debug("[%lu] Transaction already committing", transaction_id);
+        //Debug("[%lu] Transaction already committing", transaction_id);
         abort_reply_.set_status(REPLY_FAIL);
         transport_->SendMessage(this, remote, abort_reply_);
         return;
@@ -1242,14 +1242,14 @@ void Server::SendAbortParticipants(uint64_t transaction_id, const std::unordered
             // TODO: Handle timeout
             shard_clients_[p]->Abort(
                 transaction_id,
-                [transaction_id]() { Debug("[%lu] Received ABORT participant callback", transaction_id); },
+                [transaction_id]() { /*Debug("[%lu] Received ABORT participant callback", transaction_id);*/ },
                 []() {}, ABORT_TIMEOUT);
         }
     }
 }
 
 void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts) {
-    Debug("[%lu] Commiting", transaction_id);
+    //Debug("[%lu] Commiting", transaction_id);
 
     // Commit writes
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
@@ -1279,7 +1279,7 @@ void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timesta
 }
 
 void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts) {
-    Debug("[%lu] Commiting", transaction_id);
+    //Debug("[%lu] Commiting", transaction_id);
 
     // Commit writes
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
@@ -1304,7 +1304,7 @@ void Server::ParticipantCommitTransaction(uint64_t transaction_id, const Timesta
 
 void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
                           string &response) {
-    Debug("Received LeaderUpcall: %lu %s", opnum, op.c_str());
+    //Debug("Received LeaderUpcall: %lu %s", opnum, op.c_str());
 
     Request request;
 
@@ -1329,7 +1329,7 @@ void Server::LeaderUpcall(opnum_t opnum, const string &op, bool &replicate,
  * response is the reply which will be sent back to the client.
  */
 void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
-    Debug("Received Upcall: %lu %s", opnum, op.c_str());
+    //Debug("Received Upcall: %lu %s", opnum, op.c_str());
     Request request;
     Reply reply;
 
@@ -1339,11 +1339,11 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
     uint64_t transaction_id = request.txnid();
 
     if (request.op() == strongstore::proto::Request::PREPARE) {
-        Debug("[%lu] Received PREPARE", transaction_id);
+        //Debug("[%lu] Received PREPARE", transaction_id);
 
         TransactionState s = transactions_.GetRWTransactionState(transaction_id);
         if (s == ABORTED) {
-            Debug("[%lu] Already aborted", transaction_id);
+            //Debug("[%lu] Already aborted", transaction_id);
             status = REPLY_FAIL;
         } else if (s == NOT_FOUND) {  // Replica prepare
             const Timestamp prepare_ts{request.prepare().timestamp()};
@@ -1361,17 +1361,17 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
             transactions_.FinishParticipantPrepare(transaction_id);
         } else if (s == PREPARING || s == PREPARED) {
-            Debug("[%lu] Already prepared", transaction_id);
+            //Debug("[%lu] Already prepared", transaction_id);
         } else {
             NOT_REACHABLE();
         }
     } else if (request.op() == strongstore::proto::Request::COMMIT) {
-        Debug("[%lu] Received COMMIT", transaction_id);
+        //Debug("[%lu] Received COMMIT", transaction_id);
 
         const Timestamp commit_ts{request.commit().commit_timestamp()};
 
         if (request.has_prepare()) {  // Coordinator commit
-            Debug("[%lu] Coordinator commit", transaction_id);
+            //Debug("[%lu] Coordinator commit", transaction_id);
 
             if (transactions_.GetRWTransactionState(transaction_id) != COMMITTING) {
                 const Timestamp start_ts{request.prepare().timestamp()};
@@ -1397,14 +1397,14 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
 
                 transactions_.FinishCoordinatorPrepare(transaction_id, commit_ts);
             } else {
-                Debug("[%lu] Already prepared", transaction_id);
+                //Debug("[%lu] Already prepared", transaction_id);
             }
 
             uint64_t commit_wait_ms = tt_.TimeToWaitUntilMS(commit_ts.getTimestamp());
-            Debug("[%lu] delaying commit by %lu ms", transaction_id, commit_wait_ms);
+            //Debug("[%lu] delaying commit by %lu ms", transaction_id, commit_wait_ms);
             transport_->Timer(commit_wait_ms, std::bind(&Server::CoordinatorCommitTransaction, this, transaction_id, commit_ts));
         } else {  // Participant commit
-            Debug("[%lu] Participant commit", transaction_id);
+            //Debug("[%lu] Participant commit", transaction_id);
             if (transactions_.GetRWTransactionState(transaction_id) != COMMITTING) {
                 transactions_.ParticipantReceivePrepareOK(transaction_id);
             }
@@ -1413,7 +1413,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
         }
 
     } else if (request.op() == strongstore::proto::Request::ABORT) {
-        Debug("[%lu] Received ABORT", transaction_id);
+        //Debug("[%lu] Received ABORT", transaction_id);
 
         if (transactions_.GetRWTransactionState(transaction_id) != ABORTED) {  // replica abort
             const Transaction &transaction = transactions_.GetTransaction(transaction_id);
