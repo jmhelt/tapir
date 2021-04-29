@@ -114,6 +114,11 @@ class RssCodebase(ExperimentCodebase):
         if 'client_wrap_command' in config and len(config['client_wrap_command']) > 0:
             client_command = config['client_wrap_command'] % client_command
 
+        if 'pin_client_processes' in config and isinstance(config['pin_client_processes'], list) and len(config['pin_client_processes']) > 0:
+            core = config['pin_client_processes'][client_id %
+                                                  len(config['pin_client_processes'])]
+            client_command = 'taskset 0x%x %s' % (1 << core, client_command)
+
         if 'run_locally' in config and config['run_locally']:
             stdout_file = os.path.join(exp_directory,
                                        config['out_directory_name'],
