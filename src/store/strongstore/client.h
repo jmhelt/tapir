@@ -146,6 +146,11 @@ class Client : public ::Client {
 
     void HandleWound(uint64_t transaction_id);
 
+    void PrepareTimeout(uint64_t req_id, int participant, int coordinator_shard, Timestamp nonblock_timestamp, int status,
+        Timestamp ts);
+    void ROCommitTimeout(uint64_t req_id, std::pair<int, std::vector<std::string>> s, Timestamp commit_ts,
+        Timestamp min_ts);
+
     // choose coordinator from participants
     void CalculateCoordinatorChoices();
     int ChooseCoordinator();
@@ -209,6 +214,10 @@ class Client : public ::Client {
     bool first_;
 
     double nb_time_alpha_;
+
+    uint64_t max_get_retries_;
+    uint64_t max_prepare_retries_;
+    uint64_t max_commit_retries_;
 };
 
 }  // namespace strongstore
