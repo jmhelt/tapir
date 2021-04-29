@@ -188,8 +188,10 @@ public:
         for (int groupIdx : groups) {
             for (auto & kv : replicaAddresses[cfg][groupIdx]) {
                 if (srcGroup != -1 && *srcAddr == kv.second) {
+                    Debug("skipping");
                     continue;
                 }
+                Debug("sending");
                 if (!SendMessageInternal(src, kv.second, m)) {
                     return false;
                 }
