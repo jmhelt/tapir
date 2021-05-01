@@ -65,10 +65,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       debug_stats_{debug_stats},
       ping_replicas_{false},
       first_{true},
-      nb_time_alpha_{nb_time_alpha},
-      max_get_retries_(5UL),
-      max_prepare_retries_(5UL),
-      max_commit_retries_(5UL) {
+      nb_time_alpha_{nb_time_alpha} {
     t_id = client_id_ << 26;
 
     Debug("Initializing StrongStore client with id [%lu]", client_id_);
@@ -327,7 +324,8 @@ void Client::Get(const std::string &key, get_callback gcb,
         auto gcbLat = [this, gcb](int status, const std::string &key,
                                   const std::string &val,
                                   Timestamp ts) { gcb(status, key, val, ts); };
-        bclient[i]->Get(key, bclient[i]->start_timestamp(), gcbLat, gtcb, timeout);
+        bclient[i]->Get(key, bclient[i]->start_timestamp(), gcbLat, gtcb,
+                        timeout);
     });
 }
 
@@ -370,14 +368,14 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     }
 
     for (auto p : participants_) {
-        // TODO: don't use hardcoded timeouts
         if (p == coordinator_shard) {
             bclient[p]->RWCommitCoordinator(
                 t_id, participants_, nonblock_timestamp,
                 std::bind(&Client::PrepareCallback, this, req->id,
                           std::placeholders::_1, std::placeholders::_2),
-                std::bind(&Client::PrepareTimeout, this, req->id, p, coordinator_shard, nonblock_timestamp,
-                  std::placeholders::_1, std::placeholders::_2), 1000);
+                std::bind(&Client::PrepareCallback, this, req->id,
+                          std::placeholders::_1, std::placeholders::_2),
+                timeout);
         } else {
             bclient[p]->RWCommitParticipant(
                 t_id, coordinator_shard, nonblock_timestamp,
@@ -393,8 +391,8 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
                             reqId);
                         return;
                     }
-                }, std::bind(&Client::PrepareTimeout, this, req->id, p, coordinator_shard, nonblock_timestamp,
-                  std::placeholders::_1, std::placeholders::_2), 1000);
+                },
+                [](int, Timestamp) {}, timeout);
         }
     }
 }
@@ -499,7 +497,7 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
 
     for (int p : participants_) {
         bclient[p]->Abort(
-            std::bind(&Client::AbortCallback, this, req->id), [](){}, timeout);
+            std::bind(&Client::AbortCallback, this, req->id), []() {}, timeout);
     }
 }
 
@@ -584,8 +582,8 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
             std::bind(&Client::ROCommitSlowCallback, this, t_id, req->id,
                       std::placeholders::_1, std::placeholders::_2,
                       std::placeholders::_3, std::placeholders::_4),
-            std::bind(&Client::ROCommitTimeout, this, req->id, s, commit_ts, min_ts),
-            2000);
+            []() {},
+            timeout);
     }
 }
 
@@ -658,70 +656,5 @@ void Client::ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int s
         Debug("[%lu] Waiting for more RO responses", transaction_id);
     }
 }
-
-void Client::PrepareTimeout(uint64_t req_id, int p, int coordinator_shard, Timestamp nonblock_timestamp, int status,
-    Timestamp ts) {
-    auto itr = this->pendingReqs.find(req_id);
-    if (itr == this->pendingReqs.end()) {
-        Debug("PrepareTimeout for terminated request id %lu.", req_id);
-        return;
-    }
-
-    Debug("[%lu][%d] PrepareTimeout.", t_id, p);
-
-    PendingRequest *req = itr->second;
-
-    if (p == coordinator_shard) {
-            bclient[p]->RWCommitCoordinator(
-                t_id, participants_, nonblock_timestamp,
-                std::bind(&Client::PrepareCallback, this, req->id,
-                          std::placeholders::_1, std::placeholders::_2),
-                std::bind(&Client::PrepareTimeout, this, req->id, p, coordinator_shard, nonblock_timestamp,
-                  std::placeholders::_1, std::placeholders::_2), 1000);
-    } else {
-        bclient[p]->RWCommitParticipant(
-            t_id, coordinator_shard, nonblock_timestamp,
-            [this, reqId = req->id](int status, Timestamp) {
-                Debug("[%lu] PREPARE callback status %d", t_id, status);
-
-                auto itr = pendingReqs.find(reqId);
-                if (itr == pendingReqs.end()) {
-                    Debug(
-                        "PrepareCallback for terminated request id %ld "
-                        "(txn already "
-                        "committed or aborted.",
-                        reqId);
-                    return;
-                }
-            }, std::bind(&Client::PrepareTimeout, this, req->id, p, coordinator_shard, nonblock_timestamp,
-              std::placeholders::_1, std::placeholders::_2), 1000);
-    }
-}
-
-void Client::ROCommitTimeout(uint64_t req_id, std::pair<int, std::vector<std::string>> s, Timestamp commit_ts,
-        Timestamp min_ts) {
-    auto itr = this->pendingReqs.find(req_id);
-    if (itr == this->pendingReqs.end()) {
-        Debug("ROCommitTimeout for terminated request id %lu.", req_id);
-        return;
-    }
-
-    Debug("[%lu][%d] ROCommitTimeout.", t_id, s.first);
-
-    PendingRequest *req = itr->second;
-
-    bclient[s.first]->ROCommit(
-            t_id, s.second, commit_ts, min_ts,
-            std::bind(&Client::ROCommitCallback, this, t_id, req->id,
-                      std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3),
-            std::bind(&Client::ROCommitSlowCallback, this, t_id, req->id,
-                      std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3, std::placeholders::_4),
-            std::bind(&Client::ROCommitTimeout, this, req->id, s, commit_ts, min_ts),
-            2000);
-
-}
-
 
 }  // namespace strongstore
