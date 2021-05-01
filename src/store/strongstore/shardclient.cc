@@ -230,19 +230,6 @@ void ShardClient::ROCommit(uint64_t transaction_id,
     }
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, ro_commit_);
-
-    transport_->Timer(timeout, [this, req_id = reqId](){
-        auto itr = pendingROCommits.find(req_id);
-        if (itr == pendingROCommits.end()) {
-          return;
-        }
-
-        itr->second->ctcb();
-        delete itr->second;
-        pendingROCommits.erase(itr);
-
-        });
-
 }
 
 void ShardClient::HandleROCommitSlowReply(const proto::ROCommitSlowReply &reply) {
@@ -332,19 +319,6 @@ void ShardClient::RWCommitCoordinator(
     }
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_c_);
-
-    transport_->Timer(timeout, [this, req_id = reqId](){
-        auto itr = pendingPrepares.find(req_id);
-        if (itr == pendingPrepares.end()) {
-          return;
-        }
-
-        itr->second->ptcb(REPLY_TIMEOUT, Timestamp());
-        delete itr->second;
-        pendingPrepares.erase(itr);
-
-        });
-
 }
 
 void ShardClient::HandleRWCommitCoordinatorReply(
@@ -391,18 +365,6 @@ void ShardClient::RWCommitParticipant(
     nonblock_timestamp.serialize((rw_commit_p_.mutable_nonblock_timestamp()));
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_p_);
-
-    transport_->Timer(timeout, [this, req_id = reqId](){
-        auto itr = pendingPrepares.find(req_id);
-        if (itr == pendingPrepares.end()) {
-          return;
-        }
-
-        itr->second->ptcb(REPLY_TIMEOUT, Timestamp());
-        delete itr->second;
-        pendingPrepares.erase(itr);
-
-        });
 }
 
 void ShardClient::HandleRWCommitParticipantReply(
