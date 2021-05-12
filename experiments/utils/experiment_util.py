@@ -335,7 +335,7 @@ def collect_and_calculate(config, client_config_idx, remote_exp_directory, local
     stats, op_latencies, op_times, client_op_latencies, client_op_times = calculate_statistics(
         config, local_out_directory)
     generate_cdf_plots(config, local_out_directory, stats, executor)
-    #generate_ot_plots(config, local_out_directory, stats, op_latencies,
+    # generate_ot_plots(config, local_out_directory, stats, op_latencies,
     #                  op_times, client_op_latencies, client_op_times, executor)
     return local_out_directory
 
@@ -499,7 +499,7 @@ def run_experiment(config_file, client_config_idx, executor):
             client_threads = start_clients(config, local_exp_directory,
                                            remote_exp_directory, i)
             wait_for_clients_to_terminate(config, client_threads)
-            print("Waiting %d seconds for clients to finish", 5)
+            print("Waiting {} seconds for clients to finish".format(5))
             time.sleep(5)
             kill_clients(config, executor)
             time.sleep(1)

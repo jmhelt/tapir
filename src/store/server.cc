@@ -371,16 +371,14 @@ int main(int argc, char **argv) {
     size_t loaded = 0;
     size_t stored = 0;
     std::vector<int> txnGroups;
-    std::vector<std::string> keys;
     if (FLAGS_data_file_path.empty() && FLAGS_keys_path.empty()) {
         if (FLAGS_num_keys > 0) {
             if (FLAGS_preload_keys) {
+                std::string key = "0000000000";
                 for (size_t i = 0; i < FLAGS_num_keys; ++i) {
-                    string key = std::to_string(i);
-                    string value = "";
                     if ((*part)(key, FLAGS_num_shards, FLAGS_group_idx,
                                 txnGroups) == FLAGS_group_idx) {
-                        server->Load(key, value, Timestamp());
+                        server->Load(key, key, Timestamp());
                         ++stored;
                     }
                     if (i % 100000 == 0) {
@@ -388,6 +386,15 @@ int main(int argc, char **argv) {
                     }
 
                     ++loaded;
+
+                    for (int j = key.size() - 1; j >= 0; --j) {
+                        if (key[j] < '9') {
+                            key[j] += static_cast<char>(1);
+                            break;
+                        } else {
+                            key[j] = '0';
+                        }
+                    }
                 }
             }
 
