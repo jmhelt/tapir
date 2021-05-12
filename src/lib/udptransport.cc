@@ -495,7 +495,7 @@ bool UDPTransport::_SendMessageInternal(TransportReceiver *src,
                                         const Message &m,
                                         size_t meta_len,
                                         void *meta_data) {
-    Debug("Sending %s message over TCP to %s:%d",
+    Debug("Sending %s message over UDP to %s:%d",
           m.GetTypeName().c_str(), inet_ntoa(dst.addr.sin_addr),
           htons(dst.addr.sin_port));
 

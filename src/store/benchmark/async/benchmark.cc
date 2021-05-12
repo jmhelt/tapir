@@ -440,8 +440,18 @@ int main(int argc, char **argv) {
     if (benchMode == BENCH_RETWIS) {
         if (FLAGS_keys_path.empty()) {
             if (FLAGS_num_keys > 0) {
+                std::string key = "0000000000";
+                keys.reserve(FLAGS_num_keys);
                 for (size_t i = 0; i < FLAGS_num_keys; ++i) {
-                    keys.push_back(std::string(std::to_string(i)));
+                    keys.emplace_back(key);
+                    for (int j = key.size() - 1; j >= 0; --j) {
+                        if (key[j] < '9') {
+                            key[j] += static_cast<char>(1);
+                            break;
+                        } else {
+                            key[j] = '0';
+                        }
+                    }
                 }
             } else {
                 std::cerr << "Specified neither keys file nor number of keys."
