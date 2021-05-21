@@ -28,18 +28,8 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 3,
+  "num_shards": 1,
   "shards": [
-    [
-      "us-east-1-0",
-      "eu-west-1-0",
-      "ap-northeast-1-0"
-    ],
-    [
-      "us-east-1-0",
-      "eu-west-1-0",
-      "ap-northeast-1-0"
-    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
@@ -72,13 +62,13 @@
   },
   "server_port": 7087,
   "truetime_error": 0,
-  "client_num_keys": 10000000,
+  "client_num_keys": 1000000,
   "benchmark_name": "retwis",
   "client_key_selector": [
-    "uniform"
+    "zipf"
   ],
   "client_zipf_coefficient": [
-    0.0
+    0.5
   ],
   "nb_time_alpha": 1.0,
   "rw_num_ops_txn": 1,
@@ -100,15 +90,15 @@
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
-  "client_debug_output": true,
-  "server_debug_output": true,
+  "client_debug_output": false,
+  "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "server_load_time": 20,
-  "client_experiment_length": 30,
+  "server_load_time": 0,
+  "client_experiment_length": 10,
   "client_rand_sleep": 0,
-  "client_ramp_down": 10,
-  "client_ramp_up": 10,
+  "client_ramp_down": 0,
+  "client_ramp_up": 0,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
@@ -261,7 +251,7 @@
   "plot_tput_lat_y_label": "Latency (ms)",
   "input_latency_scale": 1000000000,
   "output_latency_scale": 1000,
-  "src_commit_hash": "slow-path",
+  "src_commit_hash": "spanner",
   "stats_file_name": "stats.json",
   "base_local_exp_directory": "/home/jhelt/git/rss/tapir/experiments/results",
   "base_mounted_fs_path": "/mnt/extra",
