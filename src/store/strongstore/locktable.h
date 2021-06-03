@@ -11,11 +11,9 @@
 
 namespace strongstore {
 
-enum LockStatus {
-    ACQUIRED,
-    WAITING,
-    FAIL
-};
+enum LockStatus { ACQUIRED,
+                  WAITING,
+                  FAIL };
 
 struct LockAcquireResult {
     LockStatus status;
@@ -32,11 +30,17 @@ class LockTable {
     ~LockTable();
 
     bool HasReadLock(uint64_t transaction_id, const std::string &key);
-    LockAcquireResult AcquireReadLock(uint64_t transaction_id, const Timestamp &ts, const std::string &key);
-    void ReleaseReadLock(uint64_t transaction_id, const std::string &key);
+    LockAcquireResult AcquireReadLock(uint64_t transaction_id,
+                                      const Timestamp &ts,
+                                      const std::string &key);
+    LockAcquireResult AcquireReadWriteLock(uint64_t transaction_id,
+                                           const Timestamp &ts,
+                                           const std::string &key);
 
-    LockAcquireResult AcquireLocks(uint64_t transaction_id, const Transaction &transaction);
-    LockReleaseResult ReleaseLocks(uint64_t transaction_id, const Transaction &transaction);
+    LockAcquireResult AcquireLocks(uint64_t transaction_id,
+                                   const Transaction &transaction);
+    LockReleaseResult ReleaseLocks(uint64_t transaction_id,
+                                   const Transaction &transaction);
 
    private:
     WoundWait locks_;

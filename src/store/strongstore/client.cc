@@ -329,6 +329,34 @@ void Client::Get(const std::string &key, get_callback gcb,
     });
 }
 
+/* Returns the value corresponding to the supplied key. */
+void Client::GetForUpdate(const std::string &key, get_callback gcb,
+                          get_timeout_callback gtcb, uint32_t timeout) {
+    transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
+        if (state_ == ABORTED) {
+            Debug("[%lu] Already aborted", t_id);
+            gcb(REPLY_FAIL, "", "", Timestamp());
+            return;
+        }
+
+        Debug("GET [%lu : %s]", t_id, BytesToHex(key, 16).c_str());
+        // Contact the appropriate shard to get the value.
+        int i = (*part)(key, nshards_, -1, participants_);
+
+        // If needed, add this shard to set of participants
+        if (participants_.find(i) == participants_.end()) {
+            participants_.insert(i);
+        }
+
+        // Send the GET operation to appropriate shard.
+        auto gcbLat = [this, gcb](int status, const std::string &key,
+                                  const std::string &val,
+                                  Timestamp ts) { gcb(status, key, val, ts); };
+        bclient[i]->GetForUpdate(key, bclient[i]->start_timestamp(), gcbLat, gtcb,
+                                 timeout);
+    });
+}
+
 /* Sets the value corresponding to the supplied key. */
 void Client::Put(const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,

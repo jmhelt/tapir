@@ -70,7 +70,7 @@ class TransactionStore {
     std::vector<PreparedTransaction> GetROSkippedRWTransactions(uint64_t transaction_id);
     uint64_t GetRONumberSkipped(uint64_t transaction_id);
 
-    void StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key);
+    void StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key, bool for_update);
     void FinishGet(uint64_t transaction_id, const std::string &key);
     void AbortGet(uint64_t transaction_id, const std::string &key);
     void PauseGet(uint64_t transaction_id, const std::string &key);
@@ -128,7 +128,7 @@ class TransactionStore {
             slow_path_ros_.insert(transaction_id);
         }
 
-        void StartGet(const TransportAddress &remote, const std::string &key);
+        void StartGet(const TransportAddress &remote, const std::string &key, bool for_update);
 
         void StartCoordinatorPrepare(const Timestamp &start_ts, int coordinator,
                                      const std::unordered_set<int> participants,
