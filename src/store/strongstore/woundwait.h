@@ -35,14 +35,12 @@ class WoundWait {
     bool HasReadLock(const std::string &lock, uint64_t requester) const;
 
     int LockForRead(const std::string &lock, uint64_t requester,
-                    const Timestamp &ts,
-                    std::unordered_set<uint64_t> &wound);
+                    const Timestamp &ts, std::unordered_set<uint64_t> &wound);
     void ReleaseForRead(const std::string &lock, uint64_t holder,
                         std::unordered_set<uint64_t> &notify);
 
     int LockForWrite(const std::string &lock, uint64_t requester,
-                     const Timestamp &ts,
-                     std::unordered_set<uint64_t> &wound);
+                     const Timestamp &ts, std::unordered_set<uint64_t> &wound);
     void ReleaseForWrite(const std::string &lock, uint64_t holder,
                          std::unordered_set<uint64_t> &notify);
 
@@ -51,9 +49,7 @@ class WoundWait {
        public:
         Waiter() : first_waiter_{static_cast<uint64_t>(-1)}, write_{false} {}
         Waiter(bool r, bool w, uint64_t waiter, const Timestamp &ts)
-            : waiters_{},
-              write_{w},
-              read_{r} {
+            : waiters_{}, write_{w}, read_{r} {
             add_waiter(waiter, ts);
         }
 
@@ -75,7 +71,9 @@ class WoundWait {
 
         void remove_waiter(uint64_t w) { waiters_.erase(w); }
 
-        const std::unordered_map<uint64_t, Timestamp> &waiters() const { return waiters_; }
+        const std::unordered_map<uint64_t, Timestamp> &waiters() const {
+            return waiters_;
+        }
 
        private:
         std::unordered_map<uint64_t, Timestamp> waiters_;
@@ -90,15 +88,19 @@ class WoundWait {
 
         int TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
                                std::unordered_set<uint64_t> &wound);
-        void ReleaseReadLock(uint64_t holder, std::unordered_set<uint64_t> &notify);
+        void ReleaseReadLock(uint64_t holder,
+                             std::unordered_set<uint64_t> &notify);
 
         int TryAcquireWriteLock(uint64_t requester, const Timestamp &ts,
                                 std::unordered_set<uint64_t> &wound);
-        void ReleaseWriteLock(uint64_t holder, std::unordered_set<uint64_t> &notify);
+        void ReleaseWriteLock(uint64_t holder,
+                              std::unordered_set<uint64_t> &notify);
 
         const LockState state() const { return state_; }
 
-        const std::unordered_map<uint64_t, Timestamp> &holders() const { return holders_; };
+        const std::unordered_map<uint64_t, Timestamp> &holders() const {
+            return holders_;
+        };
 
        private:
         LockState state_;
@@ -108,9 +110,9 @@ class WoundWait {
 
         bool isWriteNext();
 
-        bool ReadWait(uint64_t requester, const Timestamp &ts,
+        void ReadWait(uint64_t requester, const Timestamp &ts,
                       std::unordered_set<uint64_t> &wound);
-        bool WriteWait(uint64_t requester, const Timestamp &ts,
+        void WriteWait(uint64_t requester, const Timestamp &ts,
                        std::unordered_set<uint64_t> &wound);
 
         void AddReadWaiter(uint64_t requester, const Timestamp &ts);
@@ -118,11 +120,11 @@ class WoundWait {
         void AddReadWriteWaiter(uint64_t requester, const Timestamp &ts);
 
         void PopWaiter(std::unordered_set<uint64_t> &notify);
+
+        bool SafeUpgradeToRW(const Timestamp &ts);
     };
 
-    /* Global store which keep key -> (timestamp, value) list. */
     std::unordered_map<std::string, Lock> locks_;
-    std::unordered_map<uint64_t, std::unordered_set<std::string>> waiting_;
 };
 
 };  // namespace strongstore
