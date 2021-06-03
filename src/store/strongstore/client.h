@@ -75,6 +75,12 @@ class Client : public ::Client {
                      get_timeout_callback gtcb,
                      uint32_t timeout = GET_TIMEOUT) override;
 
+    // Get the value corresponding to key.
+    // Provide hint that transaction will later write the key.
+    virtual void GetForUpdate(const std::string &key, get_callback gcb,
+                              get_timeout_callback gtcb,
+                              uint32_t timeout = GET_TIMEOUT) override;
+
     // Set the value for the given key.
     virtual void Put(const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,

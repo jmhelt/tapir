@@ -144,6 +144,18 @@ void ShardClient::Get(uint64_t transaction_id, const std::string &key,
 void ShardClient::Get(uint64_t transaction_id, const std::string &key,
                       const Timestamp &timestamp, get_callback gcb,
                       get_timeout_callback gtcb, uint32_t timeout) {
+    Get(transaction_id, key, timestamp, gcb, gtcb, timeout, false);
+}
+
+void ShardClient::GetForUpdate(uint64_t transaction_id, const std::string &key,
+                               const Timestamp &timestamp, get_callback gcb,
+                               get_timeout_callback gtcb, uint32_t timeout) {
+    Get(transaction_id, key, timestamp, gcb, gtcb, timeout, true);
+}
+
+void ShardClient::Get(uint64_t transaction_id, const std::string &key,
+                      const Timestamp &timestamp, get_callback gcb,
+                      get_timeout_callback gtcb, uint32_t timeout, bool for_update) {
     // Send the GET operation to appropriate shard.
     Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
 
@@ -161,6 +173,7 @@ void ShardClient::Get(uint64_t transaction_id, const std::string &key,
     get_.set_transaction_id(transaction_id);
     timestamp.serialize(get_.mutable_timestamp());
     get_.set_key(key);
+    get_.set_for_update(for_update);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
 }

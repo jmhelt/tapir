@@ -28,6 +28,21 @@ int SyncClient::Get(const std::string &key, std::string &value,
     return promise.GetReply();
 }
 
+int SyncClient::GetForUpdate(const std::string &key, std::string &value,
+                             uint32_t timeout) {
+    Promise promise(timeout);
+    client->GetForUpdate(key,
+                         std::bind(&SyncClient::GetCallback, this, &promise,
+                                   std::placeholders::_1, std::placeholders::_2,
+                                   std::placeholders::_3, std::placeholders::_4),
+                         std::bind(&SyncClient::GetTimeoutCallback, this, &promise,
+                                   std::placeholders::_1, std::placeholders::_2),
+                         timeout);
+    value = promise.GetValue();
+
+    return promise.GetReply();
+}
+
 void SyncClient::Get(const std::string &key, uint32_t timeout) {
     Promise *promise = new Promise(timeout);
     getPromises.push_back(promise);

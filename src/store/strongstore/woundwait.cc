@@ -41,6 +41,7 @@ void WoundWait::Lock::ReadWait(uint64_t requester, const Timestamp &ts,
     if (search != waiters_.end()) {  // I already have a waiter
         std::shared_ptr<Waiter> w = search->second;
         w->set_read(true);
+        Debug("[%lu] I already have a waiter", requester);
         return;
     }
 
@@ -115,6 +116,10 @@ int WoundWait::Lock::TryAcquireReadLock(uint64_t requester, const Timestamp &ts,
 }
 
 void WoundWait::Lock::PopWaiter(std::unordered_set<uint64_t> &notify) {
+    // for (auto it = wait_q_.begin(); it != wait_q_.end(); ++it) {
+    //     Debug("wait_q_: %lu", *it);
+    // }
+
     while (!wait_q_.empty()) {
         uint64_t next = wait_q_.front();
         auto search = waiters_.find(next);
@@ -145,12 +150,14 @@ void WoundWait::Lock::PopWaiter(std::unordered_set<uint64_t> &notify) {
             }
 
             for (auto h : holders_) {
+                Debug("added notify1: %lu", h.first);
                 notify.insert(h.first);
             }
         } else if (state_ == LOCKED_FOR_READ) {
             if (nh == 1 && iswrite && holders_.count(next) > 0) {
                 wait_q_.pop_front();
                 waiters_.erase(search);
+                Debug("added notify2: %lu", next);
                 notify.insert(next);
                 // Merge into rw lock
                 state_ = LOCKED_FOR_READ_WRITE;
@@ -159,6 +166,7 @@ void WoundWait::Lock::PopWaiter(std::unordered_set<uint64_t> &notify) {
                 waiters_.erase(search);  // If next not in waiters anymore
                 for (auto h : w->waiters()) {
                     holders_.insert(h);
+                    Debug("added notify3: %lu", h.first);
                     notify.insert(h.first);
                     waiters_.erase(h.first);
                 }
@@ -236,10 +244,6 @@ void WoundWait::Lock::ReleaseWriteLock(uint64_t holder,
 
 void WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
                                 std::unordered_set<uint64_t> &wound) {
-    for (auto it = wait_q_.begin(); it != wait_q_.end(); ++it) {
-        Debug("wait_q_: %lu", *it);
-    }
-
     bool read_waiting = false;
     bool safe_upgrade_rw = false;
     auto search = waiters_.find(requester);
@@ -254,7 +258,6 @@ void WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         safe_upgrade_rw = w->waiters().size() == 1;
         for (auto it = wait_q_.rbegin();
              safe_upgrade_rw && it != wait_q_.rend(); ++it) {
-            Debug("safe_upgrade_rw: %d", safe_upgrade_rw);
             uint64_t h = *it;
 
             auto search = waiters_.find(h);
@@ -264,7 +267,6 @@ void WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
 
             std::shared_ptr<Waiter> waiter = search->second;
             if (waiter->waiters().count(requester) > 0) {
-                Debug("reader found");
                 break;
             }
 
@@ -273,7 +275,6 @@ void WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
             }
         }
 
-        Debug("safe_upgrade_rw: %d", safe_upgrade_rw);
         if (safe_upgrade_rw) {
             w->set_write(true);
         } else {
@@ -328,10 +329,6 @@ void WoundWait::Lock::WriteWait(uint64_t requester, const Timestamp &ts,
         } else {
             AddWriteWaiter(requester, ts);
         }
-    }
-
-    for (auto it = wait_q_.begin(); it != wait_q_.end(); ++it) {
-        Debug("wait_q_: %lu", *it);
     }
 }
 
@@ -429,7 +426,7 @@ int WoundWait::LockForRead(const std::string &lock, uint64_t requester,
                            const Timestamp &ts,
                            std::unordered_set<uint64_t> &wound) {
     Lock &l = locks_[lock];
-    // Debug("[%lu] Lock for Read: %s", requester, lock.c_str());
+    Debug("[%lu] Lock for Read: %s", requester, lock.c_str());
 
     int ret = l.TryAcquireReadLock(requester, ts, wound);
 
@@ -441,7 +438,7 @@ int WoundWait::LockForWrite(const std::string &lock, uint64_t requester,
                             std::unordered_set<uint64_t> &wound) {
     Lock &l = locks_[lock];
 
-    // Debug("[%lu] Lock for Write: %s", requester, lock.c_str());
+    Debug("[%lu] Lock for Write: %s", requester, lock.c_str());
 
     int ret = l.TryAcquireWriteLock(requester, ts, wound);
 

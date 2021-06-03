@@ -48,6 +48,7 @@ class Transaction {
     const Timestamp &start_time() const;
     const std::unordered_map<std::string, Timestamp> &getReadSet() const;
     const std::unordered_map<std::string, std::string> &getWriteSet() const;
+    std::unordered_map<std::string, std::string> &getWriteSet();
     void serialize(TransactionMessage *msg) const;
 
     void addReadSet(const std::string &key, const Timestamp &readTime);

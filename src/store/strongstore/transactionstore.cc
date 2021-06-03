@@ -9,12 +9,16 @@ TransactionStore::TransactionStore(int this_shard, Consistency c) : this_shard_{
 
 TransactionStore::~TransactionStore() {}
 
-void TransactionStore::PendingRWTransaction::StartGet(const TransportAddress &remote, const std::string &key) {
+void TransactionStore::PendingRWTransaction::StartGet(const TransportAddress &remote, const std::string &key, bool for_update) {
     if (!client_addr_) {
         client_addr_.reset(remote.clone());
     }
 
     transaction_.addReadSet(key, Timestamp());
+
+    if (for_update) {
+        transaction_.addWriteSet(key, key);
+    }
 }
 
 void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Timestamp &start_ts, int coordinator,
@@ -25,6 +29,7 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
 
     start_ts_ = start_ts;
     participants_ = participants;
+    transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
     transaction_.set_start_time(transaction.start_time());
     nonblock_ts_ = nonblock_ts;
@@ -60,6 +65,7 @@ void TransactionStore::PendingRWTransaction::StartParticipantPrepare(int coordin
         ASSERT(coordinator_ == coordinator);
     }
 
+    transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
     nonblock_ts_ = nonblock_ts;
     state_ = PREPARING;
@@ -107,11 +113,11 @@ void TransactionStore::PendingROTransaction::StartRO(const std::unordered_set<st
     }
 }
 
-void TransactionStore::StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key) {
+void TransactionStore::StartGet(uint64_t transaction_id, const TransportAddress &remote, const std::string &key, bool for_update) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == READING);
 
-    pt.StartGet(remote, key);
+    pt.StartGet(remote, key, for_update);
 }
 
 void TransactionStore::FinishGet(uint64_t transaction_id, const std::string &key) {

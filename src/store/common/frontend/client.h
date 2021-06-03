@@ -61,6 +61,13 @@ class Client {
     virtual void Get(const std::string &key, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) = 0;
 
+    // Get the value corresponding to key.
+    // Provide hint that transaction will later write the key.
+    virtual void GetForUpdate(const std::string &key, get_callback gcb,
+                              get_timeout_callback gtcb, uint32_t timeout) {
+        Get(key, gcb, gtcb, timeout);
+    }
+
     // Set the value for the given key.
     virtual void Put(const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,

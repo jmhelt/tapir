@@ -74,6 +74,12 @@ class TxnClient {
                      const Timestamp &timestamp, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) = 0;
 
+    virtual void GetForUpdate(uint64_t id, const std::string &key,
+                              const Timestamp &timestamp, get_callback gcb,
+                              get_timeout_callback gtcb, uint32_t timeout) {
+        Panic("Not implemented.");
+    }
+
     // Set the value for the given key.
     virtual void Put(uint64_t id, const std::string &key,
                      const std::string &value, put_callback pcb,

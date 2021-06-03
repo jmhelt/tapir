@@ -14,7 +14,7 @@ transaction_status_t PostTweet::Execute(SyncClient &client, bool is_retry) {
 
     std::string value;
     for (int i = 0; i < 3; i++) {
-        if (client.Get(GetKey(i), value, timeout)) {
+        if (client.GetForUpdate(GetKey(i), value, timeout)) {
             client.Abort(timeout);
             return ABORTED_SYSTEM;
         }

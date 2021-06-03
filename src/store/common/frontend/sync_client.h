@@ -32,6 +32,10 @@ class SyncClient {
     // Get the value corresponding to key.
     int Get(const std::string &key, std::string &value, uint32_t timeout);
 
+    // Get the value corresponding to key.
+    // Provide hint that transaction will later write the key.
+    int GetForUpdate(const std::string &key, std::string &value, uint32_t timeout);
+
     // Get value without waiting.
     void Get(const std::string &key, uint32_t timeout);
 

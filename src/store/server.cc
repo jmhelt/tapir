@@ -147,28 +147,6 @@ DEFINE_bool(tapir_linearizable, true, "run TAPIR in linearizable mode");
 /**
  * StrongStore settings.
  */
-const std::string strongmode_args[] = {"lock", "occ", "span-lock", "span-occ"};
-const strongstore::Mode strongmodes[]{
-    strongstore::Mode::MODE_LOCK,
-    strongstore::Mode::MODE_OCC,
-    strongstore::Mode::MODE_SPAN_LOCK,
-    strongstore::Mode::MODE_SPAN_OCC,
-};
-static bool ValidateStrongMode(const char *flagname, const std::string &value) {
-    int n = sizeof(strongmode_args);
-    for (int i = 0; i < n; ++i) {
-        if (value == strongmode_args[i]) {
-            return true;
-        }
-    }
-    std::cerr << "Invalid value for --" << flagname << ": " << value
-              << std::endl;
-    return false;
-}
-DEFINE_string(strongmode, strongmode_args[0],
-              "the protocol to use during this"
-              " experiment");
-DEFINE_validator(strongmode, &ValidateStrongMode);
 DEFINE_int64(strong_max_dep_depth, -1,
              "maximum length of dependency chain"
              " [-1 is no maximum] (for StrongStore MVTSO)");
@@ -294,17 +272,6 @@ int main(int argc, char **argv) {
     if (proto == PROTO_UNKNOWN) {
         std::cerr << "Unknown protocol." << std::endl;
         return 1;
-    }
-
-    strongstore::Mode strongMode = strongstore::Mode::MODE_UNKNOWN;
-    if (proto == PROTO_STRONG) {
-        int numStrongModes = sizeof(strongmode_args);
-        for (int i = 0; i < numStrongModes; ++i) {
-            if (FLAGS_strongmode == strongmode_args[i]) {
-                strongMode = strongmodes[i];
-                break;
-            }
-        }
     }
 
     switch (trans) {
