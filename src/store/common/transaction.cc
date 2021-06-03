@@ -35,6 +35,10 @@ const unordered_map<string, string> &Transaction::getWriteSet() const {
     return writeSet;
 }
 
+unordered_map<string, string> &Transaction::getWriteSet() {
+    return writeSet;
+}
+
 const Timestamp &Transaction::start_time() const { return start_time_; }
 
 void Transaction::set_start_time(const Timestamp &ts) { start_time_ = ts; }

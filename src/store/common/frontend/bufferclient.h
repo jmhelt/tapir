@@ -54,6 +54,10 @@ class BufferClient {
                      get_callback gcb, get_timeout_callback gtcb,
                      uint32_t timeout);
 
+    virtual void GetForUpdate(const std::string &key, const Timestamp &ts,
+                              get_callback gcb, get_timeout_callback gtcb,
+                              uint32_t timeout);
+
     // Set the value for the given key.
     virtual void Put(const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,

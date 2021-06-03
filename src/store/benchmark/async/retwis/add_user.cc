@@ -12,7 +12,7 @@ transaction_status_t AddUser::Execute(SyncClient &client, bool is_retry) {
     client.Begin(is_retry, timeout);
 
     std::string value;
-    if (client.Get(GetKey(0), value, timeout)) {
+    if (client.GetForUpdate(GetKey(0), value, timeout)) {
         client.Abort(timeout);
         return ABORTED_SYSTEM;
     }

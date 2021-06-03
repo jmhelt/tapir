@@ -89,6 +89,10 @@ class ShardClient : public TxnClient,
                      const Timestamp &timestamp, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) override;
 
+    virtual void GetForUpdate(uint64_t transaction_id, const std::string &key,
+                              const Timestamp &timestamp, get_callback gcb,
+                              get_timeout_callback gtcb, uint32_t timeout) override;
+
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,
                   const Timestamp &min_read_timestamp,
@@ -159,6 +163,10 @@ class ShardClient : public TxnClient,
         ro_commit_timeout_callback ctcb;
         uint64_t n_slow_replies;
     };
+
+    void Get(uint64_t transaction_id, const std::string &key,
+             const Timestamp &timestamp, get_callback gcb,
+             get_timeout_callback gtcb, uint32_t timeout, bool for_update);
 
     void HandleGetReply(const proto::GetReply &reply);
     void HandleRWCommitCoordinatorReply(

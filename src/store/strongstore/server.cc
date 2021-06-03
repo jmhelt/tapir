@@ -104,11 +104,19 @@ void Server::HandleGet(const TransportAddress &remote, proto::Get &msg) {
     const std::string &key = msg.key();
     const Timestamp timestamp{msg.timestamp()};
 
-    //Debug("[%lu] Received GET request: %s", transaction_id, key.c_str());
+    bool for_update = msg.has_for_update() && msg.for_update();
 
-    transactions_.StartGet(transaction_id, remote, key);
+    Debug("[%lu] Received GET request: %s %d", transaction_id, key.c_str(), for_update);
 
-    LockAcquireResult r = locks_.AcquireReadLock(transaction_id, timestamp, key);
+    transactions_.StartGet(transaction_id, remote, key, for_update);
+
+    LockAcquireResult r;
+    if (for_update) {
+        r = locks_.AcquireReadWriteLock(transaction_id, timestamp, key);
+    } else {
+        r = locks_.AcquireReadLock(transaction_id, timestamp, key);
+    }
+
     if (r.status == LockStatus::ACQUIRED) {
         ASSERT(r.wound_rws.size() == 0);
 
@@ -170,7 +178,7 @@ void Server::ContinueGet(uint64_t transaction_id) {
 
     const std::string &key = reply->key;
 
-    //Debug("[%lu] Continuing GET request %s", transaction_id, key.c_str());
+    Debug("[%lu] Continuing GET request %s", transaction_id, key.c_str());
 
     get_reply_.Clear();
     get_reply_.mutable_rid()->set_client_id(client_id);
@@ -240,11 +248,12 @@ void Server::WoundPendingRWs(uint64_t transaction_id, const std::unordered_set<u
 
 void Server::NotifyPendingRWs(uint64_t transaction_id, const std::unordered_set<uint64_t> &rws) {
     for (uint64_t waiting_rw : rws) {
-        ASSERT(transaction_id != waiting_rw);
-        //Debug("[%lu] continuing %lu", transaction_id, waiting_rw);
-        ContinueGet(waiting_rw);
-        ContinueCoordinatorPrepare(waiting_rw);
-        ContinueParticipantPrepare(waiting_rw);
+        if (transaction_id != waiting_rw) {
+            Debug("[%lu] continuing %lu", transaction_id, waiting_rw);
+            ContinueGet(waiting_rw);
+            ContinueCoordinatorPrepare(waiting_rw);
+            ContinueParticipantPrepare(waiting_rw);
+        }
     }
 }
 
@@ -1185,7 +1194,7 @@ void Server::HandleWound(const TransportAddress &remote, proto::Wound &msg) {
 void Server::HandleAbort(const TransportAddress &remote, proto::Abort &msg) {
     uint64_t transaction_id = msg.transaction_id();
 
-    //Debug("[%lu] Received Abort request", transaction_id);
+    Debug("[%lu] Received Abort request", transaction_id);
 
     abort_reply_.mutable_rid()->CopyFrom(msg.rid());
 

@@ -111,6 +111,39 @@ void BufferClient::Get(const std::string &key, const Timestamp &ts,
     txnclient->Get(tid, key, ts, bufferCb, gtcb, timeout);
 }
 
+void BufferClient::GetForUpdate(const std::string &key, const Timestamp &ts,
+                                get_callback gcb, get_timeout_callback gtcb,
+                                uint32_t timeout) {
+    // Read your own writes, check the write set first.
+    if (txn.getWriteSet().find(key) != txn.getWriteSet().end()) {
+        gcb(REPLY_OK, key, (txn.getWriteSet().find(key))->second, Timestamp());
+        return;
+    }
+
+    // Consistent reads, check the read set.
+    if (txn.getReadSet().find(key) != txn.getReadSet().end()) {
+        auto readSetItr = readSet.find(key);
+        ASSERT(readSetItr != readSet.end());
+        gcb(REPLY_OK, key, std::get<0>(readSetItr->second),
+            std::get<1>(readSetItr->second));
+        return;
+    }
+
+    get_callback bufferCb = [this, gcb](int status, const std::string &key,
+                                        const std::string &value,
+                                        Timestamp ts) {
+        // TODO: we still need to add a "failed" read to the read set
+        //   (where failed ==> successful rpc, but no value exists for key)
+        // if (status == REPLY_OK) {
+        Debug("Added %lu.%lu to read set.", ts.getTimestamp(), ts.getID());
+        this->txn.addReadSet(key, ts);
+        this->readSet.insert(std::make_pair(key, std::make_tuple(value, ts)));
+        //}
+        gcb(status, key, value, ts);
+    };
+    txnclient->GetForUpdate(tid, key, ts, bufferCb, gtcb, timeout);
+}
+
 void BufferClient::Put(const std::string &key, const std::string &value,
                        put_callback pcb, put_timeout_callback ptcb,
                        uint32_t timeout) {
