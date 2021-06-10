@@ -47,20 +47,18 @@
     ]
   ],
   "client_total": [
-    6,
-    12,
     18,
     24,
     30,
-    36
+    36,
+    42
   ],
   "client_processes_per_client_node": [
-    2,
-    4,
     6,
     8,
     10,
-    12
+    12,
+    14
   ],
   "client_threads_per_process": 1,
   "clients": [
@@ -104,24 +102,24 @@
   "client_message_timeout": 60000,
   "run_locally": false,
   "replication_protocol_settings": {
-    "message_transport_type": "udp"
+    "message_transport_type": "tcp"
   },
   "stats_merge_lists": [
     "txn_groups",
     "commit_branch"
   ],
-  "experiment_name": "jhelt-QV96657",
+  "experiment_name": "spanner-rss",
   "codebase_name": "rss",
-  "pin_client_processes": false,
-  "pin_server_processes": false,
+  "pin_client_processes": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  "pin_server_processes": [2],
   "client_debug_output": false,
   "server_debug_output": false,
   "client_debug_stats": false,
   "server_debug_stats": true,
-  "client_experiment_length": 360,
+  "client_experiment_length": 600,
   "client_rand_sleep": 0,
-  "client_ramp_down": 15,
-  "client_ramp_up": 15,
+  "client_ramp_down": 30,
+  "client_ramp_up": 30,
   "default_remote_shell": "bash",
   "server_host_format_str": "%s.%s.%s.utah.cloudlab.us",
   "client_host_format_str": "%s.%s.%s.utah.cloudlab.us",
@@ -186,7 +184,7 @@
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-VSS"
+        "Spanner-RSS"
       ],
       "x_var_is_config": false,
       "y_var": [
@@ -213,7 +211,7 @@
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-VSS"
+        "Spanner-RSS"
       ],
       "x_var_is_config": false,
       "y_var": [
@@ -240,7 +238,7 @@
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-VSS"
+        "Spanner-RSS"
       ],
       "x_var_is_config": false,
       "y_var": [
@@ -260,6 +258,33 @@
       ]
     },
     {
+      "name": "tput-mean",
+      "font": "DejaVu Sans,12",
+      "height": 600,
+      "width": 800,
+      "series_indep_vars_idx": 0,
+      "series_titles": [
+        "Spanner",
+        "Spanner-RSS"
+      ],
+      "x_var_is_config": false,
+      "y_var": [
+        "run_stats",
+        "combined",
+        "mean",
+        "p50"
+      ],
+      "y_label": "Mean Latency",
+      "x_label": "Throughput (txn/s)",
+      "x_indep_vars_idx": 1,
+      "x_var": [
+        "run_stats",
+        "combined",
+        "tput",
+        "p50"
+      ]
+    },
+    {
       "name": "lat-clients",
       "font": "DejaVu Sans,12",
       "height": 600,
@@ -267,7 +292,7 @@
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-VSS"
+        "Spanner-RSS"
       ],
       "x_var_is_config": true,
       "x_var": [
@@ -291,7 +316,7 @@
       "series_indep_vars_idx": 0,
       "series_titles": [
         "Spanner",
-        "Spanner-VSS"
+        "Spanner-RSS"
       ],
       "x_var_is_config": true,
       "x_var": [
