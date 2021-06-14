@@ -2,6 +2,7 @@
 #include "store/strongstore/transactionstore.h"
 
 #include <algorithm>
+#include <chrono>
 
 namespace strongstore {
 
@@ -323,8 +324,15 @@ void TransactionStore::AbortPrepare(uint64_t transaction_id) {
 void TransactionStore::PausePrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == PREPARING);
+    ASSERT(pt.wait_start() == 0);
 
     pt.set_state(PREPARE_WAIT);
+
+    auto now = std::chrono::high_resolution_clock::now();
+    long count = std::chrono::duration_cast<std::chrono::microseconds>(
+                     now.time_since_epoch())
+                     .count();
+    pt.set_wait_start(static_cast<uint64_t>(count));
 }
 
 TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
@@ -335,6 +343,15 @@ TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     if (pt.state() == PREPARE_WAIT) {
         pt.set_state(PREPARING);
+
+        auto now = std::chrono::high_resolution_clock::now();
+        long count = std::chrono::duration_cast<std::chrono::microseconds>(
+                         now.time_since_epoch())
+                         .count();
+        uint64_t diff = static_cast<uint64_t>(count) - pt.wait_start();
+        pt.nonblock_ts().setTimestamp(pt.nonblock_ts().getTimestamp() + diff);
+        pt.set_wait_start(0);
+        Debug("[%lu] Advancing nonblock ts by %lu micros: %lu", transaction_id, diff, pt.nonblock_ts().getTimestamp());
     }
 
     return pt.state();
