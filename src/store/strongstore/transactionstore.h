@@ -102,14 +102,14 @@ class TransactionStore {
    private:
     class PendingRWTransaction {
        public:
-        PendingRWTransaction() : client_addr_{nullptr}, coordinator_{-1}, state_{READING} {}
+        PendingRWTransaction() : client_addr_{nullptr}, coordinator_{-1}, state_{READING}, wait_start_{0} {}
         ~PendingRWTransaction() {}
 
         TransactionState state() const { return state_; }
         void set_state(TransactionState s) { state_ = s; }
 
         const Timestamp &start_ts() const { return start_ts_; }
-        const Timestamp &nonblock_ts() const { return nonblock_ts_; }
+        Timestamp &nonblock_ts() { return nonblock_ts_; }
         const Timestamp &prepare_ts() const { return prepare_ts_; }
         const Timestamp &commit_ts() const { return commit_ts_; }
         const Transaction &transaction() const { return transaction_; }
@@ -127,6 +127,9 @@ class TransactionStore {
         void add_slow_path_ro(uint64_t transaction_id) {
             slow_path_ros_.insert(transaction_id);
         }
+
+        const uint64_t wait_start() const { return wait_start_; }
+        void set_wait_start(uint64_t w) { wait_start_ = w; }
 
         void StartGet(const TransportAddress &remote, const std::string &key, bool for_update);
 
@@ -158,6 +161,7 @@ class TransactionStore {
         std::shared_ptr<TransportAddress> client_addr_;
         int coordinator_;
         TransactionState state_;
+        uint64_t wait_start_;
     };
 
     class PendingROTransaction {
