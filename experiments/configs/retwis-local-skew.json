@@ -28,16 +28,21 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 1,
+  "num_shards": 2,
   "shards": [
+    [
+      "us-east-1-0",
+      "eu-west-1-0",
+      "ap-northeast-1-0"
+    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 1,
-  "client_processes_per_client_node": 1,
+  "client_total": 3,
+  "client_processes_per_client_node": 3,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
@@ -61,14 +66,14 @@
     ]
   },
   "server_port": 7087,
-  "truetime_error": 0,
+  "truetime_error": 10,
   "client_num_keys": 1000000,
   "benchmark_name": "retwis",
   "client_key_selector": [
     "zipf"
   ],
   "client_zipf_coefficient": [
-    0.5
+    0.9
   ],
   "nb_time_alpha": 1.0,
   "rw_num_ops_txn": 1,
@@ -80,7 +85,7 @@
   "client_message_timeout": 60000,
   "run_locally": true,
   "replication_protocol_settings": {
-    "message_transport_type": "udp"
+    "message_transport_type": "tcp"
   },
   "stats_merge_lists": [
     "txn_groups",
@@ -90,12 +95,12 @@
   "codebase_name": "rss",
   "pin_client_processes": false,
   "pin_server_processes": false,
-  "client_debug_output": false,
-  "server_debug_output": false,
+  "client_debug_output": true,
+  "server_debug_output": true,
   "client_debug_stats": false,
   "server_debug_stats": true,
   "server_load_time": 0,
-  "client_experiment_length": 10,
+  "client_experiment_length": 30,
   "client_rand_sleep": 0,
   "client_ramp_down": 0,
   "client_ramp_up": 0,

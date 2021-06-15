@@ -110,8 +110,7 @@ class Client : public ::Client {
 
     struct PendingRequest {
         PendingRequest(uint64_t id, uint64_t txnId)
-            : nonblock_timestamp{},
-              id(id),
+            : id(id),
               txnId(txnId),
               outstandingPrepares(0),
               commitTries(0),
@@ -126,7 +125,6 @@ class Client : public ::Client {
         commit_timeout_callback ctcb;
         abort_callback acb;
         abort_timeout_callback atcb;
-        Timestamp nonblock_timestamp;
         uint64_t id;
         uint64_t txnId;
         int outstandingPrepares;
@@ -139,7 +137,7 @@ class Client : public ::Client {
 
     // local Prepare function
     void Prepare(PendingRequest *req, uint32_t timeout);
-    void PrepareCallback(uint64_t reqId, int status, Timestamp respTs);
+    void CommitCallback(uint64_t reqId, int status, Timestamp commit_ts, Timestamp nonblock_ts);
 
     void AbortCallback(uint64_t reqId);
 

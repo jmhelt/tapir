@@ -41,6 +41,7 @@ message RWCommitCoordinatorReply {
     required RequestIDMessage rid = 1;
     required int32 status = 2;
     optional TimestampMessage commit_timestamp = 3;
+    optional TimestampMessage nonblock_timestamp = 4;
 }
 
 message RWCommitParticipant {
@@ -61,6 +62,7 @@ message PrepareOK {
     required uint64 transaction_id = 2;
     required int32 participant_shard = 3;
     required TimestampMessage prepare_timestamp = 4;
+    required TimestampMessage nonblock_timestamp = 5;
 }
 
 message PrepareOKReply {

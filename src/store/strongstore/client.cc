@@ -392,46 +392,44 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
     Timestamp nonblock_timestamp = Timestamp();
     if (consistency_ == Consistency::RSS) {
         nonblock_timestamp = ChooseNonBlockTimestamp();
-        req->nonblock_timestamp = nonblock_timestamp;
     }
 
     for (auto p : participants_) {
         if (p == coordinator_shard) {
             bclient[p]->RWCommitCoordinator(
                 t_id, participants_, nonblock_timestamp,
-                std::bind(&Client::PrepareCallback, this, req->id,
-                          std::placeholders::_1, std::placeholders::_2),
-                std::bind(&Client::PrepareCallback, this, req->id,
-                          std::placeholders::_1, std::placeholders::_2),
+                std::bind(&Client::CommitCallback, this, req->id,
+                          std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
+                [](int) {},
                 timeout);
         } else {
             bclient[p]->RWCommitParticipant(
                 t_id, coordinator_shard, nonblock_timestamp,
-                [this, reqId = req->id](int status, Timestamp) {
+                [this, reqId = req->id](int status) {
                     Debug("[%lu] PREPARE callback status %d", t_id, status);
 
                     auto itr = pendingReqs.find(reqId);
                     if (itr == pendingReqs.end()) {
                         Debug(
-                            "PrepareCallback for terminated request id %ld "
+                            "CommitCallback for terminated request id %ld "
                             "(txn already "
                             "committed or aborted.",
                             reqId);
                         return;
                     }
                 },
-                [](int, Timestamp) {}, timeout);
+                [](int) {}, timeout);
         }
     }
 }
 
-void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
+void Client::CommitCallback(uint64_t reqId, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
     Debug("PREPARE [%lu] callback status %d", t_id, status);
 
     auto itr = this->pendingReqs.find(reqId);
     if (itr == this->pendingReqs.end()) {
         Debug(
-            "PrepareCallback for terminated request id %lu (txn already "
+            "CommitCallback for terminated request id %lu (txn already "
             "committed or aborted.",
             reqId);
         return;
@@ -452,15 +450,14 @@ void Client::PrepareCallback(uint64_t reqId, int status, Timestamp respTs) {
     }
 
     commit_callback ccb = req->ccb;
-    Timestamp nonblock_timestamp = req->nonblock_timestamp;
     pendingReqs.erase(reqId);
     delete req;
 
     uint64_t ms = 0;
     if (tstatus == COMMITTED && consistency_ == Consistency::RSS) {
-        ms = tt_.TimeToWaitUntilMS(nonblock_timestamp.getTimestamp());
+        ms = tt_.TimeToWaitUntilMS(nonblock_ts.getTimestamp());
         Debug("Waiting for nonblock time: %lu", ms);
-        min_read_timestamp_ = std::max(min_read_timestamp_, respTs);
+        min_read_timestamp_ = std::max(min_read_timestamp_, commit_ts);
         Debug("min_read_timestamp_: %lu.%lu", min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
     }
 

@@ -58,10 +58,14 @@ enum Mode {
     MODE_MVTSO
 };
 
+typedef std::function<void(int, Timestamp, Timestamp)> rw_coord_commit_callback;
+typedef std::function<void(int)> rw_coord_commit_timeout_callback;
+
+typedef std::function<void(int)> rw_part_commit_callback;
+typedef std::function<void(int)> rw_part_commit_timeout_callback;
+
 typedef std::function<void(int, const std::vector<Value> &, const std::vector<PreparedTransaction> &)> ro_commit_callback;
-
 typedef std::function<void(int, uint64_t, const Timestamp &, bool)> ro_commit_slow_callback;
-
 typedef std::function<void()> ro_commit_timeout_callback;
 
 typedef std::function<void(uint64_t)> wound_callback;
@@ -103,17 +107,18 @@ class ShardClient : public TxnClient,
                              const Transaction &transaction,
                              const std::set<int> participants,
                              Timestamp &nonblock_timestamp,
-                             prepare_callback pcb,
-                             prepare_timeout_callback ptcb, uint32_t timeout);
+                             rw_coord_commit_callback ccb,
+                             rw_coord_commit_timeout_callback ctcb, uint32_t timeout);
     void RWCommitParticipant(uint64_t transaction_id,
                              const Transaction &transaction,
                              int coordinator_shard,
                              Timestamp &nonblock_timestamp,
-                             prepare_callback pcb,
-                             prepare_timeout_callback ptcb, uint32_t timeout);
+                             rw_part_commit_callback ccb,
+                             rw_part_commit_timeout_callback ctcb, uint32_t timeout);
 
     void PrepareOK(uint64_t transaction_id, int participant_shard,
-                   const Timestamp &prepare_timestamp, prepare_callback pcb,
+                   const Timestamp &prepare_timestamp, const Timestamp &nonblock_ts,
+                   prepare_callback pcb,
                    prepare_timeout_callback ptcb, uint32_t timeout);
 
     void PrepareAbort(uint64_t transaction_id, int participant_shard,
@@ -146,6 +151,16 @@ class ShardClient : public TxnClient,
                          uint32_t timeout) override;
 
    private:
+    struct PendingRWCoordCommit : public PendingRequest {
+        PendingRWCoordCommit(uint64_t reqId) : PendingRequest(reqId) {}
+        rw_coord_commit_callback ccb;
+        rw_coord_commit_timeout_callback ctcb;
+    };
+    struct PendingRWParticipantCommit : public PendingRequest {
+        PendingRWParticipantCommit(uint64_t reqId) : PendingRequest(reqId) {}
+        rw_part_commit_callback ccb;
+        rw_part_commit_timeout_callback ctcb;
+    };
     struct PendingPrepareOK : public PendingRequest {
         PendingPrepareOK(uint64_t reqId) : PendingRequest(reqId) {}
         prepare_callback pcb;
@@ -188,10 +203,10 @@ class ShardClient : public TxnClient,
     wound_callback wcb_;
 
     std::unordered_map<uint64_t, PendingGet *> pendingGets;
-    std::unordered_map<uint64_t, PendingPrepare *> pendingPrepares;
+    std::unordered_map<uint64_t, PendingRWCoordCommit *> pendingRWCoordCommits;
+    std::unordered_map<uint64_t, PendingRWParticipantCommit *> pendingRWParticipantCommits;
     std::unordered_map<uint64_t, PendingPrepareOK *> pendingPrepareOKs;
     std::unordered_map<uint64_t, PendingPrepareAbort *> pendingPrepareAborts;
-    std::unordered_map<uint64_t, PendingCommit *> pendingCommits;
     std::unordered_map<uint64_t, PendingAbort *> pendingAborts;
     std::unordered_map<uint64_t, PendingROCommit *> pendingROCommits;
 
