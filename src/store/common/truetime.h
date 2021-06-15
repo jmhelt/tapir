@@ -20,6 +20,7 @@ class TrueTimeInterval {
 
     uint64_t earliest() const { return earliest_; }
     uint64_t latest() const { return latest_; }
+    uint64_t mid() const { return (latest_ + earliest_) / 2; }
 
    private:
     uint64_t earliest_;
@@ -37,6 +38,7 @@ class TrueTime {
     TrueTimeInterval Now() const;
 
     uint64_t TimeToWaitUntilMS(uint64_t ts) const;
+    uint64_t TimeToWaitUntilMicros(uint64_t ts) const;
 
    private:
     uint64_t error_;

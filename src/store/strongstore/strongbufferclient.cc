@@ -52,21 +52,21 @@ void BufferClient::Begin(uint64_t tid, const Timestamp &start_time) {
 void BufferClient::RWCommitCoordinator(uint64_t transaction_id,
                                        const std::set<int> participants,
                                        Timestamp &nonblock_timestamp,
-                                       prepare_callback pcb,
-                                       prepare_timeout_callback ptcb,
+                                       rw_coord_commit_callback ccb,
+                                       rw_coord_commit_timeout_callback ctcb,
                                        uint32_t timeout) {
     shard_client_->RWCommitCoordinator(transaction_id, txn, participants,
-                                       nonblock_timestamp, pcb, ptcb, timeout);
+                                       nonblock_timestamp, ccb, ctcb, timeout);
 }
 
 void BufferClient::RWCommitParticipant(uint64_t transaction_id,
                                        int coordinator_shard,
                                        Timestamp &nonblock_timestamp,
-                                       prepare_callback pcb,
-                                       prepare_timeout_callback ptcb,
+                                       rw_part_commit_callback ccb,
+                                       rw_part_commit_timeout_callback ctcb,
                                        uint32_t timeout) {
     shard_client_->RWCommitParticipant(transaction_id, txn, coordinator_shard,
-                                       nonblock_timestamp, pcb, ptcb, timeout);
+                                       nonblock_timestamp, ccb, ctcb, timeout);
 }
 
 void BufferClient::ROCommit(uint64_t transaction_id,

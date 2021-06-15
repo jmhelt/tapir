@@ -39,3 +39,13 @@ uint64_t TrueTime::TimeToWaitUntilMS(uint64_t ts) const {
         return (ts - earliest) / 1000;
     }
 }
+
+uint64_t TrueTime::TimeToWaitUntilMicros(uint64_t ts) const {
+    auto now = Now();
+    uint64_t earliest = now.earliest();
+    if (ts <= earliest) {
+        return 0;
+    } else {
+        return ts - earliest;
+    }
+}

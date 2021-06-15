@@ -40,7 +40,7 @@ struct TransactionFinishResult {
 
 class TransactionStore {
    public:
-    TransactionStore(int this_shard, Consistency consistency);
+    TransactionStore(int this_shard, Consistency consistency, const TrueTime &tt);
     ~TransactionStore();
 
     TransactionState GetRWTransactionState(uint64_t transaction_id);
@@ -91,7 +91,10 @@ class TransactionStore {
     void PausePrepare(uint64_t transaction_id);
     TransactionState ContinuePrepare(uint64_t transaction_id);
 
-    TransactionState CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant_shard, const Timestamp &prepare_ts);
+    TransactionState CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant_shard,
+                                                 const Timestamp &prepare_ts,
+                                                 const Timestamp &nonblock_ts);
+
     TransactionState ParticipantReceivePrepareOK(uint64_t transaction_id);
 
     TransactionFinishResult Commit(uint64_t transaction_id);
@@ -108,8 +111,10 @@ class TransactionStore {
         TransactionState state() const { return state_; }
         void set_state(TransactionState s) { state_ = s; }
 
+        const Timestamp &nonblock_ts() const { return nonblock_ts_; }
+        void advance_nonblock_ts(uint64_t d) { nonblock_ts_.setTimestamp(nonblock_ts_.getTimestamp() + d); }
+
         const Timestamp &start_ts() const { return start_ts_; }
-        Timestamp &nonblock_ts() { return nonblock_ts_; }
         const Timestamp &prepare_ts() const { return prepare_ts_; }
         const Timestamp &commit_ts() const { return commit_ts_; }
         const Transaction &transaction() const { return transaction_; }
@@ -140,7 +145,9 @@ class TransactionStore {
 
         void FinishCoordinatorPrepare(const Timestamp &prepare_ts);
 
-        void ReceivePrepareOK(int coordinator, int participant, const Timestamp &prepare_ts);
+        void ReceivePrepareOK(int coordinator, int participant,
+                              const Timestamp &prepare_ts,
+                              const Timestamp &nonblock_ts);
 
         void StartParticipantPrepare(int coordinator,
                                      const Transaction &transaction,
@@ -205,6 +212,7 @@ class TransactionStore {
     Stats stats_;
     int this_shard_;
     Consistency consistency_;
+    const TrueTime &tt_;
 };
 
 }  // namespace strongstore

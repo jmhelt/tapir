@@ -309,15 +309,15 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
 void ShardClient::RWCommitCoordinator(
     uint64_t transaction_id, const Transaction &transaction,
     const std::set<int> participants, Timestamp &nonblock_timestamp,
-    prepare_callback pcb, prepare_timeout_callback ptcb, uint32_t timeout) {
+    rw_coord_commit_callback ccb, rw_coord_commit_timeout_callback ctcb, uint32_t timeout) {
     Debug("[shard %i] Sending RWCommitCoordinator [%lu]", shard_idx_,
           transaction_id);
 
     uint64_t reqId = lastReqId++;
-    PendingPrepare *pendingPrepare = new PendingPrepare(reqId);
-    pendingPrepares[reqId] = pendingPrepare;
-    pendingPrepare->pcb = pcb;
-    pendingPrepare->ptcb = ptcb;
+    PendingRWCoordCommit *pendingCommit = new PendingRWCoordCommit(reqId);
+    pendingRWCoordCommits[reqId] = pendingCommit;
+    pendingCommit->ccb = ccb;
+    pendingCommit->ctcb = ctcb;
 
     // TODO: Setup timeout
     rw_commit_c_.Clear();
@@ -338,35 +338,34 @@ void ShardClient::HandleRWCommitCoordinatorReply(
     const proto::RWCommitCoordinatorReply &reply) {
     uint64_t req_id = reply.rid().client_req_id();
 
-    auto itr = pendingPrepares.find(req_id);
-    if (itr == pendingPrepares.end()) {
-        Debug("[%d][%lu] RWCommitCoordinatorReply for stale request.",
-              shard_idx_, req_id);
+    auto itr = pendingRWCoordCommits.find(req_id);
+    if (itr == pendingRWCoordCommits.end()) {
+        Debug("[%d][%lu] RWCommitCoordinatorReply for stale request.", shard_idx_, req_id);
         return;  // stale request
     }
 
-    PendingPrepare *req = itr->second;
-    prepare_callback pcb = req->pcb;
-    pendingPrepares.erase(itr);
+    PendingRWCoordCommit *req = itr->second;
+    rw_coord_commit_callback ccb = req->ccb;
+    pendingRWCoordCommits.erase(itr);
     delete req;
 
-    Debug("[shard %i] COMMIT timestamp [%lu %lu]", shard_idx_,
+    Debug("[shard %i] COMMIT timestamp %lu.%lu", shard_idx_,
           reply.commit_timestamp().timestamp(), reply.commit_timestamp().id());
-    pcb(reply.status(), Timestamp(reply.commit_timestamp()));
+    ccb(reply.status(), Timestamp(reply.commit_timestamp()), Timestamp(reply.nonblock_timestamp()));
 }
 
 void ShardClient::RWCommitParticipant(
     uint64_t transaction_id, const Transaction &transaction,
-    int coordinator_shard, Timestamp &nonblock_timestamp, prepare_callback pcb,
-    prepare_timeout_callback ptcb, uint32_t timeout) {
+    int coordinator_shard, Timestamp &nonblock_timestamp, rw_part_commit_callback ccb,
+    rw_part_commit_timeout_callback ctcb, uint32_t timeout) {
     Debug("[shard %i] Sending RWCommitParticipant [%lu]", shard_idx_,
           transaction_id);
 
     uint64_t reqId = lastReqId++;
-    PendingPrepare *pendingPrepare = new PendingPrepare(reqId);
-    pendingPrepares[reqId] = pendingPrepare;
-    pendingPrepare->pcb = pcb;
-    pendingPrepare->ptcb = ptcb;
+    PendingRWParticipantCommit *pendingCommit = new PendingRWParticipantCommit(reqId);
+    pendingRWParticipantCommits[reqId] = pendingCommit;
+    pendingCommit->ccb = ccb;
+    pendingCommit->ctcb = ctcb;
 
     // TODO: Setup timeout
     rw_commit_p_.Clear();
@@ -385,23 +384,23 @@ void ShardClient::HandleRWCommitParticipantReply(
     Debug("[shard %i] Received RWCommitParticipant", shard_idx_);
     uint64_t req_id = reply.rid().client_req_id();
 
-    auto itr = pendingPrepares.find(req_id);
-    if (itr == pendingPrepares.end()) {
-        Debug("[%d][%lu] RWCommitCoordinatorReply for stale request.",
-              shard_idx_, req_id);
+    auto itr = pendingRWParticipantCommits.find(req_id);
+    if (itr == pendingRWParticipantCommits.end()) {
+        Debug("[%d][%lu] RWCommitParticipantReply for stale request.", shard_idx_, req_id);
         return;  // stale request
     }
 
-    PendingPrepare *req = itr->second;
-    prepare_callback pcb = req->pcb;
-    pendingPrepares.erase(itr);
+    PendingRWParticipantCommit *req = itr->second;
+    rw_part_commit_callback ccb = req->ccb;
+    pendingRWParticipantCommits.erase(itr);
     delete req;
 
-    pcb(reply.status(), Timestamp());
+    ccb(reply.status());
 }
 
 void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
-                            const Timestamp &prepare_timestamp, prepare_callback pcb,
+                            const Timestamp &prepare_timestamp, const Timestamp &nonblock_ts,
+                            prepare_callback pcb,
                             prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending PrepareOK [%lu]", shard_idx_, transaction_id);
 
@@ -417,6 +416,7 @@ void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
     prepare_ok_.set_transaction_id(transaction_id);
     prepare_ok_.set_participant_shard(participant_shard);
     prepare_timestamp.serialize(prepare_ok_.mutable_prepare_timestamp());
+    nonblock_ts.serialize(prepare_ok_.mutable_nonblock_timestamp());
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, prepare_ok_);
 }

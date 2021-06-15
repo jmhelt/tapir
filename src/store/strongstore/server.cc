@@ -18,7 +18,7 @@ Server::Server(Consistency consistency,
                Transport *transport, const TrueTime &tt, bool debug_stats)
     : PingServer(transport),
       tt_{tt},
-      transactions_{shard_idx, consistency},
+      transactions_{shard_idx, consistency, tt_},
       shard_config_{shard_config},
       replica_config_{replica_config},
       transport_{transport},
@@ -448,7 +448,7 @@ void Server::HandleRWCommitCoordinator(const TransportAddress &remote, proto::RW
     const Transaction transaction{msg.transaction()};
     const Timestamp nonblock_ts{msg.nonblock_timestamp()};
 
-    //Debug("[%lu] Coordinator for transaction", transaction_id);
+    Debug("[%lu] Coordinator for transaction", transaction_id);
 
     const TrueTimeInterval now = tt_.Now();
     const Timestamp start_ts{now.latest(), client_id};
@@ -582,7 +582,9 @@ void Server::ContinueCoordinatorPrepare(uint64_t transaction_id) {
     }
 }
 
-void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts) {
+void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id,
+                                             const Timestamp &commit_ts,
+                                             const Timestamp &nonblock_ts) {
     auto search = pending_rw_commit_c_replies_.find(transaction_id);
     if (search == pending_rw_commit_c_replies_.end()) {
         //Debug("[%lu] No pending commit coordinator reply found", transaction_id);
@@ -599,6 +601,7 @@ void Server::SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Time
     rw_commit_c_reply_.mutable_rid()->set_client_req_id(client_req_id);
     rw_commit_c_reply_.set_status(REPLY_OK);
     commit_ts.serialize(rw_commit_c_reply_.mutable_commit_timestamp());
+    nonblock_ts.serialize(rw_commit_c_reply_.mutable_nonblock_timestamp());
 
     transport_->SendMessage(this, *remote, rw_commit_c_reply_);
 
@@ -614,6 +617,7 @@ void Server::SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
     rw_commit_c_reply_.mutable_rid()->set_client_req_id(client_req_id);
     rw_commit_c_reply_.set_status(REPLY_FAIL);
     rw_commit_c_reply_.clear_commit_timestamp();
+    rw_commit_c_reply_.clear_nonblock_timestamp();
 
     transport_->SendMessage(this, remote, rw_commit_c_reply_);
 }
@@ -730,7 +734,7 @@ void Server::HandleRWCommitParticipant(const TransportAddress &remote, proto::RW
     const Transaction transaction{msg.transaction()};
     const Timestamp nonblock_ts{msg.nonblock_timestamp()};
 
-    //Debug("[%lu] Participant for transaction", transaction_id);
+    Debug("[%lu] Participant for transaction", transaction_id);
 
     TransactionState s = transactions_.StartParticipantPrepare(transaction_id, coordinator, transaction, nonblock_ts);
     if (s == PREPARING) {
@@ -871,9 +875,10 @@ void Server::PrepareCallback(uint64_t transaction_id, int status, Timestamp time
     if (s == PREPARED) {
         int coordinator = transactions_.GetCoordinator(transaction_id);
         const Timestamp &prepare_ts = transactions_.GetPrepareTimestamp(transaction_id);
+        const Timestamp &nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
         // TODO: Handle timeout
         shard_clients_[coordinator]->PrepareOK(
-            transaction_id, shard_idx_, prepare_ts,
+            transaction_id, shard_idx_, prepare_ts, nonblock_ts,
             std::bind(&Server::PrepareOKCallback, this, transaction_id,
                       placeholders::_1, placeholders::_2),
             [](int, Timestamp) {}, PREPARE_TIMEOUT);
@@ -957,6 +962,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
 
     int participant_shard = msg.participant_shard();
     const Timestamp prepare_ts{msg.prepare_timestamp()};
+    const Timestamp nonblock_ts{msg.nonblock_timestamp()};
 
     //Debug("[%lu] Received Prepare OK", transaction_id);
 
@@ -974,7 +980,7 @@ void Server::HandlePrepareOK(const TransportAddress &remote, proto::PrepareOK &m
         reply->rids.insert({client_id, client_req_id, remote.clone()});
     }
 
-    TransactionState s = transactions_.CoordinatorReceivePrepareOK(transaction_id, participant_shard, prepare_ts);
+    TransactionState s = transactions_.CoordinatorReceivePrepareOK(transaction_id, participant_shard, prepare_ts, nonblock_ts);
     if (s == PREPARING) {
         //Debug("[%lu] Coordinator preparing", transaction_id);
 
@@ -1260,6 +1266,8 @@ void Server::SendAbortParticipants(uint64_t transaction_id, const std::unordered
 void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timestamp commit_ts) {
     //Debug("[%lu] Commiting", transaction_id);
 
+    const Timestamp nonblock_ts = transactions_.GetNonBlockTimestamp(transaction_id);
+
     // Commit writes
     const Transaction &transaction = transactions_.GetTransaction(transaction_id);
     for (auto &write : transaction.getWriteSet()) {
@@ -1274,7 +1282,7 @@ void Server::CoordinatorCommitTransaction(uint64_t transaction_id, const Timesta
     TransactionFinishResult fr = transactions_.Commit(transaction_id);
 
     // Reply to client
-    SendRWCommmitCoordinatorReplyOK(transaction_id, commit_ts);
+    SendRWCommmitCoordinatorReplyOK(transaction_id, commit_ts, nonblock_ts);
 
     // Reply to participants
     SendPrepareOKRepliesOK(transaction_id, commit_ts);
@@ -1396,7 +1404,7 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                                                                            participants, transaction, nonblock_ts);
                 for (int p : participants) {
                     if (p != coordinator) {
-                        s = transactions_.CoordinatorReceivePrepareOK(transaction_id, p, commit_ts);
+                        s = transactions_.CoordinatorReceivePrepareOK(transaction_id, p, commit_ts, nonblock_ts);
                     }
                 }
                 ASSERT(s == PREPARING);
@@ -1409,9 +1417,9 @@ void Server::ReplicaUpcall(opnum_t opnum, const string &op, string &response) {
                 //Debug("[%lu] Already prepared", transaction_id);
             }
 
-            uint64_t commit_wait_ms = tt_.TimeToWaitUntilMS(commit_ts.getTimestamp());
-            //Debug("[%lu] delaying commit by %lu ms", transaction_id, commit_wait_ms);
-            transport_->Timer(commit_wait_ms, std::bind(&Server::CoordinatorCommitTransaction, this, transaction_id, commit_ts));
+            uint64_t commit_wait_us = tt_.TimeToWaitUntilMicros(commit_ts.getTimestamp());
+            Debug("[%lu] delaying commit by %lu us", transaction_id, commit_wait_us);
+            transport_->TimerMicro(commit_wait_us, std::bind(&Server::CoordinatorCommitTransaction, this, transaction_id, commit_ts));
         } else {  // Participant commit
             //Debug("[%lu] Participant commit", transaction_id);
             if (transactions_.GetRWTransactionState(transaction_id) != COMMITTING) {
