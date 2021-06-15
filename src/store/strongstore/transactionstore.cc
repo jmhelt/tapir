@@ -2,15 +2,16 @@
 #include "store/strongstore/transactionstore.h"
 
 #include <algorithm>
-#include <chrono>
 
 namespace strongstore {
 
-TransactionStore::TransactionStore(int this_shard, Consistency c) : this_shard_{this_shard}, consistency_{c} {}
+TransactionStore::TransactionStore(int this_shard, Consistency c, const TrueTime &tt)
+    : this_shard_{this_shard}, consistency_{c}, tt_{tt} {}
 
 TransactionStore::~TransactionStore() {}
 
-void TransactionStore::PendingRWTransaction::StartGet(const TransportAddress &remote, const std::string &key, bool for_update) {
+void TransactionStore::PendingRWTransaction::StartGet(const TransportAddress &remote,
+                                                      const std::string &key, bool for_update) {
     if (!client_addr_) {
         client_addr_.reset(remote.clone());
     }
@@ -33,8 +34,9 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
     transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
     transaction_.set_start_time(transaction.start_time());
-    nonblock_ts_ = nonblock_ts;
     prepare_ts_ = std::max(prepare_ts_, start_ts);
+    Debug("Updating nonblock ts: %lu to %lu", nonblock_ts_.getTimestamp(), nonblock_ts.getTimestamp());
+    nonblock_ts_ = std::max(nonblock_ts_, nonblock_ts);
 
     if (coordinator_ == -1) {
         coordinator_ = coordinator;
@@ -68,6 +70,7 @@ void TransactionStore::PendingRWTransaction::StartParticipantPrepare(int coordin
 
     transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
+    Debug("Setting nonblock ts: %lu", nonblock_ts.getTimestamp());
     nonblock_ts_ = nonblock_ts;
     state_ = PREPARING;
 }
@@ -80,7 +83,9 @@ void TransactionStore::PendingRWTransaction::FinishParticipantPrepare() {
     state_ = PREPARED;
 }
 
-void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int coordinator, int participant, const Timestamp &prepare_ts) {
+void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int coordinator, int participant,
+                                                              const Timestamp &prepare_ts,
+                                                              const Timestamp &nonblock_ts) {
     if (coordinator_ == -1) {
         coordinator_ = coordinator;
     } else {
@@ -88,6 +93,8 @@ void TransactionStore::PendingRWTransaction::ReceivePrepareOK(int coordinator, i
     }
 
     prepare_ts_ = std::max(prepare_ts_, prepare_ts);
+    Debug("Updating nonblock ts: %lu to %lu", nonblock_ts_.getTimestamp(), nonblock_ts.getTimestamp());
+    nonblock_ts_ = std::max(nonblock_ts_, nonblock_ts);
     ok_participants_.insert(participant);
 
     std::size_t n = participants_.size();
@@ -327,12 +334,7 @@ void TransactionStore::PausePrepare(uint64_t transaction_id) {
     ASSERT(pt.wait_start() == 0);
 
     pt.set_state(PREPARE_WAIT);
-
-    auto now = std::chrono::high_resolution_clock::now();
-    long count = std::chrono::duration_cast<std::chrono::microseconds>(
-                     now.time_since_epoch())
-                     .count();
-    pt.set_wait_start(static_cast<uint64_t>(count));
+    pt.set_wait_start(tt_.Now().mid());
 }
 
 TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
@@ -344,12 +346,8 @@ TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     if (pt.state() == PREPARE_WAIT) {
         pt.set_state(PREPARING);
 
-        auto now = std::chrono::high_resolution_clock::now();
-        long count = std::chrono::duration_cast<std::chrono::microseconds>(
-                         now.time_since_epoch())
-                         .count();
-        uint64_t diff = static_cast<uint64_t>(count) - pt.wait_start();
-        pt.nonblock_ts().setTimestamp(pt.nonblock_ts().getTimestamp() + diff);
+        uint64_t diff = tt_.Now().mid() - pt.wait_start();
+        pt.advance_nonblock_ts(diff);
         pt.set_wait_start(0);
         Debug("[%lu] Advancing nonblock ts by %lu micros: %lu", transaction_id, diff, pt.nonblock_ts().getTimestamp());
     }
@@ -357,14 +355,16 @@ TransactionState TransactionStore::ContinuePrepare(uint64_t transaction_id) {
     return pt.state();
 }
 
-TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant, const Timestamp &prepare_ts) {
+TransactionState TransactionStore::CoordinatorReceivePrepareOK(uint64_t transaction_id, int participant,
+                                                               const Timestamp &prepare_ts,
+                                                               const Timestamp &nonblock_ts) {
     if (aborted_.count(transaction_id) > 0) {
         return ABORTED;
     }
 
     PendingRWTransaction &pt = pending_rw_[transaction_id];
     ASSERT(pt.state() == READING || pt.state() == WAIT_PARTICIPANTS);
-    pt.ReceivePrepareOK(this_shard_, participant, prepare_ts);
+    pt.ReceivePrepareOK(this_shard_, participant, prepare_ts, nonblock_ts);
 
     return pt.state();
 }

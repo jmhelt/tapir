@@ -54,13 +54,13 @@ class BufferClient : public ::BufferClient {
     void RWCommitCoordinator(uint64_t transaction_id,
                              const std::set<int> participants,
                              Timestamp &nonblock_timestamp,
-                             prepare_callback pcb,
-                             prepare_timeout_callback ptcb, uint32_t timeout);
+                             rw_coord_commit_callback ccb,
+                             rw_coord_commit_timeout_callback ctcb, uint32_t timeout);
 
     void RWCommitParticipant(uint64_t transaction_id, int coordinator_shard,
                              Timestamp &nonblock_timestamp,
-                             prepare_callback pcb,
-                             prepare_timeout_callback ptcb, uint32_t timeout);
+                             rw_part_commit_callback ccb,
+                             rw_part_commit_timeout_callback ctcb, uint32_t timeout);
 
     void ROCommit(uint64_t transaction_id, const std::vector<std::string> &keys,
                   const Timestamp &commit_timestamp,

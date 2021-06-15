@@ -184,7 +184,9 @@ class Server : public TransportReceiver,
     void HandleRWCommitCoordinator(const TransportAddress &remote,
                                    proto::RWCommitCoordinator &msg);
 
-    void SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id, const Timestamp &commit_ts);
+    void SendRWCommmitCoordinatorReplyOK(uint64_t transaction_id,
+                                         const Timestamp &commit_ts,
+                                         const Timestamp &nonblock_ts);
     void SendRWCommmitCoordinatorReplyFail(const TransportAddress &remote,
                                            uint64_t client_id,
                                            uint64_t client_req_id);
