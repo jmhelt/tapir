@@ -5,7 +5,9 @@
     ],
     [
       "client_key_selector",
-      "client_zipf_coefficient"
+      "client_zipf_coefficient",
+      "client_total",
+      "client_processes_per_client_node"
     ]
   ],
   "replication_protocol": "strong",
@@ -47,8 +49,12 @@
       "eu-west-1-2"
     ]
   ],
-  "client_total": 180,
-  "client_processes_per_client_node": 60,
+  "client_total": [
+    24
+  ],
+  "client_processes_per_client_node": [
+    8
+  ],
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0",
@@ -83,7 +89,7 @@
     "zipf"
   ],
   "client_zipf_coefficient": [
-    0.5
+    0.9
   ],
   "rw_num_ops_txn": 1,
   "server_load_time": 20,
@@ -95,16 +101,16 @@
   "client_message_timeout": 60000,
   "run_locally": false,
   "replication_protocol_settings": {
-    "message_transport_type": "udp"
+    "message_transport_type": "tcp"
   },
   "stats_merge_lists": [
     "txn_groups",
     "commit_branch"
   ],
-  "experiment_name": "jhelt-QV96657",
+  "experiment_name": "spanner-rss",
   "codebase_name": "rss",
-  "pin_client_processes": false,
-  "pin_server_processes": false,
+  "pin_client_processes": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  "pin_server_processes": [2],
   "client_debug_output": false,
   "server_debug_output": false,
   "client_debug_stats": false,
