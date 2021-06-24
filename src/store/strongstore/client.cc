@@ -63,8 +63,6 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       tt_{tt},
       consistency_{consistency},
       debug_stats_{debug_stats},
-      ping_replicas_{false},
-      first_{true},
       nb_time_alpha_{nb_time_alpha} {
     t_id = client_id_ << 26;
 
@@ -74,7 +72,6 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
     for (uint64_t i = 0; i < nshards_; i++) {
         ShardClient *shardclient = new ShardClient(config_, transport_, client_id_, i,
                                                    std::bind(&Client::HandleWound, this, std::placeholders::_1));
-        bclient.push_back(new BufferClient(shardclient));
         sclient.push_back(shardclient);
     }
 
@@ -92,10 +89,6 @@ Client::~Client() {
     if (debug_stats_) {
         Latency_Dump(&op_lat_);
         Latency_Dump(&commit_lat_);
-    }
-
-    for (auto b : bclient) {
-        delete b;
     }
 
     for (auto s : sclient) {
@@ -283,19 +276,12 @@ void Client::Begin(bool is_retry, begin_callback bcb,
     transport_->Timer(0, [this, bcb, btcb, timeout]() {
         state_ = EXECUTING;
 
-        if (ping_replicas_ && first_) {
-            for (uint64_t i = 0; i < nshards_; i++) {
-                sclient[i]->StartPings();
-            }
-            first_ = false;
-        }
-
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants_.clear();
 
         for (uint64_t i = 0; i < nshards_; i++) {
-            bclient[i]->Begin(t_id, start_time_);
+            sclient[i]->Begin(t_id, start_time_);
         }
         bcb(t_id);
     });
@@ -324,8 +310,7 @@ void Client::Get(const std::string &key, get_callback gcb,
         auto gcbLat = [this, gcb](int status, const std::string &key,
                                   const std::string &val,
                                   Timestamp ts) { gcb(status, key, val, ts); };
-        bclient[i]->Get(key, bclient[i]->start_timestamp(), gcbLat, gtcb,
-                        timeout);
+        sclient[i]->Get(t_id, key, gcbLat, gtcb, timeout);
     });
 }
 
@@ -352,8 +337,7 @@ void Client::GetForUpdate(const std::string &key, get_callback gcb,
         auto gcbLat = [this, gcb](int status, const std::string &key,
                                   const std::string &val,
                                   Timestamp ts) { gcb(status, key, val, ts); };
-        bclient[i]->GetForUpdate(key, bclient[i]->start_timestamp(), gcbLat, gtcb,
-                                 timeout);
+        sclient[i]->GetForUpdate(t_id, key, gcbLat, gtcb, timeout);
     });
 }
 
@@ -375,7 +359,7 @@ void Client::Put(const std::string &key, const std::string &value,
                                   const std::string &val1) {
             pcb(status1, key1, val1);
         };
-        bclient[i]->Put(key, value, pcbLat, ptcb, timeout);
+        sclient[i]->Put(t_id, key, value, pcbLat, ptcb, timeout);
     });
 }
 
@@ -396,14 +380,14 @@ void Client::Prepare(PendingRequest *req, uint32_t timeout) {
 
     for (auto p : participants_) {
         if (p == coordinator_shard) {
-            bclient[p]->RWCommitCoordinator(
+            sclient[p]->RWCommitCoordinator(
                 t_id, participants_, nonblock_timestamp,
                 std::bind(&Client::CommitCallback, this, req->id,
                           std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
                 [](int) {},
                 timeout);
         } else {
-            bclient[p]->RWCommitParticipant(
+            sclient[p]->RWCommitParticipant(
                 t_id, coordinator_shard, nonblock_timestamp,
                 [this, reqId = req->id](int status) {
                     Debug("[%lu] PREPARE callback status %d", t_id, status);
@@ -521,8 +505,9 @@ void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
     req->timeout = timeout;
 
     for (int p : participants_) {
-        bclient[p]->Abort(
-            std::bind(&Client::AbortCallback, this, req->id), []() {}, timeout);
+        auto cb = std::bind(&Client::AbortCallback, this, req->id);
+        sclient[p]->Abort(
+            t_id, cb, []() {}, timeout);
     }
 }
 
@@ -599,7 +584,7 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
 
     for (auto &s : sharded_keys) {
         // TODO: Handle timeout
-        bclient[s.first]->ROCommit(
+        sclient[s.first]->ROCommit(
             t_id, s.second, commit_ts, min_ts,
             std::bind(&Client::ROCommitCallback, this, t_id, req->id,
                       std::placeholders::_1, std::placeholders::_2,

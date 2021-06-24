@@ -51,7 +51,6 @@
 #include "store/strongstore/networkconfig.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
-#include "store/strongstore/strongbufferclient.h"
 #include "store/strongstore/viewfinder.h"
 
 namespace strongstore {
@@ -189,8 +188,7 @@ class Client : public ::Client {
     // Transport used by paxos client proxies.
     Transport *transport_;
 
-    // Buffering client for each shard.
-    std::vector<BufferClient *> bclient;
+    // Client for each shard.
     std::vector<ShardClient *> sclient;
 
     // Partitioner

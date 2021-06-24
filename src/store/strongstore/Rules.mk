@@ -2,7 +2,7 @@ d := $(dir $(lastword $(MAKEFILE_LIST)))
 
 SRCS += $(addprefix $(d), occstore.cc server.cc \
 					client.cc shardclient.cc replicaclient.cc \
-					strongbufferclient.cc networkconfig.cc \
+					networkconfig.cc \
 					waitdie.cc woundwait.cc locktable.cc \
 					preparedtransaction.cc viewfinder.cc transactionstore.cc)
 
@@ -24,6 +24,6 @@ OBJS-strong-store := $(LIB-udptransport) $(OBJS-vr-replica) \
 
 OBJS-strong-client := $(LIB-latency) $(OBJS-vr-client) $(LIB-udptransport) \
 	$(LIB-store-frontend) $(LIB-store-common) $(o)strong-proto.o $(o)preparedtransaction.o $(o)viewfinder.o \
-	$(o)networkconfig.o $(o)strongbufferclient.o $(o)shardclient.o $(o)client.o
+	$(o)networkconfig.o $(o)shardclient.o $(o)client.o
 
 include $(d)tests/Rules.mk

@@ -1,34 +1,3 @@
-// -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
-/***********************************************************************
- *
- * store/txnstore/shardclient.h:
- *   Single shard transactional client interface.
- *
- * Copyright 2015 Irene Zhang <iyzhang@cs.washington.edu>
- *                Naveen Kr. Sharma <naveenks@cs.washington.edu>
- *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- **********************************************************************/
-
 #include "store/strongstore/shardclient.h"
 
 #include "lib/configuration.h"
@@ -41,7 +10,7 @@ using namespace proto;
 ShardClient::ShardClient(const transport::Configuration &config,
                          Transport *transport, uint64_t client_id, int shard,
                          wound_callback wcb)
-    : PingInitiator(this, transport, 1),  // TODO: Assumes replica 0 is leader.
+    : last_req_id_{0},
       config_{config},
       transport_{transport},
       client_id_{client_id},
@@ -82,9 +51,6 @@ void ShardClient::ReceiveMessage(const TransportAddress &remote,
     } else if (type == abort_reply_.GetTypeName()) {
         abort_reply_.ParseFromString(data);
         HandleAbortReply(abort_reply_);
-    } else if (type == ping_.GetTypeName()) {
-        ping_.ParseFromString(data);
-        HandlePingResponse(ping_);
     } else if (type == wound_.GetTypeName()) {
         wound_.ParseFromString(data);
         HandleWound(wound_);
@@ -99,79 +65,83 @@ void ShardClient::HandleWound(const proto::Wound &msg) {
     wcb_(transaction_id);
 };
 
-bool ShardClient::SendPing(size_t replica, const PingMessage &ping) {
-    transport_->SendMessageToReplica(this, shard_idx_, replica_, ping);
-    return true;
-}
-
-uint64_t ShardClient::GetLatencyToLeader() {
-    uint64_t l = Done() && GetOrderedEstimates().size() > 0
-                     ? GetOrderedEstimates()[0]
-                     : 0;
-
-    return l;
-}
-
 /* Sends BEGIN to a single shard indexed by i. */
-void ShardClient::Begin(uint64_t transaction_id) {
-    Debug("[shard %i] BEGIN: %lu", shard_idx_, transaction_id);
+void ShardClient::Begin(uint64_t transaction_id, const Timestamp &start_time) {
+    Debug("[%lu] [shard %i] BEGIN", transaction_id, shard_idx_);
+
+    auto search = transactions_.find(transaction_id);
+    ASSERT(search == transactions_.end());
+
+    auto &t = transactions_[transaction_id];
+
+    t.set_start_time(start_time);
 }
 
-/* Returns the value corresponding to the supplied key. */
+bool ShardClient::CheckPriorReadsAndWrites(uint64_t transaction_id, const std::string &key, get_callback gcb) {
+    auto search = transactions_.find(transaction_id);
+    if (search == transactions_.end()) {
+        return false;
+    }
+
+    auto &txn = search->second;
+
+    // Read your own writes, check the write set first.
+    auto wsearch = txn.getWriteSet().find(key);
+    if (wsearch != txn.getWriteSet().end()) {
+        gcb(REPLY_OK, key, wsearch->second, Timestamp());
+        return true;
+    }
+
+    // Consistent reads, check the read set.
+    auto rssearch = read_sets_.find(transaction_id);
+    if (rssearch != read_sets_.end()) {
+        auto &read_set = rssearch->second;
+        auto rsearch = read_set.find(key);
+        if (rsearch != read_set.end()) {
+            gcb(REPLY_OK, key, rsearch->second, Timestamp());
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void ShardClient::Get(uint64_t transaction_id, const std::string &key,
                       get_callback gcb, get_timeout_callback gtcb,
                       uint32_t timeout) {
-    // Send the GET operation to appropriate shard.
-    Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
-
-    uint64_t reqId = lastReqId++;
-    PendingGet *pendingGet = new PendingGet(reqId);
-    pendingGets[reqId] = pendingGet;
-    pendingGet->key = key;
-    pendingGet->gcb = gcb;
-    pendingGet->gtcb = gtcb;
-
-    // TODO: Setup timeout
-    get_.Clear();
-    get_.mutable_rid()->set_client_id(client_id_);
-    get_.mutable_rid()->set_client_req_id(reqId);
-    get_.set_transaction_id(transaction_id);
-    get_.set_key(key);
-
-    transport_->SendMessageToReplica(this, shard_idx_, replica_, get_);
-}
-
-void ShardClient::Get(uint64_t transaction_id, const std::string &key,
-                      const Timestamp &timestamp, get_callback gcb,
-                      get_timeout_callback gtcb, uint32_t timeout) {
-    Get(transaction_id, key, timestamp, gcb, gtcb, timeout, false);
+    Get(transaction_id, key, gcb, gtcb, timeout, false);
 }
 
 void ShardClient::GetForUpdate(uint64_t transaction_id, const std::string &key,
-                               const Timestamp &timestamp, get_callback gcb,
-                               get_timeout_callback gtcb, uint32_t timeout) {
-    Get(transaction_id, key, timestamp, gcb, gtcb, timeout, true);
+                               get_callback gcb, get_timeout_callback gtcb,
+                               uint32_t timeout) {
+    Get(transaction_id, key, gcb, gtcb, timeout, true);
 }
 
 void ShardClient::Get(uint64_t transaction_id, const std::string &key,
-                      const Timestamp &timestamp, get_callback gcb,
-                      get_timeout_callback gtcb, uint32_t timeout, bool for_update) {
+                      get_callback gcb, get_timeout_callback gtcb,
+                      uint32_t timeout, bool for_update) {
     // Send the GET operation to appropriate shard.
     Debug("[shard %i] Sending GET [%s]", shard_idx_, key.c_str());
 
-    uint64_t reqId = lastReqId++;
-    PendingGet *pendingGet = new PendingGet(reqId);
-    pendingGets[reqId] = pendingGet;
+    uint64_t req_id = last_req_id_++;
+    PendingGet *pendingGet = new PendingGet(transaction_id, req_id);
+    pendingGets[req_id] = pendingGet;
     pendingGet->key = key;
     pendingGet->gcb = gcb;
     pendingGet->gtcb = gtcb;
 
+    auto search = transactions_.find(transaction_id);
+    ASSERT(search != transactions_.end());
+    auto &t = search->second;
+    auto &start_ts = t.start_time();
+
     // TODO: Setup timeout
     get_.Clear();
     get_.mutable_rid()->set_client_id(client_id_);
-    get_.mutable_rid()->set_client_req_id(reqId);
+    get_.mutable_rid()->set_client_req_id(req_id);
     get_.set_transaction_id(transaction_id);
-    timestamp.serialize(get_.mutable_timestamp());
+    start_ts.serialize(get_.mutable_timestamp());
     get_.set_key(key);
     get_.set_for_update(for_update);
 
@@ -189,13 +159,14 @@ void ShardClient::HandleGetReply(const proto::GetReply &reply) {
     }
 
     PendingGet *req = itr->second;
+    uint64_t transaction_id = req->transaction_id;
     get_callback gcb = req->gcb;
     std::string key = req->key;
     pendingGets.erase(itr);
     delete req;
 
-    Debug("[shard %i] Received GET reply: %s %d", shard_idx_, key.c_str(),
-          status);
+    Debug("[%lu] [shard %i] Received GET reply: %s %d",
+          transaction_id, shard_idx_, key.c_str(), status);
 
     std::string val;
     Timestamp ts;
@@ -204,13 +175,23 @@ void ShardClient::HandleGetReply(const proto::GetReply &reply) {
         ts = Timestamp(reply.timestamp());
     }
 
+    Debug("[%lu] Added %lu.%lu to read set.", transaction_id, ts.getTimestamp(), ts.getID());
+    transactions_[transaction_id].addReadSet(key, ts);
+    read_sets_[transaction_id][key] = val;
+
     gcb(status, key, val, ts);
 }
 
-void ShardClient::Put(uint64_t transaction_id, const std::string &key,
-                      const std::string &value, put_callback pcb,
-                      put_timeout_callback ptcb, uint32_t timeout) {
-    Panic("Unimplemented PUT");
+void ShardClient::Put(uint64_t transaction_id, const std::string &key, const std::string &value,
+                      put_callback pcb, put_timeout_callback ptcb,
+                      uint32_t timeout) {
+    auto search = transactions_.find(transaction_id);
+    ASSERT(search != transactions_.end());
+
+    auto &t = search->second;
+    t.addWriteSet(key, value);
+
+    pcb(REPLY_OK, key, value);
 }
 
 void ShardClient::ROCommit(uint64_t transaction_id,
@@ -220,11 +201,11 @@ void ShardClient::ROCommit(uint64_t transaction_id,
                            ro_commit_callback ccb,
                            ro_commit_slow_callback cscb,
                            ro_commit_timeout_callback ctcb, uint32_t timeout) {
-    Debug("[shard %i] Sending ROCommit [%lu]", shard_idx_, transaction_id);
+    Debug("[%lu] [shard %i] Sending ROCommit", transaction_id, shard_idx_);
 
-    uint64_t reqId = lastReqId++;
-    PendingROCommit *pendingROCommit = new PendingROCommit(reqId);
-    pendingROCommits[reqId] = pendingROCommit;
+    uint64_t req_id = last_req_id_++;
+    PendingROCommit *pendingROCommit = new PendingROCommit(transaction_id, req_id);
+    pendingROCommits[req_id] = pendingROCommit;
     pendingROCommit->ccb = ccb;
     pendingROCommit->cscb = cscb;
     pendingROCommit->ctcb = ctcb;
@@ -232,7 +213,7 @@ void ShardClient::ROCommit(uint64_t transaction_id,
 
     // TODO: Setup timeout
     ro_commit_.mutable_rid()->set_client_id(client_id_);
-    ro_commit_.mutable_rid()->set_client_req_id(reqId);
+    ro_commit_.mutable_rid()->set_client_req_id(req_id);
     ro_commit_.set_transaction_id(transaction_id);
     commit_timestamp.serialize(ro_commit_.mutable_commit_timestamp());
     min_read_timestamp.serialize(ro_commit_.mutable_min_timestamp());
@@ -307,24 +288,28 @@ void ShardClient::HandleROCommitReply(const proto::ROCommitReply &reply) {
 }
 
 void ShardClient::RWCommitCoordinator(
-    uint64_t transaction_id, const Transaction &transaction,
+    uint64_t transaction_id,
     const std::set<int> participants, Timestamp &nonblock_timestamp,
     rw_coord_commit_callback ccb, rw_coord_commit_timeout_callback ctcb, uint32_t timeout) {
-    Debug("[shard %i] Sending RWCommitCoordinator [%lu]", shard_idx_,
-          transaction_id);
+    Debug("[%lu] [shard %i] Sending RWCommitCoordinator", transaction_id, shard_idx_);
 
-    uint64_t reqId = lastReqId++;
-    PendingRWCoordCommit *pendingCommit = new PendingRWCoordCommit(reqId);
-    pendingRWCoordCommits[reqId] = pendingCommit;
+    auto search = transactions_.find(transaction_id);
+    ASSERT(search != transactions_.end());
+
+    const auto &t = search->second;
+
+    uint64_t req_id = last_req_id_++;
+    PendingRWCoordCommit *pendingCommit = new PendingRWCoordCommit(transaction_id, req_id);
+    pendingRWCoordCommits[req_id] = pendingCommit;
     pendingCommit->ccb = ccb;
     pendingCommit->ctcb = ctcb;
 
     // TODO: Setup timeout
     rw_commit_c_.Clear();
     rw_commit_c_.mutable_rid()->set_client_id(client_id_);
-    rw_commit_c_.mutable_rid()->set_client_req_id(reqId);
+    rw_commit_c_.mutable_rid()->set_client_req_id(req_id);
     rw_commit_c_.set_transaction_id(transaction_id);
-    transaction.serialize(rw_commit_c_.mutable_transaction());
+    t.serialize(rw_commit_c_.mutable_transaction());
     nonblock_timestamp.serialize((rw_commit_c_.mutable_nonblock_timestamp()));
 
     for (int p : participants) {
@@ -334,8 +319,7 @@ void ShardClient::RWCommitCoordinator(
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_c_);
 }
 
-void ShardClient::HandleRWCommitCoordinatorReply(
-    const proto::RWCommitCoordinatorReply &reply) {
+void ShardClient::HandleRWCommitCoordinatorReply(const proto::RWCommitCoordinatorReply &reply) {
     uint64_t req_id = reply.rid().client_req_id();
 
     auto itr = pendingRWCoordCommits.find(req_id);
@@ -345,42 +329,49 @@ void ShardClient::HandleRWCommitCoordinatorReply(
     }
 
     PendingRWCoordCommit *req = itr->second;
+    uint64_t transaction_id = req->transaction_id;
     rw_coord_commit_callback ccb = req->ccb;
     pendingRWCoordCommits.erase(itr);
     delete req;
+
+    transactions_.erase(transaction_id);
+    read_sets_.erase(transaction_id);
 
     Debug("[shard %i] COMMIT timestamp %lu.%lu", shard_idx_,
           reply.commit_timestamp().timestamp(), reply.commit_timestamp().id());
     ccb(reply.status(), Timestamp(reply.commit_timestamp()), Timestamp(reply.nonblock_timestamp()));
 }
 
-void ShardClient::RWCommitParticipant(
-    uint64_t transaction_id, const Transaction &transaction,
-    int coordinator_shard, Timestamp &nonblock_timestamp, rw_part_commit_callback ccb,
-    rw_part_commit_timeout_callback ctcb, uint32_t timeout) {
-    Debug("[shard %i] Sending RWCommitParticipant [%lu]", shard_idx_,
-          transaction_id);
+void ShardClient::RWCommitParticipant(uint64_t transaction_id,
+                                      int coordinator_shard, Timestamp &nonblock_timestamp,
+                                      rw_part_commit_callback ccb, rw_part_commit_timeout_callback ctcb,
+                                      uint32_t timeout) {
+    Debug("[%lu] [shard %i] Sending RWCommitParticipant", transaction_id, shard_idx_);
 
-    uint64_t reqId = lastReqId++;
-    PendingRWParticipantCommit *pendingCommit = new PendingRWParticipantCommit(reqId);
-    pendingRWParticipantCommits[reqId] = pendingCommit;
+    auto search = transactions_.find(transaction_id);
+    ASSERT(search != transactions_.end());
+
+    const auto &t = search->second;
+
+    uint64_t req_id = last_req_id_++;
+    PendingRWParticipantCommit *pendingCommit = new PendingRWParticipantCommit(transaction_id, req_id);
+    pendingRWParticipantCommits[req_id] = pendingCommit;
     pendingCommit->ccb = ccb;
     pendingCommit->ctcb = ctcb;
 
     // TODO: Setup timeout
     rw_commit_p_.Clear();
     rw_commit_p_.mutable_rid()->set_client_id(client_id_);
-    rw_commit_p_.mutable_rid()->set_client_req_id(reqId);
+    rw_commit_p_.mutable_rid()->set_client_req_id(req_id);
     rw_commit_p_.set_transaction_id(transaction_id);
-    transaction.serialize(rw_commit_p_.mutable_transaction());
+    t.serialize(rw_commit_p_.mutable_transaction());
     rw_commit_p_.set_coordinator_shard(coordinator_shard);
     nonblock_timestamp.serialize((rw_commit_p_.mutable_nonblock_timestamp()));
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, rw_commit_p_);
 }
 
-void ShardClient::HandleRWCommitParticipantReply(
-    const proto::RWCommitParticipantReply &reply) {
+void ShardClient::HandleRWCommitParticipantReply(const proto::RWCommitParticipantReply &reply) {
     Debug("[shard %i] Received RWCommitParticipant", shard_idx_);
     uint64_t req_id = reply.rid().client_req_id();
 
@@ -391,9 +382,13 @@ void ShardClient::HandleRWCommitParticipantReply(
     }
 
     PendingRWParticipantCommit *req = itr->second;
+    uint64_t transaction_id = req->transaction_id;
     rw_part_commit_callback ccb = req->ccb;
     pendingRWParticipantCommits.erase(itr);
     delete req;
+
+    transactions_.erase(transaction_id);
+    read_sets_.erase(transaction_id);
 
     ccb(reply.status());
 }
@@ -404,15 +399,15 @@ void ShardClient::PrepareOK(uint64_t transaction_id, int participant_shard,
                             prepare_timeout_callback ptcb, uint32_t timeout) {
     Debug("[shard %i] Sending PrepareOK [%lu]", shard_idx_, transaction_id);
 
-    uint64_t reqId = lastReqId++;
-    PendingPrepareOK *pendingPrepareOK = new PendingPrepareOK(reqId);
-    pendingPrepareOKs[reqId] = pendingPrepareOK;
+    uint64_t req_id = last_req_id_++;
+    PendingPrepareOK *pendingPrepareOK = new PendingPrepareOK(transaction_id, req_id);
+    pendingPrepareOKs[req_id] = pendingPrepareOK;
     pendingPrepareOK->pcb = pcb;
     pendingPrepareOK->ptcb = ptcb;
 
     // TODO: Setup timeout
     prepare_ok_.mutable_rid()->set_client_id(client_id_);
-    prepare_ok_.mutable_rid()->set_client_req_id(reqId);
+    prepare_ok_.mutable_rid()->set_client_req_id(req_id);
     prepare_ok_.set_transaction_id(transaction_id);
     prepare_ok_.set_participant_shard(participant_shard);
     prepare_timestamp.serialize(prepare_ok_.mutable_prepare_timestamp());
@@ -448,15 +443,15 @@ void ShardClient::PrepareAbort(uint64_t transaction_id, int participant_shard,
                                uint32_t timeout) {
     Debug("[shard %i] Sending PrepareAbort [%lu]", shard_idx_, transaction_id);
 
-    uint64_t reqId = lastReqId++;
-    PendingPrepareAbort *pendingPrepareAbort = new PendingPrepareAbort(reqId);
-    pendingPrepareAborts[reqId] = pendingPrepareAbort;
+    uint64_t req_id = last_req_id_++;
+    PendingPrepareAbort *pendingPrepareAbort = new PendingPrepareAbort(transaction_id, req_id);
+    pendingPrepareAborts[req_id] = pendingPrepareAbort;
     pendingPrepareAbort->pcb = pcb;
     pendingPrepareAbort->ptcb = ptcb;
 
     // TODO: Setup timeout
     prepare_abort_.mutable_rid()->set_client_id(client_id_);
-    prepare_abort_.mutable_rid()->set_client_req_id(reqId);
+    prepare_abort_.mutable_rid()->set_client_req_id(req_id);
     prepare_abort_.set_transaction_id(transaction_id);
     prepare_abort_.set_participant_shard(participant_shard);
 
@@ -489,16 +484,16 @@ void ShardClient::Abort(uint64_t transaction_id, const Transaction &transaction,
                         uint32_t timeout) {
     Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
 
-    uint64_t reqId = lastReqId++;
-    PendingAbort *pendingAbort = new PendingAbort(reqId);
-    pendingAborts[reqId] = pendingAbort;
+    uint64_t req_id = last_req_id_++;
+    PendingAbort *pendingAbort = new PendingAbort(transaction_id, req_id);
+    pendingAborts[req_id] = pendingAbort;
     pendingAbort->acb = acb;
     pendingAbort->atcb = atcb;
 
     // TODO: Setup timeout
     abort_.Clear();
     abort_.mutable_rid()->set_client_id(client_id_);
-    abort_.mutable_rid()->set_client_req_id(reqId);
+    abort_.mutable_rid()->set_client_req_id(req_id);
     abort_.set_transaction_id(transaction_id);
     transaction.serialize(abort_.mutable_transaction());
 
@@ -509,16 +504,16 @@ void ShardClient::Abort(uint64_t transaction_id, abort_callback acb,
                         abort_timeout_callback atcb, uint32_t timeout) {
     Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
 
-    uint64_t reqId = lastReqId++;
-    PendingAbort *pendingAbort = new PendingAbort(reqId);
-    pendingAborts[reqId] = pendingAbort;
+    uint64_t req_id = last_req_id_++;
+    PendingAbort *pendingAbort = new PendingAbort(transaction_id, req_id);
+    pendingAborts[req_id] = pendingAbort;
     pendingAbort->acb = acb;
     pendingAbort->atcb = atcb;
 
     // TODO: Setup timeout
     abort_.Clear();
     abort_.mutable_rid()->set_client_id(client_id_);
-    abort_.mutable_rid()->set_client_req_id(reqId);
+    abort_.mutable_rid()->set_client_req_id(req_id);
     abort_.set_transaction_id(transaction_id);
 
     transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
@@ -549,18 +544,6 @@ void ShardClient::HandleAbortReply(const proto::AbortReply &reply) {
     delete req;
 
     acb();
-}
-
-void ShardClient::Prepare(uint64_t transaction_id, const Transaction &txn,
-                          const Timestamp &timestamp, prepare_callback pcb,
-                          prepare_timeout_callback ptcb, uint32_t timeout) {
-    Panic("Unimplemented PREPARE");
-}
-
-void ShardClient::Commit(uint64_t transaction_id, const Transaction &txn,
-                         const Timestamp &timestamp, commit_callback ccb,
-                         commit_timeout_callback ctcb, uint32_t timeout) {
-    Debug("Unimplemented COMMIT");
 }
 
 }  // namespace strongstore
