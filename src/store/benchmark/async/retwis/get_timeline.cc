@@ -1,24 +1,31 @@
 #include "store/benchmark/async/retwis/get_timeline.h"
 
+#include <unordered_set>
+
 namespace retwis {
 
-GetTimeline::GetTimeline(KeySelector *keySelector, std::mt19937 &rand,
-                         uint32_t timeout)
-    : RetwisTransaction(keySelector, 1 + rand() % 10, rand, timeout), keys_{} {}
+GetTimeline::GetTimeline(KeySelector *keySelector, std::mt19937 &rand)
+    : RetwisTransaction(keySelector, 1 + rand() % 10, rand) {
+}
 
-GetTimeline::~GetTimeline() {}
+GetTimeline::~GetTimeline() {
+}
 
-transaction_status_t GetTimeline::Execute(SyncClient &client, bool is_retry) {
-    (void)is_retry;
-    Debug("GET_TIMELINE %lu", GetNumKeys());
+Operation GetTimeline::GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
+                                        const ReadValueMap &readValues) {
+    Debug("GET_TIMELINE %lu %lu %lu", GetNumKeys(), outstandingOpCount,
+          finishedOpCount);
 
-    keys_.clear();
-    for (std::size_t i = 0; i < GetNumKeys(); i++) {
-        keys_.insert(GetKey(i));
+    if (outstandingOpCount == 0) {
+        std::unordered_set<std::string> keys;
+        for (std::size_t i = 0; i < GetNumKeys(); i++) {
+            keys.insert(GetKey(i));
+        }
+
+        return ROCommit(std::move(keys));
+    } else {
+        return Wait();
     }
-
-    Debug("RO COMMIT");
-    return client.ROCommit(keys_, timeout);
 }
 
 }  // namespace retwis

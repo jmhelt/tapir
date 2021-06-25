@@ -44,8 +44,6 @@ typedef std::function<void()> commit_timeout_callback;
 typedef std::function<void()> abort_callback;
 typedef std::function<void()> abort_timeout_callback;
 
-class Stats;
-
 class Client {
    public:
     Client() { _Latency_Init(&clientLat, "client_lat"); }

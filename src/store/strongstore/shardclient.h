@@ -115,8 +115,6 @@ class ShardClient : public TransportReceiver {
                       prepare_callback pcb, prepare_timeout_callback ptcb,
                       uint32_t timeout);
 
-    void Abort(uint64_t id, const Transaction &txn, abort_callback acb,
-               abort_timeout_callback atcb, uint32_t timeout);
     void Abort(uint64_t transaction_id, abort_callback acb,
                abort_timeout_callback atcb, uint32_t timeout);
 

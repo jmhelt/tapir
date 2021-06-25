@@ -4,17 +4,17 @@
 #include <functional>
 
 #include "store/benchmark/async/retwis/retwis_transaction.h"
-#include "store/common/frontend/sync_client.h"
 
 namespace retwis {
 
 class AddUser : public RetwisTransaction {
    public:
-    AddUser(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
+    AddUser(KeySelector *keySelector, std::mt19937 &rand);
     virtual ~AddUser();
 
-    virtual transaction_status_t Execute(SyncClient &client,
-                                         bool is_retry) override;
+   protected:
+    Operation GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
+                               const ReadValueMap &readValues);
 };
 
 }  // namespace retwis

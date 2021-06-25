@@ -5,15 +5,14 @@
 #include <vector>
 
 #include "store/benchmark/async/common/key_selector.h"
+#include "store/common/frontend/async_transaction.h"
 #include "store/common/frontend/client.h"
-#include "store/common/frontend/sync_transaction.h"
 
 namespace retwis {
 
-class RetwisTransaction : public SyncTransaction {
+class RetwisTransaction : public AsyncTransaction {
    public:
-    RetwisTransaction(KeySelector *keySelector, int numKeys, std::mt19937 &rand,
-                      uint32_t timeout);
+    RetwisTransaction(KeySelector *keySelector, int numKeys, std::mt19937 &rand);
     virtual ~RetwisTransaction();
 
    protected:

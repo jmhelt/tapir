@@ -479,30 +479,9 @@ void ShardClient::HandlePrepareAbortReply(
     pcb(reply.status(), Timestamp());
 }
 
-void ShardClient::Abort(uint64_t transaction_id, const Transaction &transaction,
-                        abort_callback acb, abort_timeout_callback atcb,
-                        uint32_t timeout) {
-    Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
-
-    uint64_t req_id = last_req_id_++;
-    PendingAbort *pendingAbort = new PendingAbort(transaction_id, req_id);
-    pendingAborts[req_id] = pendingAbort;
-    pendingAbort->acb = acb;
-    pendingAbort->atcb = atcb;
-
-    // TODO: Setup timeout
-    abort_.Clear();
-    abort_.mutable_rid()->set_client_id(client_id_);
-    abort_.mutable_rid()->set_client_req_id(req_id);
-    abort_.set_transaction_id(transaction_id);
-    transaction.serialize(abort_.mutable_transaction());
-
-    transport_->SendMessageToReplica(this, shard_idx_, replica_, abort_);
-}
-
 void ShardClient::Abort(uint64_t transaction_id, abort_callback acb,
                         abort_timeout_callback atcb, uint32_t timeout) {
-    Debug("[shard %i] Sending Abort [%lu]", shard_idx_, transaction_id);
+    Debug("[%lu] [shard %i] Sending Abort", transaction_id, shard_idx_);
 
     uint64_t req_id = last_req_id_++;
     PendingAbort *pendingAbort = new PendingAbort(transaction_id, req_id);
@@ -539,9 +518,15 @@ void ShardClient::HandleAbortReply(const proto::AbortReply &reply) {
     }
 
     PendingAbort *req = itr->second;
+    uint64_t transaction_id = req->transaction_id;
     abort_callback acb = req->acb;
     pendingAborts.erase(itr);
     delete req;
+
+    if (reply.status() == REPLY_OK) {
+        transactions_.erase(transaction_id);
+        read_sets_.erase(transaction_id);
+    }
 
     acb();
 }

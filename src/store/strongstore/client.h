@@ -1,33 +1,3 @@
-// -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
-/***********************************************************************
- *
- * store/strongstore/client.h:
- *   Transactional client interface.
- *
- * Copyright 2015 Irene Zhang  <iyzhang@cs.washington.edu>
- *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- **********************************************************************/
-
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
 
@@ -111,12 +81,7 @@ class Client : public ::Client {
         PendingRequest(uint64_t id, uint64_t txnId)
             : id(id),
               txnId(txnId),
-              outstandingPrepares(0),
-              commitTries(0),
-              maxRepliedTs(0UL),
-              prepareStatus(REPLY_OK),
-              callbackInvoked(false),
-              timeout(0UL) {}
+              outstandingPrepares(0) {}
 
         ~PendingRequest() {}
 
@@ -127,11 +92,6 @@ class Client : public ::Client {
         uint64_t id;
         uint64_t txnId;
         int outstandingPrepares;
-        int commitTries;
-        uint64_t maxRepliedTs;
-        int prepareStatus;
-        bool callbackInvoked;
-        uint32_t timeout;
     };
 
     // local Prepare function
@@ -174,7 +134,7 @@ class Client : public ::Client {
     uint64_t client_id_;
 
     // Ongoing transaction ID.
-    uint64_t t_id;
+    uint64_t transaction_id_;
 
     // Ongoing transaction start time
     Timestamp start_time_;
@@ -189,17 +149,16 @@ class Client : public ::Client {
     Transport *transport_;
 
     // Client for each shard.
-    std::vector<ShardClient *> sclient;
+    std::vector<ShardClient *> sclients_;
 
     // Partitioner
-    Partitioner *part;
+    Partitioner *part_;
 
     // TrueTime server.
     TrueTime &tt_;
 
     uint64_t lastReqId;
     std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
-    std::unordered_map<std::string, uint32_t> statInts;
 
     Latency_t op_lat_;
     Latency_t commit_lat_;
@@ -207,8 +166,6 @@ class Client : public ::Client {
     Consistency consistency_;
 
     bool debug_stats_;
-    bool ping_replicas_;
-    bool first_;
 
     double nb_time_alpha_;
 };

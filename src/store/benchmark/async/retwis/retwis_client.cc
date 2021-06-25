@@ -9,38 +9,40 @@
 
 namespace retwis {
 
-RetwisClient::RetwisClient(KeySelector *keySelector, SyncClient &client,
-                           Transport &transport, uint64_t seed, int numRequests,
-                           int expDuration, uint64_t delay, int warmupSec,
-                           int cooldownSec, int tputInterval,
-                           uint32_t abortBackoff, bool retryAborted,
-                           uint32_t maxBackoff, uint32_t maxAttempts,
-                           uint32_t timeout, const std::string &latencyFilename)
-    : SyncTransactionBenchClient(
-          client, transport, seed, numRequests, expDuration, delay, warmupSec,
-          cooldownSec, tputInterval, abortBackoff, retryAborted, maxBackoff,
-          maxAttempts, timeout, latencyFilename),
-      keySelector(keySelector) {}
+RetwisClient::RetwisClient(KeySelector *keySelector, AsyncClient &client,
+                           Transport &transport, uint64_t id, int numRequests, int expDuration,
+                           uint64_t delay,
+                           int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,
+                           bool retryAborted, uint32_t maxBackoff, uint32_t maxAttempts, const std::string &latencyFilename)
+    : AsyncTransactionBenchClient(&client, transport, id, numRequests,
+                                  expDuration,
+                                  delay, warmupSec, cooldownSec, tputInterval, abortBackoff,
+                                  retryAborted, maxBackoff, maxAttempts, latencyFilename),
+      keySelector(keySelector) {
+}
 
-RetwisClient::~RetwisClient() {}
+RetwisClient::~RetwisClient() {
+}
 
-SyncTransaction *RetwisClient::GetNextTransaction() {
+AsyncTransaction *RetwisClient::GetNextTransaction() {
     int ttype = GetRand()() % 100;
     if (ttype < 5) {
         lastOp = "add_user";
-        return new AddUser(keySelector, GetRand(), GetTimeout());
+        return new AddUser(keySelector, GetRand());
     } else if (ttype < 20) {
         lastOp = "follow";
-        return new Follow(keySelector, GetRand(), GetTimeout());
+        return new Follow(keySelector, GetRand());
     } else if (ttype < 50) {
         lastOp = "post_tweet";
-        return new PostTweet(keySelector, GetRand(), GetTimeout());
+        return new PostTweet(keySelector, GetRand());
     } else {
         lastOp = "get_timeline";
-        return new GetTimeline(keySelector, GetRand(), GetTimeout());
+        return new GetTimeline(keySelector, GetRand());
     }
 }
 
-std::string RetwisClient::GetLastOp() const { return lastOp; }
+std::string RetwisClient::GetLastOp() const {
+    return lastOp;
+}
 
-}  // namespace retwis
+}  //namespace retwis

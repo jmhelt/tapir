@@ -251,7 +251,7 @@
   "plot_tput_lat_y_label": "Latency (ms)",
   "input_latency_scale": 1000000000,
   "output_latency_scale": 1000,
-  "src_commit_hash": "spanner",
+  "src_commit_hash": "open-loop",
   "stats_file_name": "stats.json",
   "base_local_exp_directory": "/home/jhelt/git/rss/tapir/experiments/results",
   "base_mounted_fs_path": "/mnt/extra",

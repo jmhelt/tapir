@@ -2,26 +2,28 @@
 
 namespace retwis {
 
-Follow::Follow(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout)
-    : RetwisTransaction(keySelector, 2, rand, timeout) {}
+Follow::Follow(KeySelector *keySelector, std::mt19937 &rand) : RetwisTransaction(keySelector, 2, rand) {
+}
 
-Follow::~Follow() {}
+Follow::~Follow() {
+}
 
-transaction_status_t Follow::Execute(SyncClient &client, bool is_retry) {
-    Debug("FOLLOW");
-    client.Begin(is_retry, timeout);
-
-    std::string value;
-    for (int i = 0; i < 2; i++) {
-        if (client.GetForUpdate(GetKey(i), value, timeout)) {
-            client.Abort(timeout);
-            return ABORTED_SYSTEM;
-        }
-        client.Put(GetKey(i), GetKey(i), timeout);
+Operation Follow::GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
+                                   const ReadValueMap &readValues) {
+    Debug("FOLLOW %lu %lu", outstandingOpCount, finishedOpCount);
+    if (outstandingOpCount == 0) {
+        return Get(GetKey(0));
+    } else if (outstandingOpCount == 1) {
+        return Put(GetKey(0), GetKey(0));
+    } else if (outstandingOpCount == 2) {
+        return Get(GetKey(1));
+    } else if (outstandingOpCount == 3) {
+        return Put(GetKey(1), GetKey(1));
+    } else if (outstandingOpCount == finishedOpCount) {
+        return Commit();
+    } else {
+        return Wait();
     }
-
-    Debug("COMMIT");
-    return client.Commit(timeout);
 }
 
 }  // namespace retwis
