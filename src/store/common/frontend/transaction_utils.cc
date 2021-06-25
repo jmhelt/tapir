@@ -8,6 +8,10 @@ Operation Get(const std::string &key) {
     return Operation{GET, key, ""};
 }
 
+Operation GetForUpdate(const std::string &key) {
+    return Operation{GET_FOR_UPDATE, key, ""};
+}
+
 Operation Put(const std::string &key,
               const std::string &value) {
     return Operation{PUT, key, value};

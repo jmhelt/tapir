@@ -14,7 +14,7 @@ Operation PostTweet::GetNextOperation(size_t outstandingOpCount, size_t finished
     if (outstandingOpCount < 6) {
         int k = outstandingOpCount / 2;
         if (outstandingOpCount % 2 == 0) {
-            return Get(GetKey(k));
+            return GetForUpdate(GetKey(k));
         } else {
             return Put(GetKey(k), GetKey(k));
         }

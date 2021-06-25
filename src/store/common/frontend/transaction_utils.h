@@ -7,6 +7,7 @@
 
 enum OperationType {
     GET = 0,
+    GET_FOR_UPDATE,
     PUT,
     COMMIT,
     ABORT,
@@ -24,6 +25,8 @@ struct Operation {
 Operation Wait();
 
 Operation Get(const std::string &key);
+
+Operation GetForUpdate(const std::string &key);
 
 Operation Put(const std::string &key,
               const std::string &value);

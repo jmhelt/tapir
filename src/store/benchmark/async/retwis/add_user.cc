@@ -12,7 +12,7 @@ Operation AddUser::GetNextOperation(size_t outstandingOpCount, size_t finishedOp
                                     const ReadValueMap &readValues) {
     Debug("ADD_USER %lu %lu", outstandingOpCount, finishedOpCount);
     if (outstandingOpCount == 0) {
-        return Get(GetKey(0));
+        return GetForUpdate(GetKey(0));
     } else if (outstandingOpCount < 4) {
         return Put(GetKey(outstandingOpCount - 1), GetKey(outstandingOpCount - 1));
     } else if (outstandingOpCount == finishedOpCount) {
