@@ -21,7 +21,6 @@ class AsyncTransactionBenchClient : public BenchmarkClient {
 
    protected:
     virtual AsyncTransaction *GetNextTransaction() = 0;
-    virtual ::context::AsyncTransaction *GetNextContextTransaction() { return nullptr; }
     virtual void SendNext();
 
     void ExecuteCallback(transaction_status_t result, const ReadValueMap &readValues);
@@ -34,7 +33,6 @@ class AsyncTransactionBenchClient : public BenchmarkClient {
     bool retryAborted;
     int64_t maxAttempts;
     AsyncTransaction *currTxn;
-    ::context::AsyncTransaction *context_txn;
     uint64_t currTxnAttempts;
 };
 

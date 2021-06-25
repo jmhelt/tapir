@@ -2,8 +2,8 @@
 
 namespace retwis {
 
-PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand) : RetwisTransaction(keySelector, 5, rand) {
-}
+PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand)
+    : RetwisTransaction(keySelector, 5, rand, "post_tweet") {}
 
 PostTweet::~PostTweet() {
 }

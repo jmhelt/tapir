@@ -25,22 +25,8 @@ class AsyncTransaction {
     virtual Operation GetNextOperation(size_t outstandingOpCount,
                                        size_t finishedOpCount,
                                        const ReadValueMap &readValues) = 0;
+
+    virtual const std::string &GetTransactionType() = 0;
 };
-
-namespace context {
-
-typedef std::function<void(transaction_status_t, const ReadValueMap &)>
-    execute_callback;
-
-class AsyncTransaction {
-   public:
-    AsyncTransaction() {}
-    virtual ~AsyncTransaction() {}
-
-    virtual void Execute(Client *client, commit_callback ccb,
-                         uint32_t timeout) = 0;
-};
-
-}  // namespace context
 
 #endif

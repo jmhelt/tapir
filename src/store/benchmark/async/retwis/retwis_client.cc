@@ -14,10 +14,10 @@ RetwisClient::RetwisClient(KeySelector *keySelector, AsyncClient &client,
                            uint64_t delay,
                            int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,
                            bool retryAborted, uint32_t maxBackoff, uint32_t maxAttempts, const std::string &latencyFilename)
-    : AsyncTransactionBenchClient(&client, transport, id, numRequests,
-                                  expDuration,
-                                  delay, warmupSec, cooldownSec, tputInterval, abortBackoff,
-                                  retryAborted, maxBackoff, maxAttempts, latencyFilename),
+    : OpenBenchmarkClient(client, transport, id, numRequests,
+                          expDuration,
+                          warmupSec, cooldownSec, abortBackoff,
+                          retryAborted, maxBackoff, maxAttempts, latencyFilename),
       keySelector(keySelector) {
 }
 
@@ -39,10 +39,6 @@ AsyncTransaction *RetwisClient::GetNextTransaction() {
         lastOp = "get_timeline";
         return new GetTimeline(keySelector, GetRand());
     }
-}
-
-std::string RetwisClient::GetLastOp() const {
-    return lastOp;
 }
 
 }  //namespace retwis

@@ -19,10 +19,10 @@
 #include "lib/latency.h"
 #include "lib/tcptransport.h"
 #include "lib/timeval.h"
-#include "store/benchmark/async/bench_client.h"
 #include "store/benchmark/async/common/key_selector.h"
 #include "store/benchmark/async/common/uniform_key_selector.h"
 #include "store/benchmark/async/common/zipf_key_selector.h"
+#include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_client.h"
 #include "store/benchmark/async/sync_transaction_bench_client.h"
 #include "store/common/frontend/async_adapter_client.h"
@@ -324,7 +324,7 @@ DEFINE_LATENCY(op);
 
 std::vector<AsyncClient *> asyncClients;
 std::vector<Client *> clients;
-std::vector<BenchmarkClient *> benchClients;
+std::vector<OpenBenchmarkClient *> benchClients;
 std::vector<std::thread *> threads;
 Transport *tport;
 Partitioner *part;
@@ -630,7 +630,7 @@ int main(int argc, char **argv) {
         }
 
         uint32_t seed = (FLAGS_client_id << 4) | i;
-        BenchmarkClient *bench;
+        OpenBenchmarkClient *bench;
         switch (benchMode) {
             case BENCH_RETWIS:
                 ASSERT(asyncClient != nullptr);

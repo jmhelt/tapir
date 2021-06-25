@@ -1,8 +1,8 @@
 #ifndef RETWIS_CLIENT_H
 #define RETWIS_CLIENT_H
 
-#include "store/benchmark/async/async_transaction_bench_client.h"
 #include "store/benchmark/async/common/key_selector.h"
+#include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_transaction.h"
 
 namespace retwis {
@@ -12,7 +12,7 @@ enum KeySelection {
     ZIPF
 };
 
-class RetwisClient : public AsyncTransactionBenchClient {
+class RetwisClient : public OpenBenchmarkClient {
    public:
     RetwisClient(KeySelector *keySelector, AsyncClient &client,
                  Transport &transport, uint64_t id, int numRequests, int expDuration,
@@ -24,8 +24,7 @@ class RetwisClient : public AsyncTransactionBenchClient {
     virtual ~RetwisClient();
 
    protected:
-    virtual AsyncTransaction *GetNextTransaction();
-    virtual std::string GetLastOp() const;
+    virtual AsyncTransaction *GetNextTransaction() override;
 
    private:
     KeySelector *keySelector;
