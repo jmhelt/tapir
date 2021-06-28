@@ -1,20 +1,25 @@
 #ifndef OPEN_BENCHMARK_CLIENT_H
 #define OPEN_BENCHMARK_CLIENT_H
 
+#include <functional>
 #include <random>
 #include <unordered_map>
 
 #include "lib/latency.h"
+#include "lib/message.h"
 #include "lib/transport.h"
-#include "store/common/frontend/async_client.h"
 #include "store/common/frontend/async_transaction.h"
+#include "store/common/frontend/client.h"
 #include "store/common/stats.h"
+#include "store/common/transaction.h"
+
+typedef std::function<void(transaction_status_t)> execute_callback;
 
 typedef std::function<void()> bench_done_callback;
 
 class OpenBenchmarkClient {
    public:
-    OpenBenchmarkClient(AsyncClient &client,
+    OpenBenchmarkClient(Client &client, uint32_t timeout,
                         Transport &transport, uint64_t id, int numRequests,
                         int expDuration, int warmupSec, int cooldownSec,
                         uint32_t abortBackoff, bool retryAborted,
@@ -28,7 +33,7 @@ class OpenBenchmarkClient {
     void StartLatency();
 
     void SendNext();
-    void ExecuteCallback(uint64_t transaction_id, transaction_status_t result, const ReadValueMap &readValues);
+    void ExecuteCallback(uint64_t transaction_id, transaction_status_t result);
 
     inline bool IsFullyDone() { return done; }
 
@@ -58,20 +63,44 @@ class OpenBenchmarkClient {
    private:
     class ExecutingTransactionContext {
        public:
-        ExecutingTransactionContext(uint64_t id, AsyncTransaction *transaction)
-            : id_{id}, transaction_{transaction}, n_attempts_{1} {}
+        ExecutingTransactionContext(uint64_t id, AsyncTransaction *transaction, execute_callback ecb)
+            : id_{id}, transaction_{transaction}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
 
         const uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
+        execute_callback ecb() const { return ecb_; }
 
         const uint64_t n_attempts() const { return n_attempts_; }
         void incr_attempts() { n_attempts_++; }
 
+        const uint64_t op_index() const { return op_index_; }
+        void reset_outstanding_ops() { op_index_ = 0; }
+        void incr_op_index() { op_index_++; }
+
        private:
         uint64_t id_;
         AsyncTransaction *transaction_;
+        execute_callback ecb_;
         uint64_t n_attempts_;
+        std::size_t op_index_;
     };
+
+    void ExecuteNextOperation(const uint64_t transaction_id);
+
+    void GetCallback(const uint64_t transaction_id,
+                     int status, const std::string &key, const std::string &val, Timestamp ts);
+    void GetTimeout(const uint64_t transaction_id,
+                    int status, const std::string &key);
+
+    void PutCallback(const uint64_t transaction_id,
+                     int status, const std::string &key, const std::string &val);
+    void PutTimeout(const uint64_t transaction_id,
+                    int status, const std::string &key, const std::string &val);
+
+    void CommitCallback(const uint64_t transaction_id, transaction_status_t result);
+    void CommitTimeout();
+    void AbortCallback();
+    void AbortTimeout();
 
     void Finish();
     void WarmupDone();
@@ -80,14 +109,14 @@ class OpenBenchmarkClient {
     std::unordered_map<uint64_t, ExecutingTransactionContext> executing_transactions_;
     uint64_t next_transaction_id_;
 
-    AsyncClient &client_;
+    Client &client_;
 
     const uint64_t client_id_;
-    int tputInterval;
+    uint32_t timeout_;
     std::mt19937 rand_;
     std::exponential_distribution<> next_arrival_dist_;
-    int numRequests;
-    int expDuration;
+    int n_requests_;
+    int exp_duration_;
     int n;
     int warmupSec;
     int cooldownSec;
@@ -96,9 +125,7 @@ class OpenBenchmarkClient {
     struct timeval startMeasureTime;
     string latencyFilename;
     int msSinceStart;
-    int opLastInterval;
-    bench_done_callback curr_bdcb;
-    std::uniform_int_distribution<uint64_t> randDelayDist;
+    bench_done_callback curr_bdcb_;
 
     uint64_t maxBackoff;
     uint64_t abortBackoff;

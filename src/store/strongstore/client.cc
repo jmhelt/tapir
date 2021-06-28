@@ -284,7 +284,7 @@ void Client::Begin(bool is_retry, begin_callback bcb,
         for (uint64_t i = 0; i < nshards_; i++) {
             sclients_[i]->Begin(transaction_id_, start_time_);
         }
-        bcb(transaction_id_);
+        bcb();
     });
 }
 

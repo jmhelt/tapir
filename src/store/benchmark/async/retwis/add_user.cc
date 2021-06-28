@@ -8,14 +8,13 @@ AddUser::AddUser(KeySelector *keySelector, std::mt19937 &rand)
 AddUser::~AddUser() {
 }
 
-Operation AddUser::GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
-                                    const ReadValueMap &readValues) {
-    Debug("ADD_USER %lu %lu", outstandingOpCount, finishedOpCount);
-    if (outstandingOpCount == 0) {
+Operation AddUser::GetNextOperation(std::size_t op_index) {
+    Debug("ADD_USER %lu", op_index);
+    if (op_index == 0) {
         return GetForUpdate(GetKey(0));
-    } else if (outstandingOpCount < 4) {
-        return Put(GetKey(outstandingOpCount - 1), GetKey(outstandingOpCount - 1));
-    } else if (outstandingOpCount == finishedOpCount) {
+    } else if (op_index < 4) {
+        return Put(GetKey(op_index - 1), GetKey(op_index - 1));
+    } else if (op_index == 4) {
         return Commit();
     } else {
         return Wait();

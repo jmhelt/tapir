@@ -10,12 +10,10 @@ GetTimeline::GetTimeline(KeySelector *keySelector, std::mt19937 &rand)
 GetTimeline::~GetTimeline() {
 }
 
-Operation GetTimeline::GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
-                                        const ReadValueMap &readValues) {
-    Debug("GET_TIMELINE %lu %lu %lu", GetNumKeys(), outstandingOpCount,
-          finishedOpCount);
+Operation GetTimeline::GetNextOperation(std::size_t op_index) {
+    Debug("GET_TIMELINE %lu %lu", GetNumKeys(), op_index);
 
-    if (outstandingOpCount == 0) {
+    if (op_index == 0) {
         std::unordered_set<std::string> keys;
         for (std::size_t i = 0; i < GetNumKeys(); i++) {
             keys.insert(GetKey(i));

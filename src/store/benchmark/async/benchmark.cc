@@ -25,8 +25,6 @@
 #include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_client.h"
 #include "store/benchmark/async/sync_transaction_bench_client.h"
-#include "store/common/frontend/async_adapter_client.h"
-#include "store/common/frontend/async_client.h"
 #include "store/common/partitioner.h"
 #include "store/common/stats.h"
 #include "store/common/truetime.h"
@@ -322,7 +320,6 @@ DEFINE_string(customer_name_file_path, "smallbank_names",
 
 DEFINE_LATENCY(op);
 
-std::vector<AsyncClient *> asyncClients;
 std::vector<Client *> clients;
 std::vector<OpenBenchmarkClient *> benchClients;
 std::vector<std::thread *> threads;
@@ -586,9 +583,7 @@ int main(int argc, char **argv) {
 
     for (size_t i = 0; i < FLAGS_num_clients; i++) {
         Client *client = nullptr;
-        AsyncClient *asyncClient = nullptr;
-
-        uint64_t clientId = (FLAGS_client_id << 6) | i;
+        // uint64_t clientId = (FLAGS_client_id << 6) | i;
         switch (mode) {
             case PROTO_TAPIR: {
                 client = new tapirstore::Client(
@@ -620,10 +615,6 @@ int main(int argc, char **argv) {
 
         switch (benchMode) {
             case BENCH_RETWIS:
-                if (asyncClient == nullptr) {
-                    ASSERT(client != nullptr);
-                    asyncClient = new AsyncAdapterClient(client, FLAGS_message_timeout);
-                }
                 break;
             default:
                 NOT_REACHABLE();
@@ -633,9 +624,9 @@ int main(int argc, char **argv) {
         OpenBenchmarkClient *bench;
         switch (benchMode) {
             case BENCH_RETWIS:
-                ASSERT(asyncClient != nullptr);
+                ASSERT(client != nullptr);
                 bench = new retwis::RetwisClient(
-                    keySelector, *asyncClient, *tport, seed, FLAGS_num_requests,
+                    keySelector, *client, FLAGS_message_timeout, *tport, seed, FLAGS_num_requests,
                     FLAGS_exp_duration, FLAGS_delay, FLAGS_warmup_secs,
                     FLAGS_cooldown_secs, FLAGS_tput_interval,
                     FLAGS_abort_backoff, FLAGS_retry_aborted, FLAGS_max_backoff,
@@ -652,9 +643,6 @@ int main(int argc, char **argv) {
             case BENCH_UNKNOWN:
             default:
                 NOT_REACHABLE();
-        }
-        if (asyncClient != nullptr) {
-            asyncClients.push_back(asyncClient);
         }
         if (client != nullptr) {
             clients.push_back(client);
@@ -685,9 +673,6 @@ int main(int argc, char **argv) {
     delete keySelector;
     for (auto i : threads) {
         i->join();
-        delete i;
-    }
-    for (auto i : asyncClients) {
         delete i;
     }
     for (auto i : clients) {

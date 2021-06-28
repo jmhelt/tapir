@@ -8,18 +8,17 @@ Follow::Follow(KeySelector *keySelector, std::mt19937 &rand)
 Follow::~Follow() {
 }
 
-Operation Follow::GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
-                                   const ReadValueMap &readValues) {
-    Debug("FOLLOW %lu %lu", outstandingOpCount, finishedOpCount);
-    if (outstandingOpCount == 0) {
+Operation Follow::GetNextOperation(std::size_t op_index) {
+    Debug("FOLLOW %lu", op_index);
+    if (op_index == 0) {
         return GetForUpdate(GetKey(0));
-    } else if (outstandingOpCount == 1) {
+    } else if (op_index == 1) {
         return Put(GetKey(0), GetKey(0));
-    } else if (outstandingOpCount == 2) {
+    } else if (op_index == 2) {
         return GetForUpdate(GetKey(1));
-    } else if (outstandingOpCount == 3) {
+    } else if (op_index == 3) {
         return Put(GetKey(1), GetKey(1));
-    } else if (outstandingOpCount == finishedOpCount) {
+    } else if (op_index == 4) {
         return Commit();
     } else {
         return Wait();

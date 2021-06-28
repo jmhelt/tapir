@@ -13,7 +13,7 @@
 
 DEFINE_LATENCY(op);
 
-OpenBenchmarkClient::OpenBenchmarkClient(AsyncClient &client,
+OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
                                          Transport &transport, uint64_t id,
                                          int numRequests, int expDuration,
                                          int warmupSec, int cooldownSec,
@@ -22,13 +22,14 @@ OpenBenchmarkClient::OpenBenchmarkClient(AsyncClient &client,
                                          const std::string &latencyFilename)
     : transport_(transport),
       executing_transactions_{},
-      next_transaction_id_{0},
+      next_transaction_id_{1},
       client_{client},
-      client_id_(id),
-      rand_(id),
+      client_id_{id},
+      timeout_{timeout},
+      rand_{id},
       next_arrival_dist_{1e-6},  // TODO: fix this
-      numRequests(numRequests),
-      expDuration(expDuration),
+      n_requests_(numRequests),
+      exp_duration_(expDuration),
       warmupSec(warmupSec),
       cooldownSec(cooldownSec),
       latencyFilename(latencyFilename),
@@ -49,9 +50,8 @@ OpenBenchmarkClient::~OpenBenchmarkClient() {}
 
 void OpenBenchmarkClient::Start(bench_done_callback bdcb) {
     n = 0;
-    curr_bdcb = bdcb;
-    transport_.Timer(warmupSec * 1000,
-                     std::bind(&OpenBenchmarkClient::WarmupDone, this));
+    curr_bdcb_ = bdcb;
+    transport_.Timer(warmupSec * 1000, std::bind(&OpenBenchmarkClient::WarmupDone, this));
     gettimeofday(&startTime, NULL);
 
     Latency_Start(&latency);
@@ -65,14 +65,17 @@ void OpenBenchmarkClient::SendNext() {
     next_transaction_id_++;
     auto transaction = GetNextTransaction();
 
-    executing_transactions_.insert({tid, {tid, transaction}});
-
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
 
     Latency_Start(&latency);
 
-    auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, tid, std::placeholders::_1, std::placeholders::_2);
-    client_.Execute(transaction, ecb);
+    auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, tid, std::placeholders::_1);
+    executing_transactions_.insert({tid, {tid, transaction, ecb}});
+    Debug("tid: %lu", tid);
+
+    auto bcb = std::bind(&OpenBenchmarkClient::ExecuteNextOperation, this, tid);
+    client_.Begin(
+        false, bcb, []() {}, timeout_);
 
     if (!done) {
         uint64_t next_arrival_us = static_cast<uint64_t>(next_arrival_dist_(rand_));
@@ -81,9 +84,134 @@ void OpenBenchmarkClient::SendNext() {
     }
 }
 
+void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
+    Debug("[%lu] ExecuteNextOperation", transaction_id);
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &ctx = search->second;
+    auto transaction = ctx.transaction();
+    auto op_index = ctx.op_index();
+
+    Operation op = transaction->GetNextOperation(op_index);
+
+    auto gcb = std::bind(&OpenBenchmarkClient::GetCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
+    auto gtcb = std::bind(&OpenBenchmarkClient::GetTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
+    auto pcb = std::bind(&OpenBenchmarkClient::PutCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    auto ptcb = std::bind(&OpenBenchmarkClient::PutTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    auto ccb = std::bind(&OpenBenchmarkClient::CommitCallback, this, transaction_id, std::placeholders::_1);
+    auto ctcb = std::bind(&OpenBenchmarkClient::CommitTimeout, this);
+    auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this);
+    auto atcb = std::bind(&OpenBenchmarkClient::AbortTimeout, this);
+
+    switch (op.type) {
+        case GET:
+            client_.Get(op.key, gcb, gtcb, timeout_);
+            break;
+
+        case GET_FOR_UPDATE:
+            client_.GetForUpdate(op.key, gcb, gtcb, timeout_);
+            break;
+
+        case PUT: {
+            client_.Put(op.key, op.value, pcb, ptcb, timeout_);
+            break;
+        }
+        case COMMIT: {
+            client_.Commit(ccb, ctcb, timeout_);
+            break;
+        }
+        case ABORT: {
+            client_.Abort(acb, atcb, timeout_);
+            break;
+        }
+        case ROCOMMIT: {
+            client_.ROCommit(op.keys, ccb, ctcb, timeout_);
+            break;
+        }
+        case WAIT:
+            break;
+        default:
+            NOT_REACHABLE();
+    }
+
+    ctx.incr_op_index();
+}
+
+void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
+                                      int status, const std::string &key, const std::string &val, Timestamp ts) {
+    Debug("[%lu] Get(%s) callback", transaction_id, key.c_str());
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &ctx = search->second;
+
+    if (status == REPLY_OK) {
+        ExecuteNextOperation(transaction_id);
+    } else if (status == REPLY_FAIL) {
+        auto ecb = ctx.ecb();
+        ecb(ABORTED_SYSTEM);
+    } else {
+        Panic("Unknown status for Get %d.", status);
+    }
+}
+
+void OpenBenchmarkClient::GetTimeout(const uint64_t transaction_id,
+                                     int status, const std::string &key) {
+    Warning("[%lu] Get(%s) timed out :(", transaction_id, key.c_str());
+    auto gcb = std::bind(&OpenBenchmarkClient::GetCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
+    auto gtcb = std::bind(&OpenBenchmarkClient::GetTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
+    client_.Get(key, gcb, gtcb, timeout_);
+}
+
+void OpenBenchmarkClient::PutCallback(const uint64_t transaction_id,
+                                      int status, const std::string &key, const std::string &val) {
+    Debug("[%lu] Put(%s,%s) callback.", transaction_id, key.c_str(), val.c_str());
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &ctx = search->second;
+
+    if (status == REPLY_OK) {
+        ExecuteNextOperation(transaction_id);
+    } else if (status == REPLY_FAIL) {
+        auto ecb = ctx.ecb();
+        ecb(ABORTED_SYSTEM);
+    } else {
+        Panic("Unknown status for Put %d.", status);
+    }
+}
+
+void OpenBenchmarkClient::PutTimeout(const uint64_t transaction_id,
+                                     int status, const std::string &key, const std::string &val) {
+    Warning("[%lu] Put(%s,%s) timed out :(", transaction_id, key.c_str(), val.c_str());
+}
+
+void OpenBenchmarkClient::CommitCallback(const uint64_t transaction_id, transaction_status_t result) {
+    Debug("Commit callback.");
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &ctx = search->second;
+    auto ecb = ctx.ecb();
+
+    ecb(result);
+}
+
+void OpenBenchmarkClient::CommitTimeout() {
+    Warning("Commit timed out :(");
+}
+
+void OpenBenchmarkClient::AbortCallback() {
+    Debug("Abort callback.");
+}
+
+void OpenBenchmarkClient::AbortTimeout() {
+    Warning("Abort timed out :(");
+}
+
 void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
-                                          transaction_status_t result,
-                                          const ReadValueMap &readValues) {
+                                          transaction_status_t result) {
     Debug("[%lu] ExecuteCallback with result %d.", transaction_id, result);
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
@@ -125,8 +253,9 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
             ctx.incr_attempts();
             transport_.TimerMicro(backoff, [this, transaction_id, transaction, ttype]() {
                 stats.Increment(ttype + "_attempts", 1);
-                auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
-                client_.Execute(transaction, ecb);
+                auto bcb = std::bind(&OpenBenchmarkClient::ExecuteNextOperation, this, transaction_id);
+                client_.Begin(
+                    true, bcb, []() {}, timeout_);
             });
         }
     }
@@ -170,7 +299,7 @@ void OpenBenchmarkClient::CooldownDone() {
         LatencyFmtNS(ns, buf);
         Notice("99th percentile latency is %ld ns (%s)", ns, buf);
     }
-    curr_bdcb();
+    curr_bdcb_();
 }
 
 void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
@@ -204,7 +333,7 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
             }
         }
 
-        if (numRequests == -1) {
+        if (n_requests_ == -1) {
             struct timeval diff;
             BenchState state = GetBenchState(diff);
             if ((state == COOL_DOWN || state == DONE) && !cooldownStarted) {
@@ -216,7 +345,7 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
             } else {
                 Debug("Not done after %ld seconds.", diff.tv_sec);
             }
-        } else if (n >= numRequests) {
+        } else if (n >= n_requests_) {
             CooldownDone();
         }
     }
@@ -234,9 +363,9 @@ OpenBenchmarkClient::BenchState OpenBenchmarkClient::GetBenchState(struct timeva
     gettimeofday(&currTime, NULL);
 
     diff = timeval_sub(currTime, startTime);
-    if (diff.tv_sec > expDuration) {
+    if (diff.tv_sec > exp_duration_) {
         return DONE;
-    } else if (diff.tv_sec > expDuration - warmupSec) {
+    } else if (diff.tv_sec > exp_duration_ - warmupSec) {
         return COOL_DOWN;
     } else if (started) {
         return MEASURE;
@@ -264,7 +393,7 @@ void OpenBenchmarkClient::Finish() {
         Latency_FlushTo(latencyFilename.c_str());
     }
 
-    if (numRequests == -1) {
+    if (n_requests_ == -1) {
         cooldownStarted = true;
     } else {
         CooldownDone();

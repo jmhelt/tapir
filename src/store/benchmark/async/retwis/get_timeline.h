@@ -13,8 +13,7 @@ class GetTimeline : public RetwisTransaction {
     virtual ~GetTimeline();
 
    protected:
-    Operation GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
-                               const ReadValueMap &readValues);
+    Operation GetNextOperation(std::size_t op_index) override;
 };
 
 }  // namespace retwis

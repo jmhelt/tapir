@@ -22,9 +22,7 @@ class AsyncTransaction {
     AsyncTransaction() {}
     virtual ~AsyncTransaction() {}
 
-    virtual Operation GetNextOperation(size_t outstandingOpCount,
-                                       size_t finishedOpCount,
-                                       const ReadValueMap &readValues) = 0;
+    virtual Operation GetNextOperation(std::size_t op_index) = 0;
 
     virtual const std::string &GetTransactionType() = 0;
 };

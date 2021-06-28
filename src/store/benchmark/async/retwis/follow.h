@@ -13,8 +13,7 @@ class Follow : public RetwisTransaction {
     virtual ~Follow();
 
    protected:
-    Operation GetNextOperation(size_t outstandingOpCount, size_t finishedOpCount,
-                               const ReadValueMap &readValues);
+    Operation GetNextOperation(std::size_t op_index) override;
 };
 
 }  // namespace retwis

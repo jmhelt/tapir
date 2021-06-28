@@ -27,7 +27,7 @@ enum transaction_status_t {
     ABORTED_MAX_RETRIES
 };
 
-typedef std::function<void(uint64_t)> begin_callback;
+typedef std::function<void()> begin_callback;
 typedef std::function<void()> begin_timeout_callback;
 
 typedef std::function<void(int, const std::string &, const std::string &, Timestamp)> get_callback;

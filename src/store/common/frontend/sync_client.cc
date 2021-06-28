@@ -8,7 +8,7 @@ void SyncClient::Begin(bool is_retry, uint32_t timeout) {
     Promise promise(timeout);
     client->Begin(
         is_retry,
-        [promisePtr = &promise](uint64_t id) { promisePtr->Reply(0); }, []() {},
+        [promisePtr = &promise]() { promisePtr->Reply(0); }, []() {},
         timeout);
     promise.GetReply();
 }

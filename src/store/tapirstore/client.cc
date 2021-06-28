@@ -95,7 +95,7 @@ void Client::Begin(bool is_retry, begin_callback bcb,
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants.clear();
-        bcb(t_id);
+        bcb();
     });
 }
 
