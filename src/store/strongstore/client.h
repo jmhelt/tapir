@@ -70,35 +70,35 @@ class Client : public ::Client {
     virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Begin a retried transaction.
-    virtual void Begin(const Context &ctx, begin_callback bcb,
+    virtual void Begin(Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
-    virtual void Get(const Context &ctx, const std::string &key,
+    virtual void Get(Context &ctx, const std::string &key,
                      get_callback gcb, get_timeout_callback gtcb,
                      uint32_t timeout = GET_TIMEOUT) override;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(const Context &ctx, const std::string &key,
+    virtual void GetForUpdate(Context &ctx, const std::string &key,
                               get_callback gcb, get_timeout_callback gtcb,
                               uint32_t timeout = GET_TIMEOUT) override;
 
     // Set the value for the given key.
-    virtual void Put(const Context &ctx, const std::string &key, const std::string &value,
+    virtual void Put(Context &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout = PUT_TIMEOUT) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) override;
 
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+    virtual void Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    void ROCommit(const Context &ctx, const std::unordered_set<std::string> &keys,
+    void ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
                   commit_callback ccb, commit_timeout_callback ctcb,
                   uint32_t timeout) override;
 
@@ -123,15 +123,15 @@ class Client : public ::Client {
                uint32_t timeout);
 
     // local Prepare function
-    void CommitCallback(const uint64_t transaction_id, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts);
+    void CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts);
 
     void AbortCallback(const uint64_t transaction_id, uint64_t req_id);
 
-    void ROCommitCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
+    void ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
                           const std::vector<Value> &values,
                           const std::vector<PreparedTransaction> &prepares);
 
-    void ROCommitSlowCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
+    void ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
                               uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit);
 
     void HandleWound(const uint64_t transaction_id);
@@ -149,8 +149,6 @@ class Client : public ::Client {
     std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;
 
     std::unordered_map<uint64_t, std::unique_ptr<ContextState>> context_states_;
-
-    Timestamp min_read_timestamp_;
 
     const strongstore::NetworkConfiguration &net_config_;
     const std::string client_region_;
@@ -185,9 +183,9 @@ class Client : public ::Client {
 
     Consistency consistency_;
 
-    bool debug_stats_;
-
     double nb_time_alpha_;
+
+    bool debug_stats_;
 };
 
 }  // namespace strongstore

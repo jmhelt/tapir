@@ -28,7 +28,7 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
       client_id_{id},
       timeout_{timeout},
       rand_{id},
-      next_arrival_dist_{1e-5},  // TODO: fix this
+      next_arrival_dist_{1e-6},  // TODO: fix this
       n_requests_(numRequests),
       exp_duration_(expDuration),
       warmupSec(warmupSec),

@@ -64,17 +64,17 @@ class OpenBenchmarkClient {
         ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, Context &ctx, execute_callback ecb)
             : lat_{}, id_{id}, transaction_{transaction}, ctx_{ctx}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
 
-        const uint64_t id() const { return id_; }
+        uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
-        const Context &ctx() const { return ctx_; }
+        Context &ctx() { return ctx_; }
         execute_callback ecb() const { return ecb_; }
 
         Latency_Frame_t *lat() { return &lat_; }
 
-        const uint64_t n_attempts() const { return n_attempts_; }
+        uint64_t n_attempts() const { return n_attempts_; }
         void incr_attempts() { n_attempts_++; }
 
-        const uint64_t op_index() const { return op_index_; }
+        uint64_t op_index() const { return op_index_; }
         void reset_outstanding_ops() { op_index_ = 0; }
         void incr_op_index() { op_index_++; }
 

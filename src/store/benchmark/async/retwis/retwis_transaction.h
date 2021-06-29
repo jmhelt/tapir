@@ -21,7 +21,7 @@ class RetwisTransaction : public AsyncTransaction {
         return keySelector->GetKey(keyIdxs[i]);
     }
 
-    inline const size_t GetNumKeys() const { return keyIdxs.size(); }
+    inline size_t GetNumKeys() const { return keyIdxs.size(); }
 
     const std::string &GetTransactionType() override { return ttype_; };
 

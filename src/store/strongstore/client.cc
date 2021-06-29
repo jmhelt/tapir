@@ -52,7 +52,6 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       coord_choices_{},
       min_lats_{},
       context_states_{},
-      min_read_timestamp_{},
       net_config_{net_config},
       client_region_{client_region},
       config_{config},
@@ -63,8 +62,8 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       tt_{tt},
       next_transaction_id_{client_id_ << 26},
       consistency_{consistency},
-      debug_stats_{debug_stats},
-      nb_time_alpha_{nb_time_alpha} {
+      nb_time_alpha_{nb_time_alpha},
+      debug_stats_{debug_stats} {
     Debug("Initializing StrongStore client with id [%lu]", client_id_);
 
     auto wcb = std::bind(&Client::HandleWound, this, std::placeholders::_1);
@@ -297,7 +296,7 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t tim
 
 /* Begins a transaction, retrying the transaction indicated by ctx.
  */
-void Client::Begin(const Context &ctx, begin_callback bcb,
+void Client::Begin(Context &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
     auto tid = next_transaction_id_++;
     auto &start_ts = ctx.start_ts();
@@ -314,7 +313,7 @@ void Client::Begin(const Context &ctx, begin_callback bcb,
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::Get(const Context &ctx, const std::string &key, get_callback gcb,
+void Client::Get(Context &ctx, const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
     auto tid = ctx.transaction_id();
 
@@ -346,7 +345,7 @@ void Client::Get(const Context &ctx, const std::string &key, get_callback gcb,
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::GetForUpdate(const Context &ctx, const std::string &key, get_callback gcb,
+void Client::GetForUpdate(Context &ctx, const std::string &key, get_callback gcb,
                           get_timeout_callback gtcb, uint32_t timeout) {
     auto tid = ctx.transaction_id();
 
@@ -378,7 +377,7 @@ void Client::GetForUpdate(const Context &ctx, const std::string &key, get_callba
 }
 
 /* Sets the value corresponding to the supplied key. */
-void Client::Put(const Context &ctx, const std::string &key, const std::string &value,
+void Client::Put(Context &ctx, const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
     auto tid = ctx.transaction_id();
@@ -410,7 +409,7 @@ void Client::Put(const Context &ctx, const std::string &key, const std::string &
 }
 
 /* Attempts to commit the ongoing transaction. */
-void Client::Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb, uint32_t timeout) {
+void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb, uint32_t timeout) {
     auto tid = ctx.transaction_id();
 
     Debug("[%lu] COMMIT", tid);
@@ -454,7 +453,7 @@ void Client::Commit(const Context &ctx, commit_callback ccb, commit_timeout_call
         nonblock_timestamp = ChooseNonBlockTimestamp(tid);
     }
 
-    auto cccb = std::bind(&Client::CommitCallback, this, tid, req->id,
+    auto cccb = std::bind(&Client::CommitCallback, this, std::ref(ctx), req->id,
                           std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     auto cctcb = [](int) {};
 
@@ -472,25 +471,26 @@ void Client::Commit(const Context &ctx, commit_callback ccb, commit_timeout_call
     }
 }
 
-void Client::CommitCallback(const uint64_t transaction_id, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
-    Debug("[%lu] PREPARE callback status %d", transaction_id, status);
+void Client::CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
+    auto tid = ctx.transaction_id();
+    Debug("[%lu] PREPARE callback status %d", tid, status);
 
-    auto itr = this->pending_reqs_.find(req_id);
-    if (itr == this->pending_reqs_.end()) {
-        Debug("[%lu] Transaction already finished", transaction_id);
+    auto search = pending_reqs_.find(req_id);
+    if (search == pending_reqs_.end()) {
+        Debug("[%lu] Transaction already finished", tid);
         return;
     }
-    PendingRequest *req = itr->second;
+    PendingRequest *req = search->second;
 
     transaction_status_t tstatus;
     switch (status) {
         case REPLY_OK:
-            Debug("[%lu] COMMIT OK", transaction_id);
+            Debug("[%lu] COMMIT OK", tid);
             tstatus = COMMITTED;
             break;
         default:
             // abort!
-            Debug("[%lu] COMMIT ABORT", transaction_id);
+            Debug("[%lu] COMMIT ABORT", tid);
             tstatus = ABORTED_SYSTEM;
             break;
     }
@@ -503,16 +503,16 @@ void Client::CommitCallback(const uint64_t transaction_id, uint64_t req_id, int 
     if (tstatus == COMMITTED && consistency_ == Consistency::RSS) {
         ms = tt_.TimeToWaitUntilMS(nonblock_ts.getTimestamp());
         Debug("Waiting for nonblock time: %lu ms", ms);
-        min_read_timestamp_ = std::max(min_read_timestamp_, commit_ts);
-        Debug("min_read_timestamp_: %lu.%lu", min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
+        ctx.advance(commit_ts);
+        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
     }
 
     transport_->Timer(ms, std::bind(ccb, tstatus));
 
-    context_states_.erase(transaction_id);
+    context_states_.erase(tid);
 }
 
-void Client::Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+void Client::Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     auto tid = ctx.transaction_id();
     Abort(tid, acb, atcb, timeout);
@@ -560,13 +560,13 @@ void Client::Abort(const uint64_t transaction_id, abort_callback acb, abort_time
 void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
     Debug("[%lu] Abort callback", transaction_id);
 
-    auto itr = this->pending_reqs_.find(req_id);
-    if (itr == this->pending_reqs_.end()) {
+    auto search = pending_reqs_.find(req_id);
+    if (search == pending_reqs_.end()) {
         Debug("[%lu] Transaction already finished", transaction_id);
         return;
     }
 
-    PendingRequest *req = itr->second;
+    PendingRequest *req = search->second;
     --req->outstandingPrepares;
     if (req->outstandingPrepares == 0) {
         abort_callback acb = req->acb;
@@ -581,7 +581,7 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
 }
 
 /* Commits RO transaction. */
-void Client::ROCommit(const Context &ctx, const std::unordered_set<std::string> &keys,
+void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
     auto tid = ctx.transaction_id();
@@ -618,24 +618,21 @@ void Client::ROCommit(const Context &ctx, const std::unordered_set<std::string> 
 
     ASSERT(sharded_keys.size() > 0);
 
-    Timestamp min_ts{};
+    Timestamp min_ts = ctx.min_read_ts();
     Timestamp commit_ts{tt_.Now().latest(), client_id_};
-    if (consistency_ == RSS) {
-        min_ts = min_read_timestamp_;
 
-        // Hack to make RSS work with zero TrueTime error despite clock skew
-        // (for throughput experiments)
-        if (min_ts >= commit_ts) {
-            commit_ts.setTimestamp(min_ts.getTimestamp() + 1);
-        }
+    // Hack to make RSS work with zero TrueTime error despite clock skew
+    // (for throughput experiments)
+    if (consistency_ == RSS && min_ts >= commit_ts) {
+        commit_ts.setTimestamp(min_ts.getTimestamp() + 1);
     }
 
     Debug("[%lu] commit_ts: %lu.%lu", tid, commit_ts.getTimestamp(), commit_ts.getID());
 
-    auto roccb = std::bind(&Client::ROCommitCallback, this, tid, req->id,
+    auto roccb = std::bind(&Client::ROCommitCallback, this, std::ref(ctx), req->id,
                            std::placeholders::_1, std::placeholders::_2,
                            std::placeholders::_3);
-    auto rocscb = std::bind(&Client::ROCommitSlowCallback, this, tid, req->id,
+    auto rocscb = std::bind(&Client::ROCommitSlowCallback, this, std::ref(ctx), req->id,
                             std::placeholders::_1, std::placeholders::_2,
                             std::placeholders::_3, std::placeholders::_4);
     auto roctcb = []() {};  // TODO: Handle timeout
@@ -645,77 +642,72 @@ void Client::ROCommit(const Context &ctx, const std::unordered_set<std::string> 
     }
 }
 
-void Client::ROCommitCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
+void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
                               const std::vector<Value> &values,
                               const std::vector<PreparedTransaction> &prepares) {
-    auto itr = this->pending_reqs_.find(req_id);
-    if (itr == this->pending_reqs_.end()) {
-        Debug("[%lu] ROCommitCallback for terminated request id %lu", transaction_id, req_id);
+    auto tid = ctx.transaction_id();
+
+    auto search = pending_reqs_.find(req_id);
+    if (search == pending_reqs_.end()) {
+        Debug("[%lu] ROCommitCallback for terminated request id %lu", tid, req_id);
         return;
     }
 
-    Debug("[%lu] ROCommit callback", transaction_id);
+    Debug("[%lu] ROCommit callback", tid);
 
-    SnapshotResult r = vf_.ReceiveFastPath(transaction_id, shard_idx, values, prepares);
+    SnapshotResult r = vf_.ReceiveFastPath(tid, shard_idx, values, prepares);
     if (r.state == COMMIT) {
-        PendingRequest *req = itr->second;
+        PendingRequest *req = search->second;
 
         commit_callback ccb = req->ccb;
-        pending_reqs_.erase(itr);
+        pending_reqs_.erase(search);
         delete req;
 
-        if (debug_stats_) {
-            Latency_End(&commit_lat_);
-        }
+        vf_.CommitRO(tid);
 
-        vf_.CommitRO(transaction_id);
-
-        min_read_timestamp_ = std::max(min_read_timestamp_, r.max_read_ts);
-        Debug("min_read_timestamp_: %lu.%lu", min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
-        Debug("[%lu] COMMIT OK", transaction_id);
+        ctx.advance(r.max_read_ts);
+        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+        Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);
 
-        context_states_.erase(transaction_id);
+        context_states_.erase(tid);
 
     } else if (r.state == WAIT) {
-        Debug("[%lu] Waiting for more RO responses", transaction_id);
+        Debug("[%lu] Waiting for more RO responses", tid);
     }
 }
 
-void Client::ROCommitSlowCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
+void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
                                   uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit) {
-    auto itr = this->pending_reqs_.find(req_id);
-    if (itr == this->pending_reqs_.end()) {
-        Debug("[%lu] ROCommitSlowCallback for terminated request id %lu", transaction_id, req_id);
+    auto tid = ctx.transaction_id();
+
+    auto search = pending_reqs_.find(req_id);
+    if (search == pending_reqs_.end()) {
+        Debug("[%lu] ROCommitSlowCallback for terminated request id %lu", tid, req_id);
         return;
     }
 
-    Debug("[%lu] ROCommitSlow callback", transaction_id);
+    Debug("[%lu] ROCommitSlow callback", tid);
 
-    SnapshotResult r = vf_.ReceiveSlowPath(transaction_id, rw_transaction_id, is_commit, commit_ts);
+    SnapshotResult r = vf_.ReceiveSlowPath(tid, rw_transaction_id, is_commit, commit_ts);
     if (r.state == COMMIT) {
-        PendingRequest *req = itr->second;
+        PendingRequest *req = search->second;
 
         commit_callback ccb = req->ccb;
-        pending_reqs_.erase(itr);
+        pending_reqs_.erase(search);
         delete req;
 
-        if (debug_stats_) {
-            Latency_End(&commit_lat_);
-        }
+        vf_.CommitRO(tid);
 
-        vf_.CommitRO(transaction_id);
-
-        min_read_timestamp_ = std::max(min_read_timestamp_, r.max_read_ts);
-        Debug("min_read_timestamp_: %lu.%lu",
-              min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
-        Debug("[%lu] COMMIT OK", transaction_id);
+        ctx.advance(r.max_read_ts);
+        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+        Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);
 
-        context_states_.erase(transaction_id);
+        context_states_.erase(tid);
 
     } else if (r.state == WAIT) {
-        Debug("[%lu] Waiting for more RO responses", transaction_id);
+        Debug("[%lu] Waiting for more RO responses", tid);
     }
 }
 

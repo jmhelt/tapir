@@ -89,7 +89,7 @@ void Client::Begin(begin_callback bcb,
  *
  * Return a TID for the transaction.
  */
-void Client::Begin(const Context &ctx, begin_callback bcb,
+void Client::Begin(Context &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
     transport->Timer(0, [this, bcb, btcb, timeout]() {
         if (pingReplicas) {
@@ -110,7 +110,7 @@ void Client::Begin(const Context &ctx, begin_callback bcb,
     });
 }
 
-void Client::Get(const Context &ctx, const std::string &key, get_callback gcb,
+void Client::Get(Context &ctx, const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
     transport->Timer(0, [this, key, gcb, gtcb, timeout]() {
         Debug("GET [%lu : %s]", t_id, key.c_str());
@@ -129,7 +129,7 @@ void Client::Get(const Context &ctx, const std::string &key, get_callback gcb,
     });
 }
 
-void Client::Put(const Context &ctx, const std::string &key, const std::string &value,
+void Client::Put(Context &ctx, const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
     transport->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
@@ -149,7 +149,7 @@ void Client::Put(const Context &ctx, const std::string &key, const std::string &
     });
 }
 
-void Client::Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
+void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
     transport->Timer(0, [this, ccb, ctcb, timeout]() {
         uint64_t reqId = lastReqId++;
@@ -337,7 +337,7 @@ void Client::HandleAllPreparesReceived(PendingRequest *req) {
     }
 }
 
-void Client::Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+void Client::Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     // presumably this will be called with empty callbacks as the application
     // can immediately move on to its next transaction without waiting for
