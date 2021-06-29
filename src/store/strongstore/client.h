@@ -20,20 +20,25 @@
 #include "store/common/truetime.h"
 #include "store/strongstore/common.h"
 #include "store/strongstore/networkconfig.h"
+#include "store/strongstore/preparedtransaction.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
-#include "store/strongstore/viewfinder.h"
 
 namespace strongstore {
 
 class ContextState {
    public:
-    ContextState() : participants_{}, state_{EXECUTING} {}
+    ContextState() : participants_{}, prepares_{}, values_{}, snapshot_ts_{}, state_{EXECUTING} {}
     ~ContextState() {}
 
     bool executing() const { return (state_ == EXECUTING); }
     bool committing() const { return (state_ == COMMITTING); }
     bool aborted() const { return (state_ == ABORTED); }
+
+    const std::set<int> &participants() const { return participants_; }
+    const std::unordered_map<uint64_t, PreparedTransaction> prepares() const { return prepares_; }
+
+    const Timestamp &snapshot_ts() const { return snapshot_ts_; }
 
    protected:
     friend class Client;
@@ -41,9 +46,14 @@ class ContextState {
     void set_committing() { state_ = COMMITTING; }
     void set_aborted() { state_ = ABORTED; }
 
-    const std::set<int> &participants() const { return participants_; }
+    std::set<int> &mutable_participants() { return participants_; }
     void add_participant(int p) { participants_.insert(p); }
     void clear_participants() { participants_.clear(); }
+
+    std::unordered_map<uint64_t, PreparedTransaction> &mutable_prepares() { return prepares_; }
+    std::unordered_map<std::string, std::list<Value>> &mutable_values() { return values_; }
+
+    void set_snapshot_ts(const Timestamp &ts) { snapshot_ts_ = ts; }
 
    private:
     enum State {
@@ -53,7 +63,28 @@ class ContextState {
     };
 
     std::set<int> participants_;
+    std::unordered_map<uint64_t, PreparedTransaction> prepares_;
+    std::unordered_map<std::string, std::list<Value>> values_;
+    Timestamp snapshot_ts_;
     State state_;
+};
+
+class CommittedTransaction {
+   public:
+    uint64_t transaction_id;
+    Timestamp commit_ts;
+    bool committed;
+};
+
+enum SnapshotState {
+    WAIT,
+    COMMIT
+};
+
+struct SnapshotResult {
+    SnapshotState state;
+    Timestamp max_read_ts;
+    std::unordered_map<std::string, std::string> kv_;
 };
 
 class Client : public ::Client {
@@ -143,7 +174,22 @@ class Client : public ::Client {
     // Choose nonblock time
     Timestamp ChooseNonBlockTimestamp(const uint64_t transaction_id);
 
-    ViewFinder vf_;
+    // For tracking RO reply progress
+    SnapshotResult ReceiveFastPath(uint64_t transaction_id, std::unique_ptr<ContextState> &state,
+                                   int shard_idx,
+                                   const std::vector<Value> &values,
+                                   const std::vector<PreparedTransaction> &prepares);
+    SnapshotResult ReceiveSlowPath(uint64_t transaction_id, std::unique_ptr<ContextState> &state,
+                                   uint64_t rw_transaction_id,
+                                   bool is_commit, const Timestamp &commit_ts);
+    SnapshotResult FindSnapshot(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
+                                std::vector<CommittedTransaction> &committed);
+    void AddValues(std::unique_ptr<ContextState> &state, const std::vector<Value> &values);
+    void AddPrepares(std::unique_ptr<ContextState> &state, const std::vector<PreparedTransaction> &prepares);
+    void ReceivedAllFastPaths(std::unique_ptr<ContextState> &state);
+    void FindCommittedKeys(std::unique_ptr<ContextState> &state);
+    void CalculateSnapshotTimestamp(std::unique_ptr<ContextState> &state);
+    SnapshotResult CheckCommit(std::unique_ptr<ContextState> &state);
 
     std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
     std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;

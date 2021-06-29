@@ -28,8 +28,13 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 2,
+  "num_shards": 3,
   "shards": [
+    [
+      "us-east-1-0",
+      "eu-west-1-0",
+      "ap-northeast-1-0"
+    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
@@ -41,8 +46,8 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 3,
-  "client_processes_per_client_node": 3,
+  "client_total": 5,
+  "client_processes_per_client_node": 5,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"

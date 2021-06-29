@@ -48,8 +48,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
                int nShards, int closestReplica, Transport *transport,
                Partitioner *part, TrueTime &tt, bool debug_stats,
                double nb_time_alpha)
-    : vf_{consistency},
-      coord_choices_{},
+    : coord_choices_{},
       min_lats_{},
       context_states_{},
       net_config_{net_config},
@@ -605,8 +604,6 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
         state->add_participant(i);
     }
 
-    vf_.StartRO(tid, participants);
-
     uint64_t req_id = last_req_id_++;
     PendingRequest *req = new PendingRequest(req_id);
     pending_reqs_[req_id] = req;
@@ -628,6 +625,7 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
     }
 
     Debug("[%lu] commit_ts: %lu.%lu", tid, commit_ts.getTimestamp(), commit_ts.getID());
+    Debug("[%lu] min_ts: %lu.%lu", tid, min_ts.getTimestamp(), min_ts.getID());
 
     auto roccb = std::bind(&Client::ROCommitCallback, this, std::ref(ctx), req->id,
                            std::placeholders::_1, std::placeholders::_2,
@@ -647,23 +645,25 @@ void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
                               const std::vector<PreparedTransaction> &prepares) {
     auto tid = ctx.transaction_id();
 
+    Debug("[%lu] ROCommit callback", tid);
+
     auto search = pending_reqs_.find(req_id);
     if (search == pending_reqs_.end()) {
         Debug("[%lu] ROCommitCallback for terminated request id %lu", tid, req_id);
         return;
     }
 
-    Debug("[%lu] ROCommit callback", tid);
+    auto search2 = context_states_.find(tid);
+    ASSERT(search2 != context_states_.end());
+    auto &state = search2->second;
 
-    SnapshotResult r = vf_.ReceiveFastPath(tid, shard_idx, values, prepares);
+    SnapshotResult r = ReceiveFastPath(tid, state, shard_idx, values, prepares);
     if (r.state == COMMIT) {
         PendingRequest *req = search->second;
 
         commit_callback ccb = req->ccb;
         pending_reqs_.erase(search);
         delete req;
-
-        vf_.CommitRO(tid);
 
         ctx.advance(r.max_read_ts);
         Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
@@ -681,23 +681,25 @@ void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
                                   uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit) {
     auto tid = ctx.transaction_id();
 
+    Debug("[%lu] ROCommitSlow callback", tid);
+
     auto search = pending_reqs_.find(req_id);
     if (search == pending_reqs_.end()) {
         Debug("[%lu] ROCommitSlowCallback for terminated request id %lu", tid, req_id);
         return;
     }
 
-    Debug("[%lu] ROCommitSlow callback", tid);
+    auto search2 = context_states_.find(tid);
+    ASSERT(search2 != context_states_.end());
+    auto &state = search2->second;
 
-    SnapshotResult r = vf_.ReceiveSlowPath(tid, rw_transaction_id, is_commit, commit_ts);
+    SnapshotResult r = ReceiveSlowPath(tid, state, rw_transaction_id, is_commit, commit_ts);
     if (r.state == COMMIT) {
         PendingRequest *req = search->second;
 
         commit_callback ccb = req->ccb;
         pending_reqs_.erase(search);
         delete req;
-
-        vf_.CommitRO(tid);
 
         ctx.advance(r.max_read_ts);
         Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
@@ -708,6 +710,197 @@ void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
 
     } else if (r.state == WAIT) {
         Debug("[%lu] Waiting for more RO responses", tid);
+    }
+}
+
+SnapshotResult Client::ReceiveFastPath(uint64_t transaction_id,
+                                       std::unique_ptr<ContextState> &state,
+                                       int shard_idx,
+                                       const std::vector<Value> &values,
+                                       const std::vector<PreparedTransaction> &prepares) {
+    Debug("[%lu] Received fast path RO response", transaction_id);
+
+    auto &participants = state->mutable_participants();
+
+    ASSERT(participants.count(shard_idx) > 0);
+    participants.erase(shard_idx);
+
+    AddValues(state, values);
+    AddPrepares(state, prepares);
+
+    // Received all fast path responses
+    if (participants.size() == 0) {
+        ReceivedAllFastPaths(state);
+    }
+
+    return CheckCommit(state);
+}
+
+SnapshotResult Client::ReceiveSlowPath(uint64_t transaction_id, std::unique_ptr<ContextState> &state,
+                                       uint64_t rw_transaction_id,
+                                       bool is_commit, const Timestamp &commit_ts) {
+    Debug("[%lu] Received slow path RO response", transaction_id);
+    ASSERT(consistency_ == RSS);
+
+    auto &prepares = state->mutable_prepares();
+
+    auto search = prepares.find(rw_transaction_id);
+    if (search == prepares.end()) {
+        Debug("[%lu] already received commit decision for %lu", transaction_id, rw_transaction_id);
+        return {WAIT};
+    }
+
+    if (is_commit) {
+        const PreparedTransaction &pt = search->second;
+        Debug("[%lu] adding writes from prepared transaction: %lu", transaction_id, rw_transaction_id);
+
+        std::vector<Value> values;
+        for (auto &write : pt.write_set()) {
+            values.emplace_back(rw_transaction_id, commit_ts, write.first, write.second);
+        }
+
+        AddValues(state, values);
+    }
+
+    prepares.erase(search);
+
+    return CheckCommit(state);
+}
+
+void Client::AddValues(std::unique_ptr<ContextState> &state, const std::vector<Value> &vs) {
+    auto &values = state->mutable_values();
+
+    for (auto &v : vs) {
+        std::list<Value> &l = values[v.key()];
+
+        auto it = l.begin();
+        for (; it != l.end(); ++it) {
+            Value &v2 = *it;
+            if (v2.ts() < v.ts()) {
+                break;
+            }
+        }
+
+        l.insert(it, v);
+    }
+}
+
+void Client::AddPrepares(std::unique_ptr<ContextState> &state, const std::vector<PreparedTransaction> &ps) {
+    auto &prepares = state->mutable_prepares();
+
+    for (auto &p : ps) {
+        auto search = prepares.find(p.transaction_id());
+        if (search == prepares.end()) {
+            prepares.insert(search, {p.transaction_id(), p});
+        } else {
+            PreparedTransaction &pt = search->second;
+            ASSERT(pt.transaction_id() == p.transaction_id());
+            pt.update_prepare_ts(p.prepare_ts());
+            pt.add_write_set(p.write_set());
+        }
+    }
+}
+
+void Client::ReceivedAllFastPaths(std::unique_ptr<ContextState> &state) {
+    FindCommittedKeys(state);
+    CalculateSnapshotTimestamp(state);
+}
+
+void Client::FindCommittedKeys(std::unique_ptr<ContextState> &state) {
+    auto &prepares = state->mutable_prepares();
+    auto &values = state->mutable_values();
+
+    if (prepares.size() == 0) {
+        return;
+    }
+
+    ASSERT(consistency_ == RSS);
+
+    std::vector<Value> to_add;
+    for (auto &kv : values) {
+        std::list<Value> &l = kv.second;
+        for (Value &v : l) {
+            uint64_t transaction_id = v.transaction_id();
+            auto search = prepares.find(transaction_id);
+            if (search != prepares.end()) {
+                PreparedTransaction &pt = search->second;
+                Debug("adding writes from prepared transaction: %lu", transaction_id);
+
+                for (auto &write : pt.write_set()) {
+                    to_add.emplace_back(transaction_id, v.ts(), write.first, write.second);
+                }
+
+                prepares.erase(search);
+            }
+        }
+    }
+
+    AddValues(state, to_add);
+}
+
+void Client::CalculateSnapshotTimestamp(std::unique_ptr<ContextState> &state) {
+    auto &values = state->mutable_values();
+
+    // Find snapshot ts, the minimum timestamp we can use to read all keys
+    Timestamp snapshot_ts{0, 0};
+    for (auto &kv : values) {
+        const std::list<Value> &l = kv.second;
+        ASSERT(l.size() > 0);
+        const Value &v = l.back();
+        if (snapshot_ts < v.ts()) {
+            snapshot_ts = v.ts();
+        }
+    }
+
+    state->set_snapshot_ts(snapshot_ts);
+}
+
+SnapshotResult Client::CheckCommit(std::unique_ptr<ContextState> &state) {
+    auto &participants = state->participants();
+    auto &prepares = state->mutable_prepares();
+    auto &values = state->mutable_values();
+    auto &snapshot_ts = state->snapshot_ts();
+
+    if (participants.size() > 0) {
+        return {WAIT};
+    }
+
+    if (consistency_ == SS) {
+        return {COMMIT, snapshot_ts};
+    }
+
+    for (auto &kv : values) {
+        Debug("key: %s", kv.first.c_str());
+        std::list<Value> &l = kv.second;
+        for (Value &v : l) {
+            Debug("value: %lu %lu.%lu %s", v.transaction_id(), v.ts().getTimestamp(), v.ts().getID(), v.val().c_str());
+        }
+    }
+
+    for (auto &p : prepares) {
+        Debug("prepare: %lu %lu.%lu", p.second.transaction_id(), p.second.prepare_ts().getTimestamp(), p.second.prepare_ts().getID());
+        for (auto &write : p.second.write_set()) {
+            Debug("write: %s %s", write.first.c_str(), write.second.c_str());
+        }
+    }
+
+    // Find min prepare ts
+    Timestamp min_ts = Timestamp::MAX;
+    for (auto &p : prepares) {
+        const PreparedTransaction &pt = p.second;
+        if (pt.prepare_ts() < min_ts) {
+            min_ts = pt.prepare_ts();
+        }
+    }
+
+    Debug("min prepare ts: %lu.%lu", min_ts.getTimestamp(), min_ts.getID());
+    Debug("snapshot ts: %lu.%lu", snapshot_ts.getTimestamp(), snapshot_ts.getID());
+    Debug("can commit: %d", snapshot_ts < min_ts);
+
+    if (snapshot_ts < min_ts) {
+        return {COMMIT, snapshot_ts};
+    } else {
+        return {WAIT};
     }
 }
 
