@@ -2,6 +2,7 @@
 #define _STRONG_CLIENT_H_
 
 #include <bitset>
+#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -25,6 +26,36 @@
 
 namespace strongstore {
 
+class ContextState {
+   public:
+    ContextState() : participants_{}, state_{EXECUTING} {}
+    ~ContextState() {}
+
+    bool executing() const { return (state_ == EXECUTING); }
+    bool committing() const { return (state_ == COMMITTING); }
+    bool aborted() const { return (state_ == ABORTED); }
+
+   protected:
+    friend class Client;
+
+    void set_committing() { state_ = COMMITTING; }
+    void set_aborted() { state_ = ABORTED; }
+
+    const std::set<int> &participants() const { return participants_; }
+    void add_participant(int p) { participants_.insert(p); }
+    void clear_participants() { participants_.clear(); }
+
+   private:
+    enum State {
+        EXECUTING,
+        COMMITTING,
+        ABORTED
+    };
+
+    std::set<int> participants_;
+    State state_;
+};
+
 class Client : public ::Client {
    public:
     Client(Consistency consistency, const NetworkConfiguration &net_config,
@@ -35,53 +66,48 @@ class Client : public ::Client {
     virtual ~Client();
 
     // Overriding functions from ::Client
-    // Begin a transaction.
-    virtual void Begin(bool is_retry, begin_callback bcb,
+    // Begin a transaction
+    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+
+    // Begin a retried transaction.
+    virtual void Begin(const Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
-    virtual void Get(const std::string &key, get_callback gcb,
-                     get_timeout_callback gtcb,
+    virtual void Get(const Context &ctx, const std::string &key,
+                     get_callback gcb, get_timeout_callback gtcb,
                      uint32_t timeout = GET_TIMEOUT) override;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(const std::string &key, get_callback gcb,
-                              get_timeout_callback gtcb,
+    virtual void GetForUpdate(const Context &ctx, const std::string &key,
+                              get_callback gcb, get_timeout_callback gtcb,
                               uint32_t timeout = GET_TIMEOUT) override;
 
     // Set the value for the given key.
-    virtual void Put(const std::string &key, const std::string &value,
+    virtual void Put(const Context &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout = PUT_TIMEOUT) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) override;
 
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
+    virtual void Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    void ROCommit(const std::unordered_set<std::string> &keys,
+    void ROCommit(const Context &ctx, const std::unordered_set<std::string> &keys,
                   commit_callback ccb, commit_timeout_callback ctcb,
                   uint32_t timeout) override;
 
    private:
     const static std::size_t MAX_SHARDS = 16;
 
-    enum State {
-        EXECUTING,
-        COMMITTING,
-        ABORTED
-    };
-
     struct PendingRequest {
-        PendingRequest(uint64_t id, uint64_t txnId)
-            : id(id),
-              txnId(txnId),
-              outstandingPrepares(0) {}
+        PendingRequest(uint64_t id)
+            : id(id), outstandingPrepares(0) {}
 
         ~PendingRequest() {}
 
@@ -90,36 +116,39 @@ class Client : public ::Client {
         abort_callback acb;
         abort_timeout_callback atcb;
         uint64_t id;
-        uint64_t txnId;
         int outstandingPrepares;
     };
 
+    void Abort(const uint64_t transaction_id, abort_callback acb, abort_timeout_callback atcb,
+               uint32_t timeout);
+
     // local Prepare function
-    void Prepare(PendingRequest *req, uint32_t timeout);
-    void CommitCallback(uint64_t reqId, int status, Timestamp commit_ts, Timestamp nonblock_ts);
+    void CommitCallback(const uint64_t transaction_id, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts);
 
-    void AbortCallback(uint64_t reqId);
+    void AbortCallback(const uint64_t transaction_id, uint64_t req_id);
 
-    void ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+    void ROCommitCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
                           const std::vector<Value> &values,
                           const std::vector<PreparedTransaction> &prepares);
 
-    void ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+    void ROCommitSlowCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
                               uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit);
 
-    void HandleWound(uint64_t transaction_id);
+    void HandleWound(const uint64_t transaction_id);
 
     // choose coordinator from participants
     void CalculateCoordinatorChoices();
-    int ChooseCoordinator();
+    int ChooseCoordinator(const uint64_t transaction_id);
 
     // Choose nonblock time
-    Timestamp ChooseNonBlockTimestamp();
+    Timestamp ChooseNonBlockTimestamp(const uint64_t transaction_id);
 
     ViewFinder vf_;
 
     std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
     std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;
+
+    std::unordered_map<uint64_t, std::unique_ptr<ContextState>> context_states_;
 
     Timestamp min_read_timestamp_;
 
@@ -128,22 +157,11 @@ class Client : public ::Client {
 
     transport::Configuration &config_;
 
-    State state_;
-
     // Unique ID for this client.
     uint64_t client_id_;
 
-    // Ongoing transaction ID.
-    uint64_t transaction_id_;
-
-    // Ongoing transaction start time
-    Timestamp start_time_;
-
     // Number of shards in SpanStore.
     uint64_t nshards_;
-
-    // List of participants in the ongoing transaction.
-    std::set<int> participants_;
 
     // Transport used by paxos client proxies.
     Transport *transport_;
@@ -157,8 +175,10 @@ class Client : public ::Client {
     // TrueTime server.
     TrueTime &tt_;
 
-    uint64_t lastReqId;
-    std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
+    uint64_t next_transaction_id_;
+
+    uint64_t last_req_id_;
+    std::unordered_map<uint64_t, PendingRequest *> pending_reqs_;
 
     Latency_t op_lat_;
     Latency_t commit_lat_;

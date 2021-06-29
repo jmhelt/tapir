@@ -24,7 +24,6 @@
 #include "store/benchmark/async/common/zipf_key_selector.h"
 #include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_client.h"
-#include "store/benchmark/async/sync_transaction_bench_client.h"
 #include "store/common/partitioner.h"
 #include "store/common/stats.h"
 #include "store/common/truetime.h"

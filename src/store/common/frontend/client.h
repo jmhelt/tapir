@@ -27,7 +27,21 @@ enum transaction_status_t {
     ABORTED_MAX_RETRIES
 };
 
-typedef std::function<void()> begin_callback;
+class Context {
+   public:
+    Context() : transaction_id_{0}, start_ts_{0, 0} {}
+    Context(uint64_t transaction_id, const Timestamp &start_ts)
+        : transaction_id_{transaction_id}, start_ts_{start_ts} {}
+
+    const uint64_t transaction_id() const { return transaction_id_; }
+    const Timestamp &start_ts() const { return start_ts_; }
+
+   private:
+    const uint64_t transaction_id_;
+    const Timestamp start_ts_;
+};
+
+typedef std::function<void(Context &)> begin_callback;
 typedef std::function<void()> begin_timeout_callback;
 
 typedef std::function<void(int, const std::string &, const std::string &, Timestamp)> get_callback;
@@ -49,39 +63,40 @@ class Client {
     Client() { _Latency_Init(&clientLat, "client_lat"); }
     virtual ~Client() {}
 
-    // Begin a transaction.
-    virtual void Begin(bool is_retry, begin_callback bcb,
+    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+
+    virtual void Begin(const Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
-    virtual void Get(const std::string &key, get_callback gcb,
+    virtual void Get(const Context &ctx, const std::string &key, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(const std::string &key, get_callback gcb,
+    virtual void GetForUpdate(const Context &ctx, const std::string &key, get_callback gcb,
                               get_timeout_callback gtcb, uint32_t timeout) {
-        Get(key, gcb, gtcb, timeout);
+        Get(ctx, key, gcb, gtcb, timeout);
     }
 
     // Set the value for the given key.
-    virtual void Put(const std::string &key, const std::string &value,
+    virtual void Put(const Context &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout) = 0;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) = 0;
 
-    virtual void ROCommit(const std::unordered_set<std::string> &keys,
+    // Abort all Get(s) and Put(s) since Begin().
+    virtual void Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+                       uint32_t timeout) = 0;
+
+    virtual void ROCommit(const Context &ctx, const std::unordered_set<std::string> &keys,
                           commit_callback ccb, commit_timeout_callback ctcb,
                           uint32_t timeout) {
         Panic("Unimplemented ROCommit!");
     }
-
-    // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
-                       uint32_t timeout) = 0;
 
     inline Stats &GetStats() { return stats; }
 

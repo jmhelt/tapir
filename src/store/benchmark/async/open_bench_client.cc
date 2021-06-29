@@ -10,6 +10,7 @@
 #include "lib/message.h"
 #include "lib/timeval.h"
 #include "lib/transport.h"
+#include "store/strongstore/client.h"
 
 DEFINE_LATENCY(op);
 
@@ -27,7 +28,7 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
       client_id_{id},
       timeout_{timeout},
       rand_{id},
-      next_arrival_dist_{1e-6},  // TODO: fix this
+      next_arrival_dist_{1e-5},  // TODO: fix this
       n_requests_(numRequests),
       exp_duration_(expDuration),
       warmupSec(warmupSec),
@@ -43,18 +44,19 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
     if (numRequests > 0) {
         latencies.reserve(numRequests);
     }
+
     _Latency_Init(&latency, "txn");
 }
 
-OpenBenchmarkClient::~OpenBenchmarkClient() {}
+OpenBenchmarkClient::~OpenBenchmarkClient() {
+    Debug("executing_transactions_.size(): %lu", executing_transactions_.size());
+}
 
 void OpenBenchmarkClient::Start(bench_done_callback bdcb) {
     n = 0;
     curr_bdcb_ = bdcb;
     transport_.Timer(warmupSec * 1000, std::bind(&OpenBenchmarkClient::WarmupDone, this));
     gettimeofday(&startTime, NULL);
-
-    Latency_Start(&latency);
 
     transport_.TimerMicro(0, std::bind(&OpenBenchmarkClient::SendNext, this));
 }
@@ -63,19 +65,13 @@ void OpenBenchmarkClient::SendNext() {
     auto tid = next_transaction_id_;
     Debug("[%lu] SendNext", tid);
     next_transaction_id_++;
-    auto transaction = GetNextTransaction();
 
+    auto transaction = GetNextTransaction();
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
 
-    Latency_Start(&latency);
-
-    auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, tid, std::placeholders::_1);
-    executing_transactions_.insert({tid, {tid, transaction, ecb}});
-    Debug("tid: %lu", tid);
-
-    auto bcb = std::bind(&OpenBenchmarkClient::ExecuteNextOperation, this, tid);
-    client_.Begin(
-        false, bcb, []() {}, timeout_);
+    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
+    auto btcb = []() {};
+    client_.Begin(bcb, btcb, timeout_);
 
     if (!done) {
         uint64_t next_arrival_us = static_cast<uint64_t>(next_arrival_dist_(rand_));
@@ -84,16 +80,30 @@ void OpenBenchmarkClient::SendNext() {
     }
 }
 
+void OpenBenchmarkClient::BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx) {
+    auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, transaction_id, std::placeholders::_1);
+
+    executing_transactions_.insert({transaction_id, {transaction_id, transaction, ctx, ecb}});
+
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+    _Latency_StartRec(search->second.lat());
+
+    ExecuteNextOperation(transaction_id);
+}
+
 void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
     Debug("[%lu] ExecuteNextOperation", transaction_id);
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
-    auto transaction = ctx.transaction();
-    auto op_index = ctx.op_index();
+    auto &et = search->second;
+    auto transaction = et.transaction();
+    auto op_index = et.op_index();
+    auto &ctx = et.ctx();
 
     Operation op = transaction->GetNextOperation(op_index);
+    et.incr_op_index();
 
     auto gcb = std::bind(&OpenBenchmarkClient::GetCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
     auto gtcb = std::bind(&OpenBenchmarkClient::GetTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
@@ -106,36 +116,35 @@ void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
 
     switch (op.type) {
         case GET:
-            client_.Get(op.key, gcb, gtcb, timeout_);
+            client_.Get(ctx, op.key, gcb, gtcb, timeout_);
             break;
 
         case GET_FOR_UPDATE:
-            client_.GetForUpdate(op.key, gcb, gtcb, timeout_);
+            client_.GetForUpdate(ctx, op.key, gcb, gtcb, timeout_);
             break;
 
-        case PUT: {
-            client_.Put(op.key, op.value, pcb, ptcb, timeout_);
+        case PUT:
+            client_.Put(ctx, op.key, op.value, pcb, ptcb, timeout_);
             break;
-        }
-        case COMMIT: {
-            client_.Commit(ccb, ctcb, timeout_);
+
+        case COMMIT:
+            client_.Commit(ctx, ccb, ctcb, timeout_);
             break;
-        }
-        case ABORT: {
-            client_.Abort(acb, atcb, timeout_);
+
+        case ABORT:
+            client_.Abort(ctx, acb, atcb, timeout_);
             break;
-        }
-        case ROCOMMIT: {
-            client_.ROCommit(op.keys, ccb, ctcb, timeout_);
+
+        case ROCOMMIT:
+            client_.ROCommit(ctx, op.keys, ccb, ctcb, timeout_);
             break;
-        }
+
         case WAIT:
             break;
+
         default:
             NOT_REACHABLE();
     }
-
-    ctx.incr_op_index();
 }
 
 void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
@@ -144,12 +153,12 @@ void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
+    auto &et = search->second;
 
     if (status == REPLY_OK) {
         ExecuteNextOperation(transaction_id);
     } else if (status == REPLY_FAIL) {
-        auto ecb = ctx.ecb();
+        auto ecb = et.ecb();
         ecb(ABORTED_SYSTEM);
     } else {
         Panic("Unknown status for Get %d.", status);
@@ -159,9 +168,16 @@ void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
 void OpenBenchmarkClient::GetTimeout(const uint64_t transaction_id,
                                      int status, const std::string &key) {
     Warning("[%lu] Get(%s) timed out :(", transaction_id, key.c_str());
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &et = search->second;
+
+    auto &ctx = et.ctx();
     auto gcb = std::bind(&OpenBenchmarkClient::GetCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
     auto gtcb = std::bind(&OpenBenchmarkClient::GetTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
-    client_.Get(key, gcb, gtcb, timeout_);
+
+    client_.Get(ctx, key, gcb, gtcb, timeout_);
 }
 
 void OpenBenchmarkClient::PutCallback(const uint64_t transaction_id,
@@ -170,12 +186,12 @@ void OpenBenchmarkClient::PutCallback(const uint64_t transaction_id,
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
+    auto &et = search->second;
 
     if (status == REPLY_OK) {
         ExecuteNextOperation(transaction_id);
     } else if (status == REPLY_FAIL) {
-        auto ecb = ctx.ecb();
+        auto ecb = et.ecb();
         ecb(ABORTED_SYSTEM);
     } else {
         Panic("Unknown status for Put %d.", status);
@@ -192,8 +208,8 @@ void OpenBenchmarkClient::CommitCallback(const uint64_t transaction_id, transact
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
-    auto ecb = ctx.ecb();
+    auto &et = search->second;
+    auto ecb = et.ecb();
 
     ecb(result);
 }
@@ -216,10 +232,10 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
-    auto transaction = ctx.transaction();
+    auto &et = search->second;
+    auto transaction = et.transaction();
     auto &ttype = transaction->GetTransactionType();
-    auto n_attempts = ctx.n_attempts();
+    auto n_attempts = et.n_attempts();
 
     if (result == COMMITTED || result == ABORTED_USER ||
         (maxAttempts != -1 && n_attempts >= static_cast<uint64_t>(maxAttempts)) ||
@@ -250,12 +266,23 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
                 Debug("Backing off for %lums", backoff);
             }
 
-            ctx.incr_attempts();
-            transport_.TimerMicro(backoff, [this, transaction_id, transaction, ttype]() {
+            et.incr_attempts();
+
+            transport_.TimerMicro(backoff, [this, transaction_id]() {
+                auto search = executing_transactions_.find(transaction_id);
+                ASSERT(search != executing_transactions_.end());
+
+                auto &et = search->second;
+                auto transaction = et.transaction();
+                auto ctx = et.ctx();
+                auto &ttype = et.transaction()->GetTransactionType();
+                executing_transactions_.erase(search);
+
                 stats.Increment(ttype + "_attempts", 1);
-                auto bcb = std::bind(&OpenBenchmarkClient::ExecuteNextOperation, this, transaction_id);
-                client_.Begin(
-                    true, bcb, []() {}, timeout_);
+
+                auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, transaction_id, transaction, std::placeholders::_1);
+                auto btcb = []() {};
+                client_.Begin(ctx, bcb, btcb, timeout_);
             });
         }
     }
@@ -307,13 +334,15 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
 
-    auto &ctx = search->second;
-    auto transaction = ctx.transaction();
+    auto &et = search->second;
+    auto transaction = et.transaction();
+    auto lat = et.lat();
 
     if (started) {
         // record latency
         if (!cooldownStarted) {
-            uint64_t ns = Latency_End(&latency);
+            _Latency_EndRec(&latency, lat);
+            uint64_t ns = lat->accum;
             // TODO: use standard definitions across all clients for
             // success/commit and failure/abort
             if (result == 0) {  // only record result if success
@@ -355,8 +384,6 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
 
     n++;
 }
-
-void OpenBenchmarkClient::StartLatency() { Latency_Start(&latency); }
 
 OpenBenchmarkClient::BenchState OpenBenchmarkClient::GetBenchState(struct timeval &diff) const {
     struct timeval currTime;

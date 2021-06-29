@@ -51,21 +51,20 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
     : vf_{consistency},
       coord_choices_{},
       min_lats_{},
+      context_states_{},
       min_read_timestamp_{},
       net_config_{net_config},
       client_region_{client_region},
       config_{config},
-      state_{EXECUTING},
       client_id_{client_id},
       nshards_(nShards),
       transport_{transport},
       part_(part),
       tt_{tt},
+      next_transaction_id_{client_id_ << 26},
       consistency_{consistency},
       debug_stats_{debug_stats},
       nb_time_alpha_{nb_time_alpha} {
-    transaction_id_ = client_id_ << 26;
-
     Debug("Initializing StrongStore client with id [%lu]", client_id_);
 
     auto wcb = std::bind(&Client::HandleWound, this, std::placeholders::_1);
@@ -95,6 +94,8 @@ Client::~Client() {
     for (auto s : sclients_) {
         delete s;
     }
+
+    Debug("context_states_.size(): %lu", context_states_.size());
 }
 
 void Client::CalculateCoordinatorChoices() {
@@ -203,12 +204,17 @@ void Client::CalculateCoordinatorChoices() {
     }
 }
 
-int Client::ChooseCoordinator() {
-    ASSERT(participants_.size() != 0);
+int Client::ChooseCoordinator(const uint64_t transaction_id) {
+    auto search = context_states_.find(transaction_id);
+    ASSERT(search != context_states_.end());
+    auto &state = search->second;
+
+    auto &participants = state->participants();
+    ASSERT(participants.size() != 0);
 
     std::bitset<MAX_SHARDS> shards;
 
-    for (int p : participants_) {
+    for (int p : participants) {
         shards.set(p);
     }
 
@@ -217,12 +223,17 @@ int Client::ChooseCoordinator() {
     return coord_choices_[shards];
 }
 
-Timestamp Client::ChooseNonBlockTimestamp() {
-    ASSERT(participants_.size() != 0);
+Timestamp Client::ChooseNonBlockTimestamp(const uint64_t transaction_id) {
+    auto search = context_states_.find(transaction_id);
+    ASSERT(search != context_states_.end());
+    auto &state = search->second;
+
+    auto &participants = state->participants();
+    ASSERT(participants.size() != 0);
 
     std::bitset<MAX_SHARDS> shards;
 
-    for (int p : participants_) {
+    for (int p : participants) {
         shards.set(p);
     }
 
@@ -231,28 +242,35 @@ Timestamp Client::ChooseNonBlockTimestamp() {
     uint16_t l = min_lats_[shards];
     uint64_t lat = static_cast<uint64_t>(nb_time_alpha_ * l * 1000);
     auto now = tt_.Now();
-    Debug("[%lu] lat: %lu, ts: %lu", transaction_id_, lat, now.earliest() + lat);
+    Debug("[%lu] lat: %lu, ts: %lu", transaction_id, lat, now.earliest() + lat);
     return {now.earliest() + lat, client_id_};
 }
 
-void Client::HandleWound(uint64_t transaction_id) {
-    if (transaction_id != transaction_id_) {
-        Debug("[%lu] Wound for wrong tid: %lu", transaction_id_, transaction_id);
+void Client::HandleWound(const uint64_t transaction_id) {
+    auto search = context_states_.find(transaction_id);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Transaction already finished", transaction_id);
         return;
     }
 
-    if (state_ == ABORTED) {
+    auto &state = search->second;
+
+    if (state->aborted()) {
         Debug("[%lu] Already aborted", transaction_id);
         return;
     }
 
-    if (state_ == EXECUTING) {
+    if (state->executing()) {
         Debug("[%lu] Sending aborts", transaction_id);
-        Abort([transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); }, []() {}, ABORT_TIMEOUT);
-    } else if (state_ == COMMITTING) {
+
+        auto acb = [transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); };
+        auto atcb = []() {};
+
+        Abort(transaction_id, acb, atcb, ABORT_TIMEOUT);
+    } else if (state->committing()) {
         // Forward wound to coordinator
         Debug("[%lu] Forwarding wound to coordinator", transaction_id);
-        int coordinator = ChooseCoordinator();
+        int coordinator = ChooseCoordinator(transaction_id);
         sclients_[coordinator]->Wound(transaction_id);
     } else {
         NOT_REACHABLE();
@@ -261,257 +279,290 @@ void Client::HandleWound(uint64_t transaction_id) {
 
 /* Begins a transaction. All subsequent operations before a commit() or
  * abort() are part of this transaction.
- *
- * Return a TID for the transaction.
  */
-void Client::Begin(bool is_retry, begin_callback bcb,
+void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    auto tid = next_transaction_id_++;
+    Timestamp start_ts{tt_.Now().latest(), client_id_};
+
+    auto state = std::make_unique<ContextState>();
+    context_states_.emplace(tid, std::move(state));
+
+    for (uint64_t i = 0; i < nshards_; i++) {
+        sclients_[i]->Begin(tid, start_ts);
+    }
+
+    Context ctx{tid, start_ts};
+    bcb(ctx);
+}
+
+/* Begins a transaction, retrying the transaction indicated by ctx.
+ */
+void Client::Begin(const Context &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
-    if (debug_stats_) {
-        Latency_Start(&op_lat_);
+    auto tid = next_transaction_id_++;
+    auto &start_ts = ctx.start_ts();
+
+    auto state = std::make_unique<ContextState>();
+    context_states_.emplace(tid, std::move(state));
+
+    for (uint64_t i = 0; i < nshards_; i++) {
+        sclients_[i]->Begin(tid, start_ts);
     }
 
-    if (!is_retry) {
-        start_time_ = Timestamp{tt_.Now().latest(), client_id_};
-    }
-
-    transport_->Timer(0, [this, bcb, btcb, timeout]() {
-        state_ = EXECUTING;
-
-        Debug("BEGIN [%lu]", transaction_id_ + 1);
-        transaction_id_++;
-        participants_.clear();
-
-        for (uint64_t i = 0; i < nshards_; i++) {
-            sclients_[i]->Begin(transaction_id_, start_time_);
-        }
-        bcb();
-    });
+    Context nctx{tid, start_ts};
+    bcb(nctx);
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::Get(const std::string &key, get_callback gcb,
+void Client::Get(const Context &ctx, const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
-    transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
-        if (state_ == ABORTED) {
-            Debug("[%lu] Already aborted", transaction_id_);
-            gcb(REPLY_FAIL, "", "", Timestamp());
-            return;
-        }
+    auto tid = ctx.transaction_id();
 
-        Debug("GET [%lu : %s]", transaction_id_, BytesToHex(key, 16).c_str());
-        // Contact the appropriate shard to get the value.
-        int i = (*part_)(key, nshards_, -1, participants_);
+    Debug("GET [%lu : %s]", tid, key.c_str());
 
-        // If needed, add this shard to set of participants
-        if (participants_.find(i) == participants_.end()) {
-            participants_.insert(i);
-        }
+    auto search = context_states_.find(tid);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Already aborted", tid);
+        gcb(REPLY_FAIL, "", "", Timestamp());
+        return;
+    }
 
-        // Send the GET operation to appropriate shard.
-        auto gcbLat = [this, gcb](int status, const std::string &key,
-                                  const std::string &val,
-                                  Timestamp ts) { gcb(status, key, val, ts); };
-        sclients_[i]->Get(transaction_id_, key, gcbLat, gtcb, timeout);
-    });
+    auto &state = search->second;
+
+    if (state->aborted()) {
+        Debug("[%lu] Already aborted", tid);
+        gcb(REPLY_FAIL, "", "", Timestamp());
+        return;
+    }
+
+    // Contact the appropriate shard to get the value.
+    int i = (*part_)(key, nshards_, -1, state->participants());
+
+    // Add this shard to set of participants
+    state->add_participant(i);
+
+    // Send the GET operation to appropriate shard.
+    sclients_[i]->Get(tid, key, gcb, gtcb, timeout);
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::GetForUpdate(const std::string &key, get_callback gcb,
+void Client::GetForUpdate(const Context &ctx, const std::string &key, get_callback gcb,
                           get_timeout_callback gtcb, uint32_t timeout) {
-    transport_->Timer(0, [this, key, gcb, gtcb, timeout]() {
-        if (state_ == ABORTED) {
-            Debug("[%lu] Already aborted", transaction_id_);
-            gcb(REPLY_FAIL, "", "", Timestamp());
-            return;
-        }
+    auto tid = ctx.transaction_id();
 
-        Debug("GET [%lu : %s]", transaction_id_, BytesToHex(key, 16).c_str());
-        // Contact the appropriate shard to get the value.
-        int i = (*part_)(key, nshards_, -1, participants_);
+    Debug("GET FOR UPDATE [%lu : %s]", tid, key.c_str());
 
-        // If needed, add this shard to set of participants
-        if (participants_.find(i) == participants_.end()) {
-            participants_.insert(i);
-        }
+    auto search = context_states_.find(tid);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Already aborted", tid);
+        gcb(REPLY_FAIL, "", "", Timestamp());
+        return;
+    }
 
-        // Send the GET operation to appropriate shard.
-        auto gcbLat = [this, gcb](int status, const std::string &key,
-                                  const std::string &val,
-                                  Timestamp ts) { gcb(status, key, val, ts); };
-        sclients_[i]->GetForUpdate(transaction_id_, key, gcbLat, gtcb, timeout);
-    });
+    auto &state = search->second;
+
+    if (state->aborted()) {
+        Debug("[%lu] Already aborted", tid);
+        gcb(REPLY_FAIL, "", "", Timestamp());
+        return;
+    }
+
+    // Contact the appropriate shard to get the value.
+    int i = (*part_)(key, nshards_, -1, state->participants());
+
+    // Add this shard to set of participants
+    state->add_participant(i);
+
+    // Send the GET operation to appropriate shard.
+    sclients_[i]->GetForUpdate(tid, key, gcb, gtcb, timeout);
 }
 
 /* Sets the value corresponding to the supplied key. */
-void Client::Put(const std::string &key, const std::string &value,
+void Client::Put(const Context &ctx, const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
-    transport_->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
-        Debug("PUT [%lu : %s]", transaction_id_, key.c_str());
-        // Contact the appropriate shard to set the value.
-        int i = (*part_)(key, nshards_, -1, participants_);
+    auto tid = ctx.transaction_id();
 
-        // If needed, add this shard to set of participants
-        if (participants_.find(i) == participants_.end()) {
-            participants_.insert(i);
-        }
+    Debug("PUT [%lu : %s]", tid, key.c_str());
 
-        auto pcbLat = [this, pcb](int status1, const std::string &key1,
-                                  const std::string &val1) {
-            pcb(status1, key1, val1);
-        };
-        sclients_[i]->Put(transaction_id_, key, value, pcbLat, ptcb, timeout);
-    });
+    auto search = context_states_.find(tid);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Already aborted", tid);
+        pcb(REPLY_FAIL, "", "");
+        return;
+    }
+
+    auto &state = search->second;
+
+    if (state->aborted()) {
+        Debug("[%lu] Already aborted", tid);
+        pcb(REPLY_FAIL, "", "");
+        return;
+    }
+
+    // Contact the appropriate shard to set the value.
+    int i = (*part_)(key, nshards_, -1, state->participants());
+
+    // Add this shard to set of participants
+    state->add_participant(i);
+
+    sclients_[i]->Put(tid, key, value, pcb, ptcb, timeout);
 }
 
-void Client::Prepare(PendingRequest *req, uint32_t timeout) {
-    Debug("[%lu] PREPARE", transaction_id_);
-    ASSERT(participants_.size() > 0);
+/* Attempts to commit the ongoing transaction. */
+void Client::Commit(const Context &ctx, commit_callback ccb, commit_timeout_callback ctcb, uint32_t timeout) {
+    auto tid = ctx.transaction_id();
+
+    Debug("[%lu] COMMIT", tid);
+
+    auto search = context_states_.find(tid);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Already aborted", tid);
+        ccb(ABORTED_SYSTEM);
+        return;
+    }
+
+    auto &state = search->second;
+
+    if (state->aborted()) {
+        Debug("[%lu] Already aborted", tid);
+        ccb(ABORTED_SYSTEM);
+        return;
+    }
+
+    state->set_committing();
+
+    uint64_t req_id = last_req_id_++;
+    PendingRequest *req = new PendingRequest(req_id);
+    pending_reqs_[req_id] = req;
+    req->ccb = ccb;
+    req->ctcb = ctcb;
+
+    auto &participants = state->participants();
+
+    stats.IncrementList("txn_groups", participants.size());
+
+    Debug("[%lu] PREPARE", tid);
+    ASSERT(participants.size() > 0);
 
     req->outstandingPrepares = 0;
 
-    int coordinator_shard = ChooseCoordinator();
+    int coordinator_shard = ChooseCoordinator(tid);
 
     Timestamp nonblock_timestamp = Timestamp();
     if (consistency_ == Consistency::RSS) {
-        nonblock_timestamp = ChooseNonBlockTimestamp();
+        nonblock_timestamp = ChooseNonBlockTimestamp(tid);
     }
 
-    for (auto p : participants_) {
-        if (p == coordinator_shard) {
-            sclients_[p]->RWCommitCoordinator(
-                transaction_id_, participants_, nonblock_timestamp,
-                std::bind(&Client::CommitCallback, this, req->id,
-                          std::placeholders::_1, std::placeholders::_2, std::placeholders::_3),
-                [](int) {},
-                timeout);
-        } else {
-            sclients_[p]->RWCommitParticipant(
-                transaction_id_, coordinator_shard, nonblock_timestamp,
-                [this, reqId = req->id](int status) {
-                    Debug("[%lu] PREPARE callback status %d", transaction_id_, status);
+    auto cccb = std::bind(&Client::CommitCallback, this, tid, req->id,
+                          std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+    auto cctcb = [](int) {};
 
-                    auto itr = pendingReqs.find(reqId);
-                    if (itr == pendingReqs.end()) {
-                        Debug(
-                            "CommitCallback for terminated request id %ld "
-                            "(txn already "
-                            "committed or aborted.",
-                            reqId);
-                        return;
-                    }
-                },
-                [](int) {}, timeout);
+    auto pccb = [transaction_id = tid](int status) {
+        Debug("[%lu] PREPARE callback status %d", transaction_id, status);
+    };
+    auto pctcb = [](int) {};
+
+    for (auto p : participants) {
+        if (p == coordinator_shard) {
+            sclients_[p]->RWCommitCoordinator(tid, participants, nonblock_timestamp, cccb, cctcb, timeout);
+        } else {
+            sclients_[p]->RWCommitParticipant(tid, coordinator_shard, nonblock_timestamp, pccb, pctcb, timeout);
         }
     }
 }
 
-void Client::CommitCallback(uint64_t reqId, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
-    Debug("PREPARE [%lu] callback status %d", transaction_id_, status);
+void Client::CommitCallback(const uint64_t transaction_id, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
+    Debug("[%lu] PREPARE callback status %d", transaction_id, status);
 
-    auto itr = this->pendingReqs.find(reqId);
-    if (itr == this->pendingReqs.end()) {
-        Debug(
-            "CommitCallback for terminated request id %lu (txn already "
-            "committed or aborted.",
-            reqId);
+    auto itr = this->pending_reqs_.find(req_id);
+    if (itr == this->pending_reqs_.end()) {
+        Debug("[%lu] Transaction already finished", transaction_id);
         return;
     }
     PendingRequest *req = itr->second;
 
-    transaction_status_t tstatus = ABORTED_SYSTEM;
+    transaction_status_t tstatus;
     switch (status) {
         case REPLY_OK:
-            Debug("COMMIT [%lu] OK", transaction_id_);
+            Debug("[%lu] COMMIT OK", transaction_id);
             tstatus = COMMITTED;
             break;
         default:
             // abort!
-            Debug("COMMIT [%lu] ABORT", transaction_id_);
+            Debug("[%lu] COMMIT ABORT", transaction_id);
             tstatus = ABORTED_SYSTEM;
             break;
     }
 
     commit_callback ccb = req->ccb;
-    pendingReqs.erase(reqId);
+    pending_reqs_.erase(req_id);
     delete req;
 
     uint64_t ms = 0;
     if (tstatus == COMMITTED && consistency_ == Consistency::RSS) {
         ms = tt_.TimeToWaitUntilMS(nonblock_ts.getTimestamp());
-        Debug("Waiting for nonblock time: %lu", ms);
+        Debug("Waiting for nonblock time: %lu ms", ms);
         min_read_timestamp_ = std::max(min_read_timestamp_, commit_ts);
         Debug("min_read_timestamp_: %lu.%lu", min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
     }
 
-    transport_->Timer(ms, [this, ccb, tstatus] {
-        if (debug_stats_) {
-            Latency_End(&commit_lat_);
-        }
-        ccb(tstatus);
-    });
+    transport_->Timer(ms, std::bind(ccb, tstatus));
+
+    context_states_.erase(transaction_id);
 }
 
-/* Attempts to commit the ongoing transaction. */
-void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
-                    uint32_t timeout) {
-    if (state_ == ABORTED) {
-        Debug("[%lu] Already aborted", transaction_id_);
-        ccb(ABORTED_SYSTEM);
-        return;
-    }
-
-    state_ = COMMITTING;
-
-    if (debug_stats_) {
-        Latency_End(&op_lat_);
-        Latency_Start(&commit_lat_);
-    }
-
-    uint64_t reqId = lastReqId++;
-    PendingRequest *req = new PendingRequest(reqId, transaction_id_);
-    pendingReqs[reqId] = req;
-    req->ccb = ccb;
-    req->ctcb = ctcb;
-
-    stats.IncrementList("txn_groups", participants_.size());
-
-    Prepare(req, timeout);
+void Client::Abort(const Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+                   uint32_t timeout) {
+    auto tid = ctx.transaction_id();
+    Abort(tid, acb, atcb, timeout);
 }
 
 /* Aborts the ongoing transaction. */
-void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
+void Client::Abort(const uint64_t transaction_id, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
-    Debug("[%lu] ABORT", transaction_id_);
+    Debug("[%lu] ABORT", transaction_id);
 
-    if (state_ == ABORTED) {
-        Debug("[%lu] Already aborted", transaction_id_);
+    auto search = context_states_.find(transaction_id);
+    if (search == context_states_.end()) {
+        Debug("[%lu] Already aborted", transaction_id);
         acb();
         return;
     }
 
-    state_ = ABORTED;
+    auto &state = search->second;
 
-    uint64_t reqId = lastReqId++;
-    PendingRequest *req = new PendingRequest(reqId, transaction_id_);
-    pendingReqs[reqId] = req;
+    if (state->aborted()) {
+        Debug("[%lu] Already aborted", transaction_id);
+        acb();
+        return;
+    }
+
+    state->set_aborted();
+
+    auto &participants = state->participants();
+
+    uint64_t req_id = last_req_id_++;
+    PendingRequest *req = new PendingRequest(req_id);
+    pending_reqs_[req_id] = req;
     req->acb = acb;
     req->atcb = atcb;
-    req->outstandingPrepares = participants_.size();
+    req->outstandingPrepares = participants.size();
 
-    for (int p : participants_) {
-        auto cb = std::bind(&Client::AbortCallback, this, req->id);
-        sclients_[p]->Abort(
-            transaction_id_, cb, []() {}, timeout);
+    auto cb = std::bind(&Client::AbortCallback, this, transaction_id, req->id);
+    auto tcb = []() {};
+
+    for (int p : participants) {
+        sclients_[p]->Abort(transaction_id, cb, tcb, timeout);
     }
 }
 
-void Client::AbortCallback(uint64_t reqId) {
-    Debug("[%lu] Abort callback", transaction_id_);
+void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
+    Debug("[%lu] Abort callback", transaction_id);
 
-    auto itr = this->pendingReqs.find(reqId);
-    if (itr == this->pendingReqs.end()) {
-        Debug("AbortCallback for terminated request id %lu", reqId);
+    auto itr = this->pending_reqs_.find(req_id);
+    if (itr == this->pending_reqs_.end()) {
+        Debug("[%lu] Transaction already finished", transaction_id);
         return;
     }
 
@@ -519,38 +570,46 @@ void Client::AbortCallback(uint64_t reqId) {
     --req->outstandingPrepares;
     if (req->outstandingPrepares == 0) {
         abort_callback acb = req->acb;
-        pendingReqs.erase(reqId);
+        pending_reqs_.erase(req_id);
         delete req;
 
-        Debug("[%lu] Abort finished", transaction_id_);
+        Debug("[%lu] Abort finished", transaction_id);
         acb();
+
+        context_states_.erase(transaction_id);
     }
 }
 
 /* Commits RO transaction. */
-void Client::ROCommit(const std::unordered_set<std::string> &keys,
+void Client::ROCommit(const Context &ctx, const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
-    state_ = COMMITTING;
-    transaction_id_++;
+    auto tid = ctx.transaction_id();
 
-    participants_.clear();
+    Debug("[%lu] ROCOMMIT", tid);
+
+    auto search = context_states_.find(tid);
+    ASSERT(search != context_states_.end());
+
+    auto &state = search->second;
+
+    state->set_committing();
+
+    auto &participants = state->participants();
+    ASSERT(participants.size() == 0);
+
     std::unordered_map<int, std::vector<std::string>> sharded_keys;
     for (auto &key : keys) {
-        int i = (*part_)(key, nshards_, -1, participants_);
+        int i = (*part_)(key, nshards_, -1, participants);
         sharded_keys[i].push_back(key);
-        participants_.insert(i);
+        state->add_participant(i);
     }
 
-    vf_.StartRO(transaction_id_, participants_);
+    vf_.StartRO(tid, participants);
 
-    if (debug_stats_) {
-        Latency_Start(&commit_lat_);
-    }
-
-    uint64_t reqId = lastReqId++;
-    PendingRequest *req = new PendingRequest(reqId, transaction_id_);
-    pendingReqs[reqId] = req;
+    uint64_t req_id = last_req_id_++;
+    PendingRequest *req = new PendingRequest(req_id);
+    pending_reqs_[req_id] = req;
     req->ccb = ccb;
     req->ctcb = ctcb;
     req->outstandingPrepares = sharded_keys.size();
@@ -571,29 +630,27 @@ void Client::ROCommit(const std::unordered_set<std::string> &keys,
         }
     }
 
-    Debug("commit_ts: %lu.%lu", commit_ts.getTimestamp(), commit_ts.getID());
+    Debug("[%lu] commit_ts: %lu.%lu", tid, commit_ts.getTimestamp(), commit_ts.getID());
+
+    auto roccb = std::bind(&Client::ROCommitCallback, this, tid, req->id,
+                           std::placeholders::_1, std::placeholders::_2,
+                           std::placeholders::_3);
+    auto rocscb = std::bind(&Client::ROCommitSlowCallback, this, tid, req->id,
+                            std::placeholders::_1, std::placeholders::_2,
+                            std::placeholders::_3, std::placeholders::_4);
+    auto roctcb = []() {};  // TODO: Handle timeout
 
     for (auto &s : sharded_keys) {
-        // TODO: Handle timeout
-        sclients_[s.first]->ROCommit(
-            transaction_id_, s.second, commit_ts, min_ts,
-            std::bind(&Client::ROCommitCallback, this, transaction_id_, req->id,
-                      std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3),
-            std::bind(&Client::ROCommitSlowCallback, this, transaction_id_, req->id,
-                      std::placeholders::_1, std::placeholders::_2,
-                      std::placeholders::_3, std::placeholders::_4),
-            []() {},
-            timeout);
+        sclients_[s.first]->ROCommit(tid, s.second, commit_ts, min_ts, roccb, rocscb, roctcb, timeout);
     }
 }
 
-void Client::ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+void Client::ROCommitCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
                               const std::vector<Value> &values,
                               const std::vector<PreparedTransaction> &prepares) {
-    auto itr = this->pendingReqs.find(reqId);
-    if (itr == this->pendingReqs.end()) {
-        Debug("[%lu] ROCommitCallback for terminated request id %lu", transaction_id, reqId);
+    auto itr = this->pending_reqs_.find(req_id);
+    if (itr == this->pending_reqs_.end()) {
+        Debug("[%lu] ROCommitCallback for terminated request id %lu", transaction_id, req_id);
         return;
     }
 
@@ -604,7 +661,7 @@ void Client::ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard
         PendingRequest *req = itr->second;
 
         commit_callback ccb = req->ccb;
-        pendingReqs.erase(itr);
+        pending_reqs_.erase(itr);
         delete req;
 
         if (debug_stats_) {
@@ -618,16 +675,18 @@ void Client::ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard
         Debug("[%lu] COMMIT OK", transaction_id);
         ccb(COMMITTED);
 
+        context_states_.erase(transaction_id);
+
     } else if (r.state == WAIT) {
         Debug("[%lu] Waiting for more RO responses", transaction_id);
     }
 }
 
-void Client::ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+void Client::ROCommitSlowCallback(const uint64_t transaction_id, uint64_t req_id, int shard_idx,
                                   uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit) {
-    auto itr = this->pendingReqs.find(reqId);
-    if (itr == this->pendingReqs.end()) {
-        Debug("[%lu] ROCommitSlowCallback for terminated request id %lu", transaction_id, reqId);
+    auto itr = this->pending_reqs_.find(req_id);
+    if (itr == this->pending_reqs_.end()) {
+        Debug("[%lu] ROCommitSlowCallback for terminated request id %lu", transaction_id, req_id);
         return;
     }
 
@@ -638,7 +697,7 @@ void Client::ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int s
         PendingRequest *req = itr->second;
 
         commit_callback ccb = req->ccb;
-        pendingReqs.erase(itr);
+        pending_reqs_.erase(itr);
         delete req;
 
         if (debug_stats_) {
@@ -652,6 +711,8 @@ void Client::ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int s
               min_read_timestamp_.getTimestamp(), min_read_timestamp_.getID());
         Debug("[%lu] COMMIT OK", transaction_id);
         ccb(COMMITTED);
+
+        context_states_.erase(transaction_id);
 
     } else if (r.state == WAIT) {
         Debug("[%lu] Waiting for more RO responses", transaction_id);

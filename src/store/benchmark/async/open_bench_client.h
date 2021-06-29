@@ -30,8 +30,6 @@ class OpenBenchmarkClient {
     void Start(bench_done_callback bdcb);
     void OnReply(uint64_t transaction_id, int result);
 
-    void StartLatency();
-
     void SendNext();
     void ExecuteCallback(uint64_t transaction_id, transaction_status_t result);
 
@@ -61,14 +59,17 @@ class OpenBenchmarkClient {
     Transport &transport_;
 
    private:
-    class ExecutingTransactionContext {
+    class ExecutingTransaction {
        public:
-        ExecutingTransactionContext(uint64_t id, AsyncTransaction *transaction, execute_callback ecb)
-            : id_{id}, transaction_{transaction}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
+        ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, Context &ctx, execute_callback ecb)
+            : lat_{}, id_{id}, transaction_{transaction}, ctx_{ctx}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
 
         const uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
+        const Context &ctx() const { return ctx_; }
         execute_callback ecb() const { return ecb_; }
+
+        Latency_Frame_t *lat() { return &lat_; }
 
         const uint64_t n_attempts() const { return n_attempts_; }
         void incr_attempts() { n_attempts_++; }
@@ -78,12 +79,16 @@ class OpenBenchmarkClient {
         void incr_op_index() { op_index_++; }
 
        private:
+        Latency_Frame_t lat_;
         uint64_t id_;
         AsyncTransaction *transaction_;
+        Context ctx_;
         execute_callback ecb_;
         uint64_t n_attempts_;
         std::size_t op_index_;
     };
+
+    void BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx);
 
     void ExecuteNextOperation(const uint64_t transaction_id);
 
@@ -106,7 +111,7 @@ class OpenBenchmarkClient {
     void WarmupDone();
     void CooldownDone();
 
-    std::unordered_map<uint64_t, ExecutingTransactionContext> executing_transactions_;
+    std::unordered_map<uint64_t, ExecutingTransaction> executing_transactions_;
     uint64_t next_transaction_id_;
 
     Client &client_;
