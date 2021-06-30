@@ -79,7 +79,7 @@ void OpenBenchmarkClient::SendNext() {
     auto btcb = []() {};
     client_.Begin(bcb, btcb, timeout_);
 
-    if (!done) {
+    if (!cooldownStarted) {
         uint64_t next_arrival_us = static_cast<uint64_t>(next_arrival_dist_(rand_));
         Debug("next arrival in %lu us", next_arrival_us);
         transport_.TimerMicro(next_arrival_us, std::bind(&OpenBenchmarkClient::SendNext, this));
