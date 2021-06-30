@@ -80,6 +80,7 @@
   "client_zipf_coefficient": [
     0.9
   ],
+  "client_arrival_rate": 5,
   "nb_time_alpha": 1.0,
   "rw_num_ops_txn": 1,
   "server_preload_keys": true,

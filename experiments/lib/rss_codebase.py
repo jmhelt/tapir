@@ -84,6 +84,9 @@ class RssCodebase(ExperimentCodebase):
         if 'client_debug_stats' in config and config['client_debug_stats']:
             client_command += ' --debug_stats'
 
+        if 'client_arrival_rate' in config:
+            client_command += ' --client_arrival_rate %f' % config['client_arrival_rate']
+
         if 'nb_time_alpha' in config:
             client_command += ' --nb_time_alpha %f' % config['nb_time_alpha']
 

@@ -16,6 +16,7 @@ DEFINE_LATENCY(op);
 
 OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
                                          Transport &transport, uint64_t id,
+                                         double arrival_rate,
                                          int numRequests, int expDuration,
                                          int warmupSec, int cooldownSec,
                                          uint32_t abortBackoff, bool retryAborted,
@@ -28,7 +29,7 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
       client_id_{id},
       timeout_{timeout},
       rand_{id},
-      next_arrival_dist_{1e-5},  // TODO: fix this
+      next_arrival_dist_{arrival_rate * 1e-6},
       n_requests_(numRequests),
       exp_duration_(expDuration),
       warmupSec(warmupSec),
@@ -41,8 +42,13 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
     started = false;
     done = false;
     cooldownStarted = false;
+
     if (numRequests > 0) {
         latencies.reserve(numRequests);
+    }
+
+    if (arrival_rate <= 0) {
+        Panic("Arrival rate must be (strictly) positive!");
     }
 
     _Latency_Init(&latency, "txn");

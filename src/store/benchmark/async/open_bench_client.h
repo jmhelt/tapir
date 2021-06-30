@@ -20,7 +20,8 @@ typedef std::function<void()> bench_done_callback;
 class OpenBenchmarkClient {
    public:
     OpenBenchmarkClient(Client &client, uint32_t timeout,
-                        Transport &transport, uint64_t id, int numRequests,
+                        Transport &transport, uint64_t id,
+                        double arrival_rate, int numRequests,
                         int expDuration, int warmupSec, int cooldownSec,
                         uint32_t abortBackoff, bool retryAborted,
                         uint32_t maxBackoff, uint32_t maxAttempts,
