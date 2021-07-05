@@ -293,9 +293,25 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t tim
     bcb(ctx);
 }
 
+void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    auto tid = next_transaction_id_++;
+    Timestamp start_ts{tt_.Now().latest(), client_id_};
+
+    auto state = std::make_unique<ContextState>();
+    context_states_.emplace(tid, std::move(state));
+
+    for (uint64_t i = 0; i < nshards_; i++) {
+        sclients_[i]->Begin(tid, start_ts);
+    }
+
+    Context nctx{tid, start_ts};
+    nctx.advance(ctx.min_read_ts());
+    bcb(nctx);
+}
+
 /* Begins a transaction, retrying the transaction indicated by ctx.
  */
-void Client::Begin(Context &ctx, begin_callback bcb,
+void Client::Retry(Context &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
     auto tid = next_transaction_id_++;
     auto &start_ts = ctx.start_ts();
@@ -427,6 +443,8 @@ void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback c
         ccb(ABORTED_SYSTEM);
         return;
     }
+
+    Debug("[%lu] min_read_ts: %lu.%lu", tid, ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
 
     state->set_committing();
 
@@ -591,6 +609,8 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
     ASSERT(search != context_states_.end());
 
     auto &state = search->second;
+
+    Debug("[%lu] min_read_ts: %lu.%lu", tid, ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
 
     state->set_committing();
 

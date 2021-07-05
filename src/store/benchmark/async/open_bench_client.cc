@@ -30,6 +30,9 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
       timeout_{timeout},
       rand_{id},
       next_arrival_dist_{arrival_rate * 1e-6},
+      think_time_dist_{1 * 1e-6},
+      stay_dist_{0.5},
+      //   stay_prob_{0.5},
       n_requests_(numRequests),
       exp_duration_(expDuration),
       warmupSec(warmupSec),
@@ -84,6 +87,19 @@ void OpenBenchmarkClient::SendNext() {
         Debug("next arrival in %lu us", next_arrival_us);
         transport_.TimerMicro(next_arrival_us, std::bind(&OpenBenchmarkClient::SendNext, this));
     }
+}
+
+void OpenBenchmarkClient::SendNextInSession(Context ctx) {
+    auto tid = next_transaction_id_;
+    Debug("[%lu] SendNextInSession", tid);
+    next_transaction_id_++;
+
+    auto transaction = GetNextTransaction();
+    stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
+
+    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
+    auto btcb = []() {};
+    client_.Begin(ctx, bcb, btcb, timeout_);
 }
 
 void OpenBenchmarkClient::BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx) {
@@ -242,12 +258,21 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
     auto transaction = et.transaction();
     auto &ttype = transaction->GetTransactionType();
     auto n_attempts = et.n_attempts();
+    auto ctx = et.ctx();
 
     if (result == COMMITTED || result == ABORTED_USER ||
         (maxAttempts != -1 && n_attempts >= static_cast<uint64_t>(maxAttempts)) ||
         !retryAborted) {
         if (result == COMMITTED) {
             stats.Increment(ttype + "_committed", 1);
+
+            if (stay_dist_(rand_)) {
+                uint64_t next_arrival_us = static_cast<uint64_t>(think_time_dist_(rand_));
+                Debug("next arrival in session %lu us", next_arrival_us);
+                transport_.TimerMicro(next_arrival_us, std::bind(&OpenBenchmarkClient::SendNextInSession, this, ctx));
+            } else {
+                Debug("end of session");
+            }
         }
         if (retryAborted) {
             stats.Add(ttype + "_attempts_list", n_attempts);
@@ -288,7 +313,7 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
 
                 auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, transaction_id, transaction, std::placeholders::_1);
                 auto btcb = []() {};
-                client_.Begin(ctx, bcb, btcb, timeout_);
+                client_.Retry(ctx, bcb, btcb, timeout_);
             });
         }
     }

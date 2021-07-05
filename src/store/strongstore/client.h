@@ -99,9 +99,10 @@ class Client : public ::Client {
     // Overriding functions from ::Client
     // Begin a transaction
     virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Begin a retried transaction.
-    virtual void Begin(Context &ctx, begin_callback bcb,
+    virtual void Retry(Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.

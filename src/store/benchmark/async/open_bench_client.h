@@ -89,6 +89,8 @@ class OpenBenchmarkClient {
         std::size_t op_index_;
     };
 
+    void SendNextInSession(Context ctx);
+
     void BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx);
 
     void ExecuteNextOperation(const uint64_t transaction_id);
@@ -121,6 +123,9 @@ class OpenBenchmarkClient {
     uint32_t timeout_;
     std::mt19937 rand_;
     std::exponential_distribution<> next_arrival_dist_;
+    std::exponential_distribution<> think_time_dist_;
+    std::bernoulli_distribution stay_dist_;
+    // double stay_prob_;
     int n_requests_;
     int exp_duration_;
     int n;

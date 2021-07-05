@@ -80,17 +80,6 @@ Client::~Client() {
  */
 void Client::Begin(begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
-    Context ctx{};
-    Begin(ctx, bcb, btcb, timeout);
-}
-
-/* Begins a transaction. All subsequent operations before a commit() or
- * abort() are part of this transaction.
- *
- * Return a TID for the transaction.
- */
-void Client::Begin(Context &ctx, begin_callback bcb,
-                   begin_timeout_callback btcb, uint32_t timeout) {
     transport->Timer(0, [this, bcb, btcb, timeout]() {
         if (pingReplicas) {
             if (!first && !startedPings) {
@@ -108,6 +97,20 @@ void Client::Begin(Context &ctx, begin_callback bcb,
         Context ctx{};
         bcb(ctx);
     });
+}
+
+void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+/* Begins a transaction. All subsequent operations before a commit() or
+ * abort() are part of this transaction.
+ *
+ * Return a TID for the transaction.
+ */
+void Client::Retry(Context &ctx, begin_callback bcb,
+                   begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
 }
 
 void Client::Get(Context &ctx, const std::string &key, get_callback gcb,

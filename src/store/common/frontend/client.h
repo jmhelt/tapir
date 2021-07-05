@@ -68,8 +68,9 @@ class Client {
     virtual ~Client() {}
 
     virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
 
-    virtual void Begin(Context &ctx, begin_callback bcb,
+    virtual void Retry(Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.

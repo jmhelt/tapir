@@ -46,8 +46,8 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 5,
-  "client_processes_per_client_node": 5,
+  "client_total": 1,
+  "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
@@ -106,7 +106,7 @@
   "client_debug_stats": false,
   "server_debug_stats": true,
   "server_load_time": 0,
-  "client_experiment_length": 30,
+  "client_experiment_length": 10,
   "client_rand_sleep": 0,
   "client_ramp_down": 0,
   "client_ramp_up": 0,
