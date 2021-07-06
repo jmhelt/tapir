@@ -19,13 +19,11 @@
 #include "lib/latency.h"
 #include "lib/tcptransport.h"
 #include "lib/timeval.h"
-#include "store/benchmark/async/bench_client.h"
 #include "store/benchmark/async/common/key_selector.h"
 #include "store/benchmark/async/common/uniform_key_selector.h"
 #include "store/benchmark/async/common/zipf_key_selector.h"
+#include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_client.h"
-#include "store/benchmark/async/sync_transaction_bench_client.h"
-#include "store/common/frontend/sync_client.h"
 #include "store/common/partitioner.h"
 #include "store/common/stats.h"
 #include "store/common/truetime.h"
@@ -46,7 +44,9 @@ enum benchmode_t {
     BENCH_RETWIS,
 };
 
-enum keysmode_t { KEYS_UNKNOWN, KEYS_UNIFORM, KEYS_ZIPF };
+enum keysmode_t { KEYS_UNKNOWN,
+                  KEYS_UNIFORM,
+                  KEYS_ZIPF };
 
 enum transmode_t {
     TRANS_UNKNOWN,
@@ -91,18 +91,18 @@ DEFINE_string(trans_protocol, trans_args[0],
               " passing messages");
 DEFINE_validator(trans_protocol, &ValidateTransMode);
 
-const std::string protocol_args[] = {"txn-l", "txn-s",    "qw",        "occ",
-                                     "lock",  "span-occ", "span-lock", "mvtso"};
-const protomode_t protomodes[]{PROTO_TAPIR,  PROTO_TAPIR,  PROTO_WEAK,
+const std::string protocol_args[] = {"txn-l", "txn-s", "qw", "occ",
+                                     "lock", "span-occ", "span-lock", "mvtso"};
+const protomode_t protomodes[]{PROTO_TAPIR, PROTO_TAPIR, PROTO_WEAK,
                                PROTO_STRONG, PROTO_STRONG, PROTO_STRONG,
                                PROTO_STRONG, PROTO_STRONG};
 const strongstore::Mode strongmodes[]{
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_OCC,
-    strongstore::Mode::MODE_LOCK,      strongstore::Mode::MODE_SPAN_OCC,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_OCC,
+    strongstore::Mode::MODE_LOCK, strongstore::Mode::MODE_SPAN_OCC,
     strongstore::Mode::MODE_SPAN_LOCK, strongstore::Mode::MODE_MVTSO,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN,
-    strongstore::Mode::MODE_UNKNOWN,   strongstore::Mode::MODE_UNKNOWN};
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN,
+    strongstore::Mode::MODE_UNKNOWN, strongstore::Mode::MODE_UNKNOWN};
 static bool ValidateProtocolMode(const char *flagname,
                                  const std::string &value) {
     int n = sizeof(protocol_args);
@@ -241,9 +241,10 @@ DEFINE_string(key_selector, keys_args[0],
               "select keys.");
 DEFINE_validator(key_selector, &ValidateKeys);
 
-DEFINE_double(zipf_coefficient, 0.5,
-              "the coefficient of the zipf distribution "
-              "for key selection.");
+DEFINE_double(zipf_coefficient, 0.5, "the coefficient of the zipf distribution for key selection.");
+DEFINE_double(client_arrival_rate, 1.0, "arrival rate for open loop clients");
+DEFINE_double(client_think_time, 1.0, "think time for closed and partly open loop clients");
+DEFINE_double(client_stay_probability, 0.5, "session stay probability for partly open loop clients");
 
 /**
  * RW settings.
@@ -319,9 +320,8 @@ DEFINE_string(customer_name_file_path, "smallbank_names",
 
 DEFINE_LATENCY(op);
 
-std::vector<::SyncClient *> syncClients;
-std::vector<::Client *> clients;
-std::vector<::BenchmarkClient *> benchClients;
+std::vector<Client *> clients;
+std::vector<OpenBenchmarkClient *> benchClients;
 std::vector<std::thread *> threads;
 Transport *tport;
 Partitioner *part;
@@ -583,9 +583,7 @@ int main(int argc, char **argv) {
 
     for (size_t i = 0; i < FLAGS_num_clients; i++) {
         Client *client = nullptr;
-        SyncClient *syncClient = nullptr;
-
-        uint64_t clientId = (FLAGS_client_id << 6) | i;
+        // uint64_t clientId = (FLAGS_client_id << 6) | i;
         switch (mode) {
             case PROTO_TAPIR: {
                 client = new tapirstore::Client(
@@ -617,53 +615,35 @@ int main(int argc, char **argv) {
 
         switch (benchMode) {
             case BENCH_RETWIS:
-                if (syncClient == nullptr) {
-                    ASSERT(client != nullptr);
-                    syncClient = new SyncClient(client);
-                }
                 break;
             default:
                 NOT_REACHABLE();
         }
 
         uint32_t seed = (FLAGS_client_id << 4) | i;
-        BenchmarkClient *bench;
+        OpenBenchmarkClient *bench;
         switch (benchMode) {
             case BENCH_RETWIS:
-                ASSERT(syncClient != nullptr);
+                ASSERT(client != nullptr);
                 bench = new retwis::RetwisClient(
-                    keySelector, *syncClient, *tport, seed, FLAGS_num_requests,
-                    FLAGS_exp_duration, FLAGS_delay, FLAGS_warmup_secs,
-                    FLAGS_cooldown_secs, FLAGS_tput_interval,
+                    keySelector, *client, FLAGS_message_timeout, *tport, seed,
+                    FLAGS_client_arrival_rate, FLAGS_client_think_time, FLAGS_client_stay_probability,
+                    FLAGS_exp_duration, FLAGS_warmup_secs, FLAGS_cooldown_secs,
+                    FLAGS_tput_interval,
                     FLAGS_abort_backoff, FLAGS_retry_aborted, FLAGS_max_backoff,
-                    FLAGS_max_attempts, FLAGS_message_timeout);
+                    FLAGS_max_attempts);
                 break;
             default:
                 NOT_REACHABLE();
         }
 
-        SyncTransactionBenchClient *syncBench;
         switch (benchMode) {
             case BENCH_RETWIS:
-                syncBench = dynamic_cast<SyncTransactionBenchClient *>(bench);
-                ASSERT(syncBench != nullptr);
-                threads.push_back(new std::thread([syncBench, bdcb]() {
-                    syncBench->Start([]() {});
-                    while (!syncBench->IsFullyDone()) {
-                        syncBench->StartLatency();
-                        transaction_status_t result;
-                        syncBench->SendNext(&result);
-                        syncBench->IncrementSent(result);
-                    }
-                    bdcb();
-                }));
+                tport->Timer(0, [bench, bdcb]() { bench->Start(bdcb); });
                 break;
             case BENCH_UNKNOWN:
             default:
                 NOT_REACHABLE();
-        }
-        if (syncClient != nullptr) {
-            syncClients.push_back(syncClient);
         }
         if (client != nullptr) {
             clients.push_back(client);
@@ -694,9 +674,6 @@ int main(int argc, char **argv) {
     delete keySelector;
     for (auto i : threads) {
         i->join();
-        delete i;
-    }
-    for (auto i : syncClients) {
         delete i;
     }
     for (auto i : clients) {

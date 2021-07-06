@@ -28,8 +28,13 @@
   "replica_config": "replica.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 2,
+  "num_shards": 3,
   "shards": [
+    [
+      "us-east-1-0",
+      "eu-west-1-0",
+      "ap-northeast-1-0"
+    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
@@ -41,8 +46,8 @@
       "ap-northeast-1-0"
     ]
   ],
-  "client_total": 3,
-  "client_processes_per_client_node": 3,
+  "client_total": 1,
+  "client_processes_per_client_node": 1,
   "client_threads_per_process": 1,
   "clients": [
     "client-0-0"
@@ -75,6 +80,9 @@
   "client_zipf_coefficient": [
     0.9
   ],
+  "client_arrival_rate": 5,
+  "client_stay_probability": 0.66,
+  "client_think_time": 1,
   "nb_time_alpha": 1.0,
   "rw_num_ops_txn": 1,
   "server_preload_keys": true,
@@ -256,7 +264,7 @@
   "plot_tput_lat_y_label": "Latency (ms)",
   "input_latency_scale": 1000000000,
   "output_latency_scale": 1000,
-  "src_commit_hash": "spanner",
+  "src_commit_hash": "open-loop",
   "stats_file_name": "stats.json",
   "base_local_exp_directory": "/home/jhelt/git/rss/tapir/experiments/results",
   "base_mounted_fs_path": "/mnt/extra",

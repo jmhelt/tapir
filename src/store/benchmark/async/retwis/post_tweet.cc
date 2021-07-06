@@ -2,30 +2,30 @@
 
 namespace retwis {
 
-PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand,
-                     uint32_t timeout)
-    : RetwisTransaction(keySelector, 5, rand, timeout) {}
+PostTweet::PostTweet(KeySelector *keySelector, std::mt19937 &rand)
+    : RetwisTransaction(keySelector, 5, rand, "post_tweet") {}
 
-PostTweet::~PostTweet() {}
+PostTweet::~PostTweet() {
+}
 
-transaction_status_t PostTweet::Execute(SyncClient &client, bool is_retry) {
-    Debug("POST_TWEET");
-    client.Begin(is_retry, timeout);
-
-    std::string value;
-    for (int i = 0; i < 3; i++) {
-        if (client.GetForUpdate(GetKey(i), value, timeout)) {
-            client.Abort(timeout);
-            return ABORTED_SYSTEM;
+Operation PostTweet::GetNextOperation(std::size_t op_index) {
+    Debug("POST_TWEET %lu", op_index);
+    if (op_index < 6) {
+        int k = op_index / 2;
+        if (op_index % 2 == 0) {
+            return GetForUpdate(GetKey(k));
+        } else {
+            return Put(GetKey(k), GetKey(k));
         }
-        client.Put(GetKey(i), GetKey(i), timeout);
+    } else if (op_index == 6) {
+        return Put(GetKey(3), GetKey(3));
+    } else if (op_index == 7) {
+        return Put(GetKey(4), GetKey(4));
+    } else if (op_index == 8) {
+        return Commit();
+    } else {
+        return Wait();
     }
-
-    client.Put(GetKey(3), GetKey(3), timeout);
-    client.Put(GetKey(4), GetKey(4), timeout);
-
-    Debug("COMMIT");
-    return client.Commit(timeout);
 }
 
 }  // namespace retwis

@@ -2,33 +2,36 @@
 #define RETWIS_CLIENT_H
 
 #include "store/benchmark/async/common/key_selector.h"
+#include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_transaction.h"
-#include "store/benchmark/async/sync_transaction_bench_client.h"
+#include "store/common/frontend/client.h"
 
 namespace retwis {
 
-enum KeySelection { UNIFORM, ZIPF };
+enum KeySelection {
+    UNIFORM,
+    ZIPF
+};
 
-class RetwisClient : public SyncTransactionBenchClient {
+class RetwisClient : public OpenBenchmarkClient {
    public:
-    RetwisClient(KeySelector *keySelector, SyncClient &client,
-                 Transport &transport, uint64_t seed, int numRequests,
-                 int expDuration, uint64_t delay, int warmupSec,
-                 int cooldownSec, int tputInterval, uint32_t abortBackoff,
+    RetwisClient(KeySelector *keySelector, Client &client, uint32_t timeout,
+                 Transport &transport, uint64_t id,
+                 double arrival_rate, double think_time, double stay_probability,
+                 int expDuration, int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,
                  bool retryAborted, uint32_t maxBackoff, uint32_t maxAttempts,
-                 uint32_t timeout, const std::string &latencyFilename = "");
+                 const std::string &latencyFilename = "latency");
 
     virtual ~RetwisClient();
 
    protected:
-    virtual SyncTransaction *GetNextTransaction();
-    virtual std::string GetLastOp() const;
+    virtual AsyncTransaction *GetNextTransaction() override;
 
    private:
     KeySelector *keySelector;
     std::string lastOp;
 };
 
-}  // namespace retwis
+}  //namespace retwis
 
 #endif /* RETWIS_CLIENT_H */
