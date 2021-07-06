@@ -22,6 +22,8 @@ class Timestamp {
     Timestamp() : timestamp(0), id(0){};
     Timestamp(uint64_t t) : timestamp(t), id(0){};
     Timestamp(uint64_t t, uint64_t i) : timestamp(t), id(i){};
+    Timestamp(const Timestamp &t)
+        : timestamp(t.getTimestamp()), id(t.getID()){};
     Timestamp(const TimestampMessage &msg)
         : timestamp(msg.timestamp()), id(msg.id()){};
     ~Timestamp(){};

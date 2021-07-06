@@ -9,11 +9,11 @@ namespace retwis {
 
 class PostTweet : public RetwisTransaction {
    public:
-    PostTweet(KeySelector *keySelector, std::mt19937 &rand, uint32_t timeout);
+    PostTweet(KeySelector *keySelector, std::mt19937 &rand);
     virtual ~PostTweet();
 
-    virtual transaction_status_t Execute(SyncClient &client,
-                                         bool is_retry) override;
+   protected:
+    Operation GetNextOperation(std::size_t op_index) override;
 };
 
 }  // namespace retwis

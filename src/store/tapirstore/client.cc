@@ -78,9 +78,8 @@ Client::~Client() {
  *
  * Return a TID for the transaction.
  */
-void Client::Begin(bool is_retry, begin_callback bcb,
+void Client::Begin(begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
-    (void)is_retry;
     transport->Timer(0, [this, bcb, btcb, timeout]() {
         if (pingReplicas) {
             if (!first && !startedPings) {
@@ -95,11 +94,26 @@ void Client::Begin(bool is_retry, begin_callback bcb,
         Debug("BEGIN [%lu]", t_id + 1);
         t_id++;
         participants.clear();
-        bcb(t_id);
+        Context ctx{};
+        bcb(ctx);
     });
 }
 
-void Client::Get(const std::string &key, get_callback gcb,
+void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+/* Begins a transaction. All subsequent operations before a commit() or
+ * abort() are part of this transaction.
+ *
+ * Return a TID for the transaction.
+ */
+void Client::Retry(Context &ctx, begin_callback bcb,
+                   begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+void Client::Get(Context &ctx, const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
     transport->Timer(0, [this, key, gcb, gtcb, timeout]() {
         Debug("GET [%lu : %s]", t_id, key.c_str());
@@ -118,7 +132,7 @@ void Client::Get(const std::string &key, get_callback gcb,
     });
 }
 
-void Client::Put(const std::string &key, const std::string &value,
+void Client::Put(Context &ctx, const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
     transport->Timer(0, [this, key, value, pcb, ptcb, timeout]() {
@@ -138,7 +152,7 @@ void Client::Put(const std::string &key, const std::string &value,
     });
 }
 
-void Client::Commit(commit_callback ccb, commit_timeout_callback ctcb,
+void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                     uint32_t timeout) {
     transport->Timer(0, [this, ccb, ctcb, timeout]() {
         uint64_t reqId = lastReqId++;
@@ -326,7 +340,7 @@ void Client::HandleAllPreparesReceived(PendingRequest *req) {
     }
 }
 
-void Client::Abort(abort_callback acb, abort_timeout_callback atcb,
+void Client::Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     // presumably this will be called with empty callbacks as the application
     // can immediately move on to its next transaction without waiting for

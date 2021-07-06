@@ -33,7 +33,7 @@ class PingInitiator {
         return orderedEstimates;
     }
 
-    inline const bool Done() const { return done; }
+    inline bool Done() const { return done; }
 
     void HandlePingResponse(const PingMessage &ping);
 

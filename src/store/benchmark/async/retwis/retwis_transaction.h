@@ -2,18 +2,18 @@
 #define RETWIS_TRANSACTION_H
 
 #include <random>
+#include <string>
 #include <vector>
 
 #include "store/benchmark/async/common/key_selector.h"
+#include "store/common/frontend/async_transaction.h"
 #include "store/common/frontend/client.h"
-#include "store/common/frontend/sync_transaction.h"
 
 namespace retwis {
 
-class RetwisTransaction : public SyncTransaction {
+class RetwisTransaction : public AsyncTransaction {
    public:
-    RetwisTransaction(KeySelector *keySelector, int numKeys, std::mt19937 &rand,
-                      uint32_t timeout);
+    RetwisTransaction(KeySelector *keySelector, int numKeys, std::mt19937 &rand, const std::string ttype);
     virtual ~RetwisTransaction();
 
    protected:
@@ -21,12 +21,15 @@ class RetwisTransaction : public SyncTransaction {
         return keySelector->GetKey(keyIdxs[i]);
     }
 
-    inline const size_t GetNumKeys() const { return keyIdxs.size(); }
+    inline size_t GetNumKeys() const { return keyIdxs.size(); }
+
+    const std::string &GetTransactionType() override { return ttype_; };
 
     KeySelector *keySelector;
 
    private:
     std::vector<int> keyIdxs;
+    std::string ttype_;
 };
 
 }  // namespace retwis

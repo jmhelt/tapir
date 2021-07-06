@@ -27,12 +27,28 @@ enum transaction_status_t {
     ABORTED_MAX_RETRIES
 };
 
-typedef std::function<void(uint64_t)> begin_callback;
+class Context {
+   public:
+    Context() : transaction_id_{0}, start_ts_{0, 0}, min_read_ts_{0, 0} {}
+    Context(uint64_t transaction_id, const Timestamp &start_ts)
+        : transaction_id_{transaction_id}, start_ts_{start_ts}, min_read_ts_{0, 0} {}
+
+    uint64_t transaction_id() const { return transaction_id_; }
+    const Timestamp &start_ts() const { return start_ts_; }
+
+    const Timestamp &min_read_ts() const { return min_read_ts_; }
+    void advance(const Timestamp &ts) { min_read_ts_ = std::max(min_read_ts_, ts); }
+
+   private:
+    const uint64_t transaction_id_;
+    const Timestamp start_ts_;
+    Timestamp min_read_ts_;
+};
+
+typedef std::function<void(Context &)> begin_callback;
 typedef std::function<void()> begin_timeout_callback;
 
-typedef std::function<void(int, const std::string &, const std::string &,
-                           Timestamp)>
-    get_callback;
+typedef std::function<void(int, const std::string &, const std::string &, Timestamp)> get_callback;
 typedef std::function<void(int, const std::string &)> get_timeout_callback;
 
 typedef std::function<void(int, const std::string &, const std::string &)>
@@ -46,46 +62,46 @@ typedef std::function<void()> commit_timeout_callback;
 typedef std::function<void()> abort_callback;
 typedef std::function<void()> abort_timeout_callback;
 
-class Stats;
-
 class Client {
    public:
     Client() { _Latency_Init(&clientLat, "client_lat"); }
     virtual ~Client() {}
 
-    // Begin a transaction.
-    virtual void Begin(bool is_retry, begin_callback bcb,
+    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+
+    virtual void Retry(Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
-    virtual void Get(const std::string &key, get_callback gcb,
+    virtual void Get(Context &ctx, const std::string &key, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(const std::string &key, get_callback gcb,
+    virtual void GetForUpdate(Context &ctx, const std::string &key, get_callback gcb,
                               get_timeout_callback gtcb, uint32_t timeout) {
-        Get(key, gcb, gtcb, timeout);
+        Get(ctx, key, gcb, gtcb, timeout);
     }
 
     // Set the value for the given key.
-    virtual void Put(const std::string &key, const std::string &value,
+    virtual void Put(Context &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout) = 0;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) = 0;
 
-    virtual void ROCommit(const std::unordered_set<std::string> &keys,
+    // Abort all Get(s) and Put(s) since Begin().
+    virtual void Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+                       uint32_t timeout) = 0;
+
+    virtual void ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
                           commit_callback ccb, commit_timeout_callback ctcb,
                           uint32_t timeout) {
         Panic("Unimplemented ROCommit!");
     }
-
-    // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
-                       uint32_t timeout) = 0;
 
     inline Stats &GetStats() { return stats; }
 

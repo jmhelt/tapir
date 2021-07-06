@@ -1,37 +1,8 @@
-// -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
-/***********************************************************************
- *
- * store/strongstore/client.h:
- *   Transactional client interface.
- *
- * Copyright 2015 Irene Zhang  <iyzhang@cs.washington.edu>
- *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- **********************************************************************/
-
 #ifndef _STRONG_CLIENT_H_
 #define _STRONG_CLIENT_H_
 
 #include <bitset>
+#include <memory>
 #include <set>
 #include <string>
 #include <thread>
@@ -49,12 +20,72 @@
 #include "store/common/truetime.h"
 #include "store/strongstore/common.h"
 #include "store/strongstore/networkconfig.h"
+#include "store/strongstore/preparedtransaction.h"
 #include "store/strongstore/shardclient.h"
 #include "store/strongstore/strong-proto.pb.h"
-#include "store/strongstore/strongbufferclient.h"
-#include "store/strongstore/viewfinder.h"
 
 namespace strongstore {
+
+class ContextState {
+   public:
+    ContextState() : participants_{}, prepares_{}, values_{}, snapshot_ts_{}, state_{EXECUTING} {}
+    ~ContextState() {}
+
+    bool executing() const { return (state_ == EXECUTING); }
+    bool committing() const { return (state_ == COMMITTING); }
+    bool aborted() const { return (state_ == ABORTED); }
+
+    const std::set<int> &participants() const { return participants_; }
+    const std::unordered_map<uint64_t, PreparedTransaction> prepares() const { return prepares_; }
+
+    const Timestamp &snapshot_ts() const { return snapshot_ts_; }
+
+   protected:
+    friend class Client;
+
+    void set_committing() { state_ = COMMITTING; }
+    void set_aborted() { state_ = ABORTED; }
+
+    std::set<int> &mutable_participants() { return participants_; }
+    void add_participant(int p) { participants_.insert(p); }
+    void clear_participants() { participants_.clear(); }
+
+    std::unordered_map<uint64_t, PreparedTransaction> &mutable_prepares() { return prepares_; }
+    std::unordered_map<std::string, std::list<Value>> &mutable_values() { return values_; }
+
+    void set_snapshot_ts(const Timestamp &ts) { snapshot_ts_ = ts; }
+
+   private:
+    enum State {
+        EXECUTING,
+        COMMITTING,
+        ABORTED
+    };
+
+    std::set<int> participants_;
+    std::unordered_map<uint64_t, PreparedTransaction> prepares_;
+    std::unordered_map<std::string, std::list<Value>> values_;
+    Timestamp snapshot_ts_;
+    State state_;
+};
+
+class CommittedTransaction {
+   public:
+    uint64_t transaction_id;
+    Timestamp commit_ts;
+    bool committed;
+};
+
+enum SnapshotState {
+    WAIT,
+    COMMIT
+};
+
+struct SnapshotResult {
+    SnapshotState state;
+    Timestamp max_read_ts;
+    std::unordered_map<std::string, std::string> kv_;
+};
 
 class Client : public ::Client {
    public:
@@ -66,58 +97,49 @@ class Client : public ::Client {
     virtual ~Client();
 
     // Overriding functions from ::Client
-    // Begin a transaction.
-    virtual void Begin(bool is_retry, begin_callback bcb,
+    // Begin a transaction
+    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+
+    // Begin a retried transaction.
+    virtual void Retry(Context &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
-    virtual void Get(const std::string &key, get_callback gcb,
-                     get_timeout_callback gtcb,
+    virtual void Get(Context &ctx, const std::string &key,
+                     get_callback gcb, get_timeout_callback gtcb,
                      uint32_t timeout = GET_TIMEOUT) override;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(const std::string &key, get_callback gcb,
-                              get_timeout_callback gtcb,
+    virtual void GetForUpdate(Context &ctx, const std::string &key,
+                              get_callback gcb, get_timeout_callback gtcb,
                               uint32_t timeout = GET_TIMEOUT) override;
 
     // Set the value for the given key.
-    virtual void Put(const std::string &key, const std::string &value,
+    virtual void Put(Context &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout = PUT_TIMEOUT) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) override;
 
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(abort_callback acb, abort_timeout_callback atcb,
+    virtual void Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    void ROCommit(const std::unordered_set<std::string> &keys,
+    void ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
                   commit_callback ccb, commit_timeout_callback ctcb,
                   uint32_t timeout) override;
 
    private:
     const static std::size_t MAX_SHARDS = 16;
 
-    enum State {
-        EXECUTING,
-        COMMITTING,
-        ABORTED
-    };
-
     struct PendingRequest {
-        PendingRequest(uint64_t id, uint64_t txnId)
-            : id(id),
-              txnId(txnId),
-              outstandingPrepares(0),
-              commitTries(0),
-              maxRepliedTs(0UL),
-              prepareStatus(REPLY_OK),
-              callbackInvoked(false),
-              timeout(0UL) {}
+        PendingRequest(uint64_t id)
+            : id(id), outstandingPrepares(0) {}
 
         ~PendingRequest() {}
 
@@ -126,93 +148,91 @@ class Client : public ::Client {
         abort_callback acb;
         abort_timeout_callback atcb;
         uint64_t id;
-        uint64_t txnId;
         int outstandingPrepares;
-        int commitTries;
-        uint64_t maxRepliedTs;
-        int prepareStatus;
-        bool callbackInvoked;
-        uint32_t timeout;
     };
 
+    void Abort(const uint64_t transaction_id, abort_callback acb, abort_timeout_callback atcb,
+               uint32_t timeout);
+
     // local Prepare function
-    void Prepare(PendingRequest *req, uint32_t timeout);
-    void CommitCallback(uint64_t reqId, int status, Timestamp commit_ts, Timestamp nonblock_ts);
+    void CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts);
 
-    void AbortCallback(uint64_t reqId);
+    void AbortCallback(const uint64_t transaction_id, uint64_t req_id);
 
-    void ROCommitCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+    void ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
                           const std::vector<Value> &values,
                           const std::vector<PreparedTransaction> &prepares);
 
-    void ROCommitSlowCallback(uint64_t transaction_id, uint64_t reqId, int shard_idx,
+    void ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
                               uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit);
 
-    void HandleWound(uint64_t transaction_id);
+    void HandleWound(const uint64_t transaction_id);
 
     // choose coordinator from participants
     void CalculateCoordinatorChoices();
-    int ChooseCoordinator();
+    int ChooseCoordinator(const uint64_t transaction_id);
 
     // Choose nonblock time
-    Timestamp ChooseNonBlockTimestamp();
+    Timestamp ChooseNonBlockTimestamp(const uint64_t transaction_id);
 
-    ViewFinder vf_;
+    // For tracking RO reply progress
+    SnapshotResult ReceiveFastPath(uint64_t transaction_id, std::unique_ptr<ContextState> &state,
+                                   int shard_idx,
+                                   const std::vector<Value> &values,
+                                   const std::vector<PreparedTransaction> &prepares);
+    SnapshotResult ReceiveSlowPath(uint64_t transaction_id, std::unique_ptr<ContextState> &state,
+                                   uint64_t rw_transaction_id,
+                                   bool is_commit, const Timestamp &commit_ts);
+    SnapshotResult FindSnapshot(std::unordered_map<uint64_t, PreparedTransaction> &prepared,
+                                std::vector<CommittedTransaction> &committed);
+    void AddValues(std::unique_ptr<ContextState> &state, const std::vector<Value> &values);
+    void AddPrepares(std::unique_ptr<ContextState> &state, const std::vector<PreparedTransaction> &prepares);
+    void ReceivedAllFastPaths(std::unique_ptr<ContextState> &state);
+    void FindCommittedKeys(std::unique_ptr<ContextState> &state);
+    void CalculateSnapshotTimestamp(std::unique_ptr<ContextState> &state);
+    SnapshotResult CheckCommit(std::unique_ptr<ContextState> &state);
 
     std::unordered_map<std::bitset<MAX_SHARDS>, int> coord_choices_;
     std::unordered_map<std::bitset<MAX_SHARDS>, uint16_t> min_lats_;
 
-    Timestamp min_read_timestamp_;
+    std::unordered_map<uint64_t, std::unique_ptr<ContextState>> context_states_;
 
     const strongstore::NetworkConfiguration &net_config_;
     const std::string client_region_;
 
     transport::Configuration &config_;
 
-    State state_;
-
     // Unique ID for this client.
     uint64_t client_id_;
-
-    // Ongoing transaction ID.
-    uint64_t t_id;
-
-    // Ongoing transaction start time
-    Timestamp start_time_;
 
     // Number of shards in SpanStore.
     uint64_t nshards_;
 
-    // List of participants in the ongoing transaction.
-    std::set<int> participants_;
-
     // Transport used by paxos client proxies.
     Transport *transport_;
 
-    // Buffering client for each shard.
-    std::vector<BufferClient *> bclient;
-    std::vector<ShardClient *> sclient;
+    // Client for each shard.
+    std::vector<ShardClient *> sclients_;
 
     // Partitioner
-    Partitioner *part;
+    Partitioner *part_;
 
     // TrueTime server.
     TrueTime &tt_;
 
-    uint64_t lastReqId;
-    std::unordered_map<uint64_t, PendingRequest *> pendingReqs;
-    std::unordered_map<std::string, uint32_t> statInts;
+    uint64_t next_transaction_id_;
+
+    uint64_t last_req_id_;
+    std::unordered_map<uint64_t, PendingRequest *> pending_reqs_;
 
     Latency_t op_lat_;
     Latency_t commit_lat_;
 
     Consistency consistency_;
 
-    bool debug_stats_;
-    bool ping_replicas_;
-    bool first_;
-
     double nb_time_alpha_;
+
+    bool debug_stats_;
 };
 
 }  // namespace strongstore
