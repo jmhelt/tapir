@@ -21,7 +21,7 @@ class OpenBenchmarkClient {
    public:
     OpenBenchmarkClient(Client &client, uint32_t timeout,
                         Transport &transport, uint64_t id,
-                        double arrival_rate, int numRequests,
+                        double arrival_rate, double think_time, double stay_probability,
                         int expDuration, int warmupSec, int cooldownSec,
                         uint32_t abortBackoff, bool retryAborted,
                         uint32_t maxBackoff, uint32_t maxAttempts,
@@ -37,9 +37,6 @@ class OpenBenchmarkClient {
     inline bool IsFullyDone() { return done; }
 
     struct Latency_t latency;
-    bool started;
-    bool done;
-    bool cooldownStarted;
     std::vector<uint64_t> latencies;
 
     inline const Stats &GetStats() const { return stats; }
@@ -125,8 +122,6 @@ class OpenBenchmarkClient {
     std::exponential_distribution<> next_arrival_dist_;
     std::exponential_distribution<> think_time_dist_;
     std::bernoulli_distribution stay_dist_;
-    // double stay_prob_;
-    int n_requests_;
     int exp_duration_;
     int n;
     int warmupSec;
@@ -142,6 +137,10 @@ class OpenBenchmarkClient {
     uint64_t abortBackoff;
     bool retryAborted;
     int64_t maxAttempts;
+
+    bool started;
+    bool done;
+    bool cooldownStarted;
 };
 
 #endif /* OPEN_BENCHMARK_CLIENT_H */

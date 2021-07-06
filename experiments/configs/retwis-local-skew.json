@@ -81,6 +81,8 @@
     0.9
   ],
   "client_arrival_rate": 5,
+  "client_stay_probability": 0.66,
+  "client_think_time": 1,
   "nb_time_alpha": 1.0,
   "rw_num_ops_txn": 1,
   "server_preload_keys": true,
@@ -106,7 +108,7 @@
   "client_debug_stats": false,
   "server_debug_stats": true,
   "server_load_time": 0,
-  "client_experiment_length": 10,
+  "client_experiment_length": 30,
   "client_rand_sleep": 0,
   "client_ramp_down": 0,
   "client_ramp_up": 0,

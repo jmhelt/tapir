@@ -243,6 +243,8 @@ DEFINE_validator(key_selector, &ValidateKeys);
 
 DEFINE_double(zipf_coefficient, 0.5, "the coefficient of the zipf distribution for key selection.");
 DEFINE_double(client_arrival_rate, 1.0, "arrival rate for open loop clients");
+DEFINE_double(client_think_time, 1.0, "think time for closed and partly open loop clients");
+DEFINE_double(client_stay_probability, 0.5, "session stay probability for partly open loop clients");
 
 /**
  * RW settings.
@@ -625,9 +627,9 @@ int main(int argc, char **argv) {
                 ASSERT(client != nullptr);
                 bench = new retwis::RetwisClient(
                     keySelector, *client, FLAGS_message_timeout, *tport, seed,
-                    FLAGS_client_arrival_rate, FLAGS_num_requests,
-                    FLAGS_exp_duration, FLAGS_delay, FLAGS_warmup_secs,
-                    FLAGS_cooldown_secs, FLAGS_tput_interval,
+                    FLAGS_client_arrival_rate, FLAGS_client_think_time, FLAGS_client_stay_probability,
+                    FLAGS_exp_duration, FLAGS_warmup_secs, FLAGS_cooldown_secs,
+                    FLAGS_tput_interval,
                     FLAGS_abort_backoff, FLAGS_retry_aborted, FLAGS_max_backoff,
                     FLAGS_max_attempts);
                 break;

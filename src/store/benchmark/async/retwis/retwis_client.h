@@ -16,11 +16,11 @@ enum KeySelection {
 class RetwisClient : public OpenBenchmarkClient {
    public:
     RetwisClient(KeySelector *keySelector, Client &client, uint32_t timeout,
-                 Transport &transport, uint64_t id, double arrival_rate, int numRequests, int expDuration,
-                 uint64_t delay, int warmupSec, int cooldownSec, int tputInterval,
-                 uint32_t abortBackoff,
+                 Transport &transport, uint64_t id,
+                 double arrival_rate, double think_time, double stay_probability,
+                 int expDuration, int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,
                  bool retryAborted, uint32_t maxBackoff, uint32_t maxAttempts,
-                 const std::string &latencyFilename = "");
+                 const std::string &latencyFilename = "latency");
 
     virtual ~RetwisClient();
 

@@ -16,9 +16,9 @@ DEFINE_LATENCY(op);
 
 OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
                                          Transport &transport, uint64_t id,
-                                         double arrival_rate,
-                                         int numRequests, int expDuration,
-                                         int warmupSec, int cooldownSec,
+                                         double arrival_rate, double think_time,
+                                         double stay_probability,
+                                         int expDuration, int warmupSec, int cooldownSec,
                                          uint32_t abortBackoff, bool retryAborted,
                                          uint32_t maxBackoff, uint32_t maxAttempts,
                                          const std::string &latencyFilename)
@@ -30,26 +30,19 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
       timeout_{timeout},
       rand_{id},
       next_arrival_dist_{arrival_rate * 1e-6},
-      think_time_dist_{1 * 1e-6},
-      stay_dist_{0.5},
-      //   stay_prob_{0.5},
-      n_requests_(numRequests),
-      exp_duration_(expDuration),
-      warmupSec(warmupSec),
-      cooldownSec(cooldownSec),
-      latencyFilename(latencyFilename),
+      think_time_dist_{1 / think_time * 1e-6},
+      stay_dist_{stay_probability},
+      exp_duration_{expDuration},
+      warmupSec{warmupSec},
+      cooldownSec{cooldownSec},
+      latencyFilename{latencyFilename},
       maxBackoff{maxBackoff},
       abortBackoff{abortBackoff},
       retryAborted{retryAborted},
-      maxAttempts{maxAttempts} {
-    started = false;
-    done = false;
-    cooldownStarted = false;
-
-    if (numRequests > 0) {
-        latencies.reserve(numRequests);
-    }
-
+      maxAttempts{maxAttempts},
+      started{false},
+      done{false},
+      cooldownStarted{false} {
     if (arrival_rate <= 0) {
         Panic("Arrival rate must be (strictly) positive!");
     }
@@ -393,20 +386,16 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
             }
         }
 
-        if (n_requests_ == -1) {
-            struct timeval diff;
-            BenchState state = GetBenchState(diff);
-            if ((state == COOL_DOWN || state == DONE) && !cooldownStarted) {
-                Debug("Starting cooldown after %ld seconds.", diff.tv_sec);
-                Finish();
-            } else if (state == DONE) {
-                Debug("Finished cooldown after %ld seconds.", diff.tv_sec);
-                CooldownDone();
-            } else {
-                Debug("Not done after %ld seconds.", diff.tv_sec);
-            }
-        } else if (n >= n_requests_) {
+        struct timeval diff;
+        BenchState state = GetBenchState(diff);
+        if ((state == COOL_DOWN || state == DONE) && !cooldownStarted) {
+            Debug("Starting cooldown after %ld seconds.", diff.tv_sec);
+            Finish();
+        } else if (state == DONE) {
+            Debug("Finished cooldown after %ld seconds.", diff.tv_sec);
             CooldownDone();
+        } else {
+            Debug("Not done after %ld seconds.", diff.tv_sec);
         }
     }
 
@@ -451,9 +440,5 @@ void OpenBenchmarkClient::Finish() {
         Latency_FlushTo(latencyFilename.c_str());
     }
 
-    if (n_requests_ == -1) {
-        cooldownStarted = true;
-    } else {
-        CooldownDone();
-    }
+    cooldownStarted = true;
 }
