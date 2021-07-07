@@ -32,6 +32,9 @@ include_directories(${CMAKE_SOURCE_DIR}/third_party/json/single_include)
 # add the common library
 add_subdirectory(lib)
 
+# add the rss library
+add_subdirectory(rss)
+
 # add the replication library
 add_subdirectory(replication)
 
