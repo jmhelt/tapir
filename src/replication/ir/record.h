@@ -38,8 +38,8 @@
 #include "lib/assert.h"
 #include "lib/message.h"
 #include "lib/transport.h"
+#include "lib/viewstamp.h"
 #include "replication/common/request.pb.h"
-#include "replication/common/viewstamp.h"
 #include "replication/ir/ir-proto.pb.h"
 
 namespace replication {
@@ -47,8 +47,7 @@ namespace ir {
 
 typedef std::pair<uint64_t, uint64_t> opid_t;
 
-struct RecordEntry
-{
+struct RecordEntry {
     view_t view;
     opid_t opid;
     proto::RecordEntryState state;
@@ -76,9 +75,8 @@ struct RecordEntry
     virtual ~RecordEntry() {}
 };
 
-class Record
-{
-public:
+class Record {
+   public:
     // Use the copy-and-swap idiom to make Record moveable but not copyable
     // [1]. We make it non-copyable to avoid unnecessary copies.
     //
@@ -96,7 +94,7 @@ public:
         std::swap(x.entries, y.entries);
     }
 
-    RecordEntry &Add(const RecordEntry& entry);
+    RecordEntry &Add(const RecordEntry &entry);
     RecordEntry &Add(view_t view, opid_t opid, const Request &request,
                      proto::RecordEntryState state,
                      proto::RecordEntryType type);
@@ -112,10 +110,10 @@ public:
     void ToProto(proto::RecordProto *proto) const;
     const std::map<opid_t, RecordEntry> &Entries() const;
 
-private:
+   private:
     std::map<opid_t, RecordEntry> entries;
 };
 
-}      // namespace ir
-}      // namespace replication
-#endif  /* _IR_RECORD_H_ */
+}  // namespace ir
+}  // namespace replication
+#endif /* _IR_RECORD_H_ */

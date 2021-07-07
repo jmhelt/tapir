@@ -43,11 +43,9 @@
 #include "store/common/partitioner.h"
 #include "store/strongstore/server.h"
 #include "store/tapirstore/server.h"
-#include "store/weakstore/server.h"
 
 enum protocol_t { PROTO_UNKNOWN,
                   PROTO_TAPIR,
-                  PROTO_WEAK,
                   PROTO_STRONG };
 
 enum transmode_t {
@@ -71,12 +69,10 @@ DEFINE_bool(debug_stats, false, "record stats related to debugging");
 
 const std::string protocol_args[] = {
     "tapir",
-    "weak",
     "strong",
 };
 const protocol_t protos[]{
     PROTO_TAPIR,
-    PROTO_WEAK,
     PROTO_STRONG,
 };
 static bool ValidateProtocol(const char *flagname, const std::string &value) {
@@ -315,12 +311,6 @@ int main(int argc, char **argv) {
             server = new tapirstore::Server(FLAGS_tapir_linearizable);
             break;
         }
-        case PROTO_WEAK: {
-            server = new weakstore::Server(replica_config, FLAGS_group_idx,
-                                           FLAGS_replica_idx, tport,
-                                           new weakstore::Store());
-            break;
-        }
         case PROTO_STRONG: {
             server = new strongstore::Server(consistency, shard_config,
                                              replica_config, FLAGS_server_id,
@@ -425,8 +415,6 @@ int main(int argc, char **argv) {
                 dynamic_cast<replication::ir::IRAppReplica *>(server));
             break;
         }
-        case PROTO_WEAK:
-            break;
 
         case PROTO_STRONG: {
             replica = new replication::vr::VRReplica(

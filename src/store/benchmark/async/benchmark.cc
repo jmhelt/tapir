@@ -30,12 +30,10 @@
 #include "store/strongstore/client.h"
 #include "store/strongstore/networkconfig.h"
 #include "store/tapirstore/client.h"
-#include "store/weakstore/client.h"
 
 enum protomode_t {
     PROTO_UNKNOWN,
     PROTO_TAPIR,
-    PROTO_WEAK,
     PROTO_STRONG,
 };
 
@@ -93,7 +91,7 @@ DEFINE_validator(trans_protocol, &ValidateTransMode);
 
 const std::string protocol_args[] = {"txn-l", "txn-s", "qw", "occ",
                                      "lock", "span-occ", "span-lock", "mvtso"};
-const protomode_t protomodes[]{PROTO_TAPIR, PROTO_TAPIR, PROTO_WEAK,
+const protomode_t protomodes[]{PROTO_TAPIR, PROTO_TAPIR,
                                PROTO_STRONG, PROTO_STRONG, PROTO_STRONG,
                                PROTO_STRONG, PROTO_STRONG};
 const strongstore::Mode strongmodes[]{
@@ -592,12 +590,6 @@ int main(int argc, char **argv) {
                     FLAGS_tapir_sync_commit, tt);
                 break;
             }
-            // case MODE_WEAK: {
-            //     protoClient =
-            //         new weakstore::Client(configPath, nshards,
-            //         closestReplica);
-            //     break;
-            // }
             case PROTO_STRONG: {
                 strongstore::NetworkConfiguration net_config{shard_config,
                                                              net_config_stream};

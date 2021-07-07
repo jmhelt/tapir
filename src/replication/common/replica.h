@@ -37,15 +37,17 @@
 
 #include "lib/configuration.h"
 #include "lib/transport.h"
+#include "lib/viewstamp.h"
 #include "replication/common/log.h"
 #include "replication/common/request.pb.h"
-#include "replication/common/viewstamp.h"
 
 namespace replication {
 
 class Replica;
 
-enum ReplicaStatus { STATUS_NORMAL, STATUS_VIEW_CHANGE, STATUS_RECOVERING };
+enum ReplicaStatus { STATUS_NORMAL,
+                     STATUS_VIEW_CHANGE,
+                     STATUS_RECOVERING };
 
 class AppReplica {
    public:

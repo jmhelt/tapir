@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-#include "replication/common/viewstamp.h"
+#include "lib/viewstamp.h"
 
 using std::string;
 

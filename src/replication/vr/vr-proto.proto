@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-import "replication/common/request.proto";
+import "request.proto";
 
 package replication.vr.proto;
 
