@@ -1,35 +1,6 @@
-// -*- mode: c++; c-file-style: "k&r"; c-basic-offset: 4 -*-
-/***********************************************************************
- *
- * store/strongstore/client.cc:
- *   Client to transactional storage system with strong consistency
- *
- * Copyright 2015 Irene Zhang <iyzhang@cs.washington.edu>
- *                Naveen Kr. Sharma <naveenks@cs.washington.edu>
- *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- **********************************************************************/
-
 #include "store/strongstore/client.h"
+
+#include <rss/lib.h>
 
 #include <cmath>
 #include <functional>
@@ -53,6 +24,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       context_states_{},
       net_config_{net_config},
       client_region_{client_region},
+      service_name_{"spanner-" + std::to_string(client_id)},
       config_{config},
       client_id_{client_id},
       nshards_(nShards),
@@ -81,9 +53,15 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
     }
 
     CalculateCoordinatorChoices();
+
+    rss::RegisterRSSService(service_name_, []() {
+        Debug("invoked real-time barrier!");
+    });
 }
 
 Client::~Client() {
+    rss::UnregisterRSSService(service_name_);
+
     if (debug_stats_) {
         Latency_Dump(&op_lat_);
         Latency_Dump(&commit_lat_);
@@ -279,6 +257,8 @@ void Client::HandleWound(const uint64_t transaction_id) {
  * abort() are part of this transaction.
  */
 void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    rss::StartRWTransaction(service_name_);
+
     auto tid = next_transaction_id_++;
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
@@ -294,6 +274,8 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t tim
 }
 
 void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    rss::StartRWTransaction(service_name_);
+
     auto tid = next_transaction_id_++;
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
@@ -313,6 +295,8 @@ void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb
  */
 void Client::Retry(Context &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
+    rss::StartRWTransaction(service_name_);
+
     auto tid = next_transaction_id_++;
     auto &start_ts = ctx.start_ts();
 
@@ -524,7 +508,7 @@ void Client::CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp
         Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
     }
 
-    transport_->Timer(ms, std::bind(ccb, tstatus));
+    transport_->Timer(ms, [ccb, tstatus, service_name = service_name_]() { rss::EndRWTransaction(service_name); ccb(tstatus); });
 
     context_states_.erase(tid);
 }
@@ -590,6 +574,8 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
         pending_reqs_.erase(req_id);
         delete req;
 
+        rss::EndRWTransaction(service_name_);
+
         Debug("[%lu] Abort finished", transaction_id);
         acb();
 
@@ -601,6 +587,8 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
 void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
+    rss::StartROTransaction(service_name_);
+
     auto tid = ctx.transaction_id();
 
     Debug("[%lu] ROCOMMIT", tid);
@@ -687,6 +675,9 @@ void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
 
         ctx.advance(r.max_read_ts);
         Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+
+        rss::EndROTransaction(service_name_);
+
         Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);
 
@@ -723,6 +714,9 @@ void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
 
         ctx.advance(r.max_read_ts);
         Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+
+        rss::EndROTransaction(service_name_);
+
         Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);
 

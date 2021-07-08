@@ -200,6 +200,8 @@ class Client : public ::Client {
     const strongstore::NetworkConfiguration &net_config_;
     const std::string client_region_;
 
+    const std::string service_name_;
+
     transport::Configuration &config_;
 
     // Unique ID for this client.

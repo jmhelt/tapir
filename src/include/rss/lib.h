@@ -43,7 +43,9 @@ class RSSRegistry {
     enum RSSServiceState {
         NONE,
         EXECUTING_RW,
-        EXECUTING_RO
+        EXECUTING_RO,
+        EXECUTED_RW,
+        EXECUTED_RO
     };
 
     class RSSService {
@@ -54,6 +56,8 @@ class RSSRegistry {
         RSSServiceState current_state() const { return current_state_; }
         void set_current_state(RSSServiceState s) { current_state_ = s; }
 
+        void invoke_barrier() const { bf_(); }
+
        private:
         std::string name_;
         barrier_func_t bf_;
@@ -61,11 +65,12 @@ class RSSRegistry {
     };
 
     RSSService &FindService(const std::string &name);
+    void UpdateLastService(const std::string &name);
 
     std::string last_service_;
     std::unordered_map<std::string, RSSService> services_;
 };
 
-RSSRegistry registry;
+static RSSRegistry __RSS_REGISTRY;
 
 }  // namespace rss
