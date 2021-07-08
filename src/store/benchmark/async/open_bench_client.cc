@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "lib/latency.h"
 #include "lib/message.h"
@@ -24,7 +25,7 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
                                          const std::string &latencyFilename)
     : transport_(transport),
       executing_transactions_{},
-      next_transaction_id_{1},
+      next_transaction_id_{0},
       client_{client},
       client_id_{id},
       timeout_{timeout},
@@ -64,9 +65,8 @@ void OpenBenchmarkClient::Start(bench_done_callback bdcb) {
 }
 
 void OpenBenchmarkClient::SendNext() {
-    auto tid = next_transaction_id_;
+    auto tid = next_transaction_id_++;
     Debug("[%lu] SendNext", tid);
-    next_transaction_id_++;
 
     auto transaction = GetNextTransaction();
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
@@ -82,10 +82,9 @@ void OpenBenchmarkClient::SendNext() {
     }
 }
 
-void OpenBenchmarkClient::SendNextInSession(Context ctx) {
-    auto tid = next_transaction_id_;
+void OpenBenchmarkClient::SendNextInSession(std::unique_ptr<Context> &ctx) {
+    auto tid = next_transaction_id_++;
     Debug("[%lu] SendNextInSession", tid);
-    next_transaction_id_++;
 
     auto transaction = GetNextTransaction();
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
@@ -95,10 +94,10 @@ void OpenBenchmarkClient::SendNextInSession(Context ctx) {
     client_.Begin(ctx, bcb, btcb, timeout_);
 }
 
-void OpenBenchmarkClient::BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx) {
+void OpenBenchmarkClient::BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx) {
     auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, transaction_id, std::placeholders::_1);
 
-    executing_transactions_.insert({transaction_id, {transaction_id, transaction, ctx, ecb}});
+    executing_transactions_.emplace(transaction_id, ExecutingTransaction{transaction_id, transaction, std::move(ctx), ecb});
 
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
@@ -251,26 +250,38 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
     auto transaction = et.transaction();
     auto &ttype = transaction->GetTransactionType();
     auto n_attempts = et.n_attempts();
-    auto ctx = et.ctx();
 
     if (result == COMMITTED || result == ABORTED_USER ||
         (maxAttempts != -1 && n_attempts >= static_cast<uint64_t>(maxAttempts)) ||
         !retryAborted) {
+        bool erase_et = true;
         if (result == COMMITTED) {
             stats.Increment(ttype + "_committed", 1);
 
             if (stay_dist_(rand_)) {
+                erase_et = false;
                 uint64_t next_arrival_us = static_cast<uint64_t>(think_time_dist_(rand_));
                 Debug("next arrival in session %lu us", next_arrival_us);
-                transport_.TimerMicro(next_arrival_us, std::bind(&OpenBenchmarkClient::SendNextInSession, this, ctx));
+                transport_.TimerMicro(next_arrival_us, [this, transaction_id]() {
+                    auto search = executing_transactions_.find(transaction_id);
+                    ASSERT(search != executing_transactions_.end());
+
+                    auto &et = search->second;
+                    auto ctx = std::move(et.ctx());
+                    executing_transactions_.erase(search);
+
+                    SendNextInSession(ctx);
+                });
             } else {
                 Debug("end of session");
             }
         }
+
         if (retryAborted) {
             stats.Add(ttype + "_attempts_list", n_attempts);
         }
-        OnReply(transaction_id, result);
+
+        OnReply(transaction_id, result, erase_et);
     } else {
         stats.Increment(ttype + "_" + std::to_string(result), 1);
         OpenBenchmarkClient::BenchState state = GetBenchState();
@@ -298,7 +309,7 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
 
                 auto &et = search->second;
                 auto transaction = et.transaction();
-                auto ctx = et.ctx();
+                auto ctx = std::move(et.ctx());
                 auto &ttype = et.transaction()->GetTransactionType();
                 executing_transactions_.erase(search);
 
@@ -353,7 +364,7 @@ void OpenBenchmarkClient::CooldownDone() {
     curr_bdcb_();
 }
 
-void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
+void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result, bool erase_et) {
     Debug("[%lu] OnReply with result %d.", transaction_id, result);
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
@@ -400,7 +411,10 @@ void OpenBenchmarkClient::OnReply(uint64_t transaction_id, int result) {
     }
 
     delete transaction;
-    executing_transactions_.erase(search);
+
+    if (erase_et) {
+        executing_transactions_.erase(search);
+    }
 
     n++;
 }

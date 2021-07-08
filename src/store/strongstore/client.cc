@@ -257,9 +257,10 @@ void Client::HandleWound(const uint64_t transaction_id) {
  * abort() are part of this transaction.
  */
 void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
-    rss::StartRWTransaction(service_name_);
-
     auto tid = next_transaction_id_++;
+
+    Debug("[%lu] Begin", tid);
+
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
     auto state = std::make_unique<ContextState>();
@@ -269,14 +270,18 @@ void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t tim
         sclients_[i]->Begin(tid, start_ts);
     }
 
-    Context ctx{tid, start_ts};
-    bcb(ctx);
+    std::unique_ptr<Context> ctx = std::make_unique<Context>(tid, start_ts);
+
+    rss::StartRWTransaction(*ctx, service_name_);
+
+    bcb(std::move(ctx));
 }
 
-void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
-    rss::StartRWTransaction(service_name_);
-
+void Client::Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
     auto tid = next_transaction_id_++;
+
+    Debug("[%lu] Begin", tid);
+
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
     auto state = std::make_unique<ContextState>();
@@ -286,19 +291,19 @@ void Client::Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb
         sclients_[i]->Begin(tid, start_ts);
     }
 
-    Context nctx{tid, start_ts};
-    nctx.advance(ctx.min_read_ts());
-    bcb(nctx);
+    std::unique_ptr<Context> nctx = std::make_unique<Context>(tid, *ctx);
+
+    rss::StartRWTransaction(*nctx, service_name_);
+
+    bcb(std::move(nctx));
 }
 
 /* Begins a transaction, retrying the transaction indicated by ctx.
  */
-void Client::Retry(Context &ctx, begin_callback bcb,
+void Client::Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
                    begin_timeout_callback btcb, uint32_t timeout) {
-    rss::StartRWTransaction(service_name_);
-
     auto tid = next_transaction_id_++;
-    auto &start_ts = ctx.start_ts();
+    auto &start_ts = ctx->start_ts();
 
     auto state = std::make_unique<ContextState>();
     context_states_.emplace(tid, std::move(state));
@@ -307,14 +312,17 @@ void Client::Retry(Context &ctx, begin_callback bcb,
         sclients_[i]->Begin(tid, start_ts);
     }
 
-    Context nctx{tid, start_ts};
-    bcb(nctx);
+    std::unique_ptr<Context> nctx = std::make_unique<Context>(tid, *ctx);
+
+    rss::StartRWTransaction(*nctx, service_name_);
+
+    bcb(std::move(nctx));
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::Get(Context &ctx, const std::string &key, get_callback gcb,
+void Client::Get(std::unique_ptr<Context> &ctx, const std::string &key, get_callback gcb,
                  get_timeout_callback gtcb, uint32_t timeout) {
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("GET [%lu : %s]", tid, key.c_str());
 
@@ -344,9 +352,9 @@ void Client::Get(Context &ctx, const std::string &key, get_callback gcb,
 }
 
 /* Returns the value corresponding to the supplied key. */
-void Client::GetForUpdate(Context &ctx, const std::string &key, get_callback gcb,
+void Client::GetForUpdate(std::unique_ptr<Context> &ctx, const std::string &key, get_callback gcb,
                           get_timeout_callback gtcb, uint32_t timeout) {
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("GET FOR UPDATE [%lu : %s]", tid, key.c_str());
 
@@ -376,10 +384,10 @@ void Client::GetForUpdate(Context &ctx, const std::string &key, get_callback gcb
 }
 
 /* Sets the value corresponding to the supplied key. */
-void Client::Put(Context &ctx, const std::string &key, const std::string &value,
+void Client::Put(std::unique_ptr<Context> &ctx, const std::string &key, const std::string &value,
                  put_callback pcb, put_timeout_callback ptcb,
                  uint32_t timeout) {
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("PUT [%lu : %s]", tid, key.c_str());
 
@@ -408,8 +416,8 @@ void Client::Put(Context &ctx, const std::string &key, const std::string &value,
 }
 
 /* Attempts to commit the ongoing transaction. */
-void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb, uint32_t timeout) {
-    auto tid = ctx.transaction_id();
+void Client::Commit(std::unique_ptr<Context> &ctx, commit_callback ccb, commit_timeout_callback ctcb, uint32_t timeout) {
+    auto tid = ctx->transaction_id();
 
     Debug("[%lu] COMMIT", tid);
 
@@ -428,7 +436,8 @@ void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback c
         return;
     }
 
-    Debug("[%lu] min_read_ts: %lu.%lu", tid, ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+    auto &min_read_ts = ctx->min_read_ts();
+    Debug("[%lu] min_read_ts: %lu.%lu", tid, min_read_ts.getTimestamp(), min_read_ts.getID());
 
     state->set_committing();
 
@@ -472,8 +481,8 @@ void Client::Commit(Context &ctx, commit_callback ccb, commit_timeout_callback c
     }
 }
 
-void Client::CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
-    auto tid = ctx.transaction_id();
+void Client::CommitCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts) {
+    auto tid = ctx->transaction_id();
     Debug("[%lu] PREPARE callback status %d", tid, status);
 
     auto search = pending_reqs_.find(req_id);
@@ -504,19 +513,32 @@ void Client::CommitCallback(Context &ctx, uint64_t req_id, int status, Timestamp
     if (tstatus == COMMITTED && consistency_ == Consistency::RSS) {
         ms = tt_.TimeToWaitUntilMS(nonblock_ts.getTimestamp());
         Debug("Waiting for nonblock time: %lu ms", ms);
-        ctx.advance(commit_ts);
-        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+        ctx->advance_min_read_ts(commit_ts);
+        auto &min_read_ts = ctx->min_read_ts();
+        Debug("min_read_timestamp_: %lu.%lu", min_read_ts.getTimestamp(), min_read_ts.getID());
     }
 
-    transport_->Timer(ms, [ccb, tstatus, service_name = service_name_]() { rss::EndRWTransaction(service_name); ccb(tstatus); });
+    rss::EndRWTransaction(*ctx, service_name_);
+
+    transport_->Timer(ms, std::bind(ccb, tstatus));
 
     context_states_.erase(tid);
 }
 
-void Client::Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+void Client::Abort(std::unique_ptr<Context> &ctx, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
-    auto tid = ctx.transaction_id();
-    Abort(tid, acb, atcb, timeout);
+    auto tid = ctx->transaction_id();
+
+    auto acb1 = [acb, ctx = std::ref(ctx), service_name = service_name_]() {
+        rss::EndRWTransaction(*(ctx.get()), service_name);
+        acb();
+    };
+
+    auto atcb1 = [atcb, ctx = std::ref(ctx), service_name = service_name_]() {
+        rss::EndRWTransaction(*(ctx.get()), service_name);
+        atcb();
+    };
+    Abort(tid, acb1, atcb1, timeout);
 }
 
 /* Aborts the ongoing transaction. */
@@ -574,8 +596,6 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
         pending_reqs_.erase(req_id);
         delete req;
 
-        rss::EndRWTransaction(service_name_);
-
         Debug("[%lu] Abort finished", transaction_id);
         acb();
 
@@ -584,12 +604,12 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
 }
 
 /* Commits RO transaction. */
-void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
+void Client::ROCommit(std::unique_ptr<Context> &ctx, const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
-    rss::StartROTransaction(service_name_);
+    rss::StartROTransaction(*ctx, service_name_);
 
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("[%lu] ROCOMMIT", tid);
 
@@ -598,7 +618,8 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
 
     auto &state = search->second;
 
-    Debug("[%lu] min_read_ts: %lu.%lu", tid, ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+    auto &min_read_ts = ctx->min_read_ts();
+    Debug("[%lu] min_read_ts: %lu.%lu", tid, min_read_ts.getTimestamp(), min_read_ts.getID());
 
     state->set_committing();
 
@@ -623,7 +644,7 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
 
     ASSERT(sharded_keys.size() > 0);
 
-    Timestamp min_ts = ctx.min_read_ts();
+    Timestamp min_ts = ctx->min_read_ts();
     Timestamp commit_ts{tt_.Now().latest(), client_id_};
 
     // Hack to make RSS work with zero TrueTime error despite clock skew
@@ -648,10 +669,10 @@ void Client::ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
     }
 }
 
-void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
+void Client::ROCommitCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int shard_idx,
                               const std::vector<Value> &values,
                               const std::vector<PreparedTransaction> &prepares) {
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("[%lu] ROCommit callback", tid);
 
@@ -673,10 +694,12 @@ void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
         pending_reqs_.erase(search);
         delete req;
 
-        ctx.advance(r.max_read_ts);
-        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+        ctx->advance_min_read_ts(r.max_read_ts);
 
-        rss::EndROTransaction(service_name_);
+        auto &min_read_ts = ctx->min_read_ts();
+        Debug("min_read_timestamp_: %lu.%lu", min_read_ts.getTimestamp(), min_read_ts.getID());
+
+        rss::EndROTransaction(*ctx, service_name_);
 
         Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);
@@ -688,9 +711,9 @@ void Client::ROCommitCallback(Context &ctx, uint64_t req_id, int shard_idx,
     }
 }
 
-void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
+void Client::ROCommitSlowCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int shard_idx,
                                   uint64_t rw_transaction_id, const Timestamp &commit_ts, bool is_commit) {
-    auto tid = ctx.transaction_id();
+    auto tid = ctx->transaction_id();
 
     Debug("[%lu] ROCommitSlow callback", tid);
 
@@ -712,10 +735,12 @@ void Client::ROCommitSlowCallback(Context &ctx, uint64_t req_id, int shard_idx,
         pending_reqs_.erase(search);
         delete req;
 
-        ctx.advance(r.max_read_ts);
-        Debug("min_read_timestamp_: %lu.%lu", ctx.min_read_ts().getTimestamp(), ctx.min_read_ts().getID());
+        ctx->advance_min_read_ts(r.max_read_ts);
 
-        rss::EndROTransaction(service_name_);
+        auto &min_read_ts = ctx->min_read_ts();
+        Debug("min_read_timestamp_: %lu.%lu", min_read_ts.getTimestamp(), min_read_ts.getID());
+
+        rss::EndROTransaction(*ctx, service_name_);
 
         Debug("[%lu] COMMIT OK", tid);
         ccb(COMMITTED);

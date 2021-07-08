@@ -32,6 +32,7 @@
 #ifndef _TAPIR_CLIENT_H_
 #define _TAPIR_CLIENT_H_
 
+#include <memory>
 #include <set>
 #include <thread>
 
@@ -63,29 +64,29 @@ class Client : public ::Client {
 
     virtual void Begin(begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
-    virtual void Begin(Context &ctx,
+    virtual void Begin(std::unique_ptr<Context> &ctx,
                        begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Begin a transaction.
-    virtual void Retry(Context &ctx, begin_callback bcb,
+    virtual void Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Get the value corresponding to key.
-    virtual void Get(Context &ctx, const std::string &key, get_callback gcb,
+    virtual void Get(std::unique_ptr<Context> &ctx, const std::string &key, get_callback gcb,
                      get_timeout_callback gtcb,
                      uint32_t timeout = GET_TIMEOUT) override;
 
     // Set the value for the given key.
-    virtual void Put(Context &ctx, const std::string &key, const std::string &value,
+    virtual void Put(std::unique_ptr<Context> &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout = PUT_TIMEOUT) override;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(std::unique_ptr<Context> &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) override;
 
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+    virtual void Abort(std::unique_ptr<Context> &ctx, abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) override;
 
    private:

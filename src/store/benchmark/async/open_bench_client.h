@@ -2,6 +2,7 @@
 #define OPEN_BENCHMARK_CLIENT_H
 
 #include <functional>
+#include <memory>
 #include <random>
 #include <unordered_map>
 
@@ -29,7 +30,7 @@ class OpenBenchmarkClient {
     virtual ~OpenBenchmarkClient();
 
     void Start(bench_done_callback bdcb);
-    void OnReply(uint64_t transaction_id, int result);
+    void OnReply(uint64_t transaction_id, int result, bool erase_et = true);
 
     void SendNext();
     void ExecuteCallback(uint64_t transaction_id, transaction_status_t result);
@@ -59,12 +60,12 @@ class OpenBenchmarkClient {
    private:
     class ExecutingTransaction {
        public:
-        ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, Context &ctx, execute_callback ecb)
-            : lat_{}, id_{id}, transaction_{transaction}, ctx_{ctx}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
+        ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx, execute_callback ecb)
+            : lat_{}, id_{id}, transaction_{transaction}, ctx_{std::move(ctx)}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
 
         uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
-        Context &ctx() { return ctx_; }
+        std::unique_ptr<Context> &ctx() { return ctx_; }
         execute_callback ecb() const { return ecb_; }
 
         Latency_Frame_t *lat() { return &lat_; }
@@ -80,15 +81,15 @@ class OpenBenchmarkClient {
         Latency_Frame_t lat_;
         uint64_t id_;
         AsyncTransaction *transaction_;
-        Context ctx_;
+        std::unique_ptr<Context> ctx_;
         execute_callback ecb_;
         uint64_t n_attempts_;
         std::size_t op_index_;
     };
 
-    void SendNextInSession(Context ctx);
+    void SendNextInSession(std::unique_ptr<Context> &ctx);
 
-    void BeginCallback(const uint64_t transaction_id, AsyncTransaction *transaction, Context &ctx);
+    void BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx);
 
     void ExecuteNextOperation(const uint64_t transaction_id);
 

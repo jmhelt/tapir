@@ -9,7 +9,10 @@
 #ifndef _CLIENT_API_H_
 #define _CLIENT_API_H_
 
+#include <rss/lib.h>
+
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,17 +30,21 @@ enum transaction_status_t {
     ABORTED_MAX_RETRIES
 };
 
-class Context {
+class Context : public rss::Session {
    public:
     Context() : transaction_id_{0}, start_ts_{0, 0}, min_read_ts_{0, 0} {}
+
     Context(uint64_t transaction_id, const Timestamp &start_ts)
         : transaction_id_{transaction_id}, start_ts_{start_ts}, min_read_ts_{0, 0} {}
+
+    Context(uint64_t transaction_id, const Context &c)
+        : Session(c), transaction_id_{transaction_id}, start_ts_{c.start_ts_}, min_read_ts_{c.min_read_ts_} {}
 
     uint64_t transaction_id() const { return transaction_id_; }
     const Timestamp &start_ts() const { return start_ts_; }
 
     const Timestamp &min_read_ts() const { return min_read_ts_; }
-    void advance(const Timestamp &ts) { min_read_ts_ = std::max(min_read_ts_, ts); }
+    void advance_min_read_ts(const Timestamp &ts) { min_read_ts_ = std::max(min_read_ts_, ts); }
 
    private:
     const uint64_t transaction_id_;
@@ -45,7 +52,7 @@ class Context {
     Timestamp min_read_ts_;
 };
 
-typedef std::function<void(Context &)> begin_callback;
+typedef std::function<void(std::unique_ptr<Context>)> begin_callback;
 typedef std::function<void()> begin_timeout_callback;
 
 typedef std::function<void(int, const std::string &, const std::string &, Timestamp)> get_callback;
@@ -68,36 +75,36 @@ class Client {
     virtual ~Client() {}
 
     virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
-    virtual void Begin(Context &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
 
-    virtual void Retry(Context &ctx, begin_callback bcb,
+    virtual void Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
-    virtual void Get(Context &ctx, const std::string &key, get_callback gcb,
+    virtual void Get(std::unique_ptr<Context> &ctx, const std::string &key, get_callback gcb,
                      get_timeout_callback gtcb, uint32_t timeout) = 0;
 
     // Get the value corresponding to key.
     // Provide hint that transaction will later write the key.
-    virtual void GetForUpdate(Context &ctx, const std::string &key, get_callback gcb,
+    virtual void GetForUpdate(std::unique_ptr<Context> &ctx, const std::string &key, get_callback gcb,
                               get_timeout_callback gtcb, uint32_t timeout) {
         Get(ctx, key, gcb, gtcb, timeout);
     }
 
     // Set the value for the given key.
-    virtual void Put(Context &ctx, const std::string &key, const std::string &value,
+    virtual void Put(std::unique_ptr<Context> &ctx, const std::string &key, const std::string &value,
                      put_callback pcb, put_timeout_callback ptcb,
                      uint32_t timeout) = 0;
 
     // Commit all Get(s) and Put(s) since Begin().
-    virtual void Commit(Context &ctx, commit_callback ccb, commit_timeout_callback ctcb,
+    virtual void Commit(std::unique_ptr<Context> &ctx, commit_callback ccb, commit_timeout_callback ctcb,
                         uint32_t timeout) = 0;
 
     // Abort all Get(s) and Put(s) since Begin().
-    virtual void Abort(Context &ctx, abort_callback acb, abort_timeout_callback atcb,
+    virtual void Abort(std::unique_ptr<Context> &ctx, abort_callback acb, abort_timeout_callback atcb,
                        uint32_t timeout) = 0;
 
-    virtual void ROCommit(Context &ctx, const std::unordered_set<std::string> &keys,
+    virtual void ROCommit(std::unique_ptr<Context> &ctx, const std::unordered_set<std::string> &keys,
                           commit_callback ccb, commit_timeout_callback ctcb,
                           uint32_t timeout) {
         Panic("Unimplemented ROCommit!");

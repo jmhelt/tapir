@@ -80,7 +80,7 @@
   "client_zipf_coefficient": [
     0.9
   ],
-  "client_arrival_rate": 5,
+  "client_arrival_rate": 10,
   "client_stay_probability": 0.66,
   "client_think_time": 1,
   "nb_time_alpha": 1.0,
