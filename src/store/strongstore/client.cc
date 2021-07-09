@@ -223,6 +223,8 @@ Timestamp Client::ChooseNonBlockTimestamp(const uint64_t transaction_id) {
 }
 
 void Client::HandleWound(const uint64_t transaction_id) {
+    Debug("[%lu] Handling wound", transaction_id);
+
     auto search = context_states_.find(transaction_id);
     if (search == context_states_.end()) {
         Debug("[%lu] Transaction already finished", transaction_id);
@@ -230,70 +232,97 @@ void Client::HandleWound(const uint64_t transaction_id) {
     }
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", transaction_id);
-        return;
-    }
-
-    if (state->executing()) {
-        Debug("[%lu] Sending aborts", transaction_id);
-
-        auto acb = [transaction_id]() { Debug("[%lu] Received wound callback", transaction_id); };
-        auto atcb = []() {};
-
-        Abort(transaction_id, acb, atcb, ABORT_TIMEOUT);
-    } else if (state->committing()) {
-        // Forward wound to coordinator
-        Debug("[%lu] Forwarding wound to coordinator", transaction_id);
-        int coordinator = ChooseCoordinator(transaction_id);
-        sclients_[coordinator]->Wound(transaction_id);
-    } else {
-        NOT_REACHABLE();
+    int p = -1;
+    int coordinator = -1;
+    Debug("[%lu] client state: %d", transaction_id, state->state());
+    switch (state->state()) {
+        case ContextState::EXECUTING:
+            state->set_needs_abort();
+            break;
+        case ContextState::GETTING:
+            p = state->current_participant();
+            sclients_[p]->AbortGet(transaction_id);
+            break;
+        case ContextState::PUTTING:
+            p = state->current_participant();
+            sclients_[p]->AbortPut(transaction_id);
+            break;
+        case ContextState::COMMITTING:
+            Debug("[%lu] Forwarding wound to coordinator", transaction_id);
+            coordinator = ChooseCoordinator(transaction_id);
+            sclients_[coordinator]->Wound(transaction_id);
+            break;
+        case ContextState::ABORTING:
+            Debug("[%lu] Already aborted");
+            break;
+        default:
+            Panic("Unexpected state: %d", state->state());
     }
 }
 
 /* Begins a transaction. All subsequent operations before a commit() or
  * abort() are part of this transaction.
  */
-void Client::Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+std::unique_ptr<Context> Client::Begin() {
     auto tid = next_transaction_id_++;
 
     Debug("[%lu] Begin", tid);
 
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
-    auto state = std::make_unique<ContextState>();
-    context_states_.emplace(tid, std::move(state));
+    context_states_.emplace(tid, std::make_unique<ContextState>());
 
     for (uint64_t i = 0; i < nshards_; i++) {
         sclients_[i]->Begin(tid, start_ts);
     }
 
-    std::unique_ptr<Context> ctx = std::make_unique<Context>(tid, start_ts);
+    return std::make_unique<Context>(tid, start_ts);
+}
+
+void Client::BeginRW(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    std::unique_ptr<Context> ctx = Begin();
 
     rss::StartRWTransaction(*ctx, service_name_);
 
     bcb(std::move(ctx));
 }
 
-void Client::Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+void Client::BeginRO(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    std::unique_ptr<Context> ctx = Begin();
+
+    rss::StartROTransaction(*ctx, service_name_);
+
+    bcb(std::move(ctx));
+}
+
+std::unique_ptr<Context> Client::Begin(std::unique_ptr<Context> &ctx) {
     auto tid = next_transaction_id_++;
 
     Debug("[%lu] Begin", tid);
 
     Timestamp start_ts{tt_.Now().latest(), client_id_};
 
-    auto state = std::make_unique<ContextState>();
-    context_states_.emplace(tid, std::move(state));
+    context_states_.emplace(tid, std::make_unique<ContextState>());
 
     for (uint64_t i = 0; i < nshards_; i++) {
         sclients_[i]->Begin(tid, start_ts);
     }
 
-    std::unique_ptr<Context> nctx = std::make_unique<Context>(tid, *ctx);
+    return std::make_unique<Context>(tid, *ctx);
+}
+
+void Client::BeginRW(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    std::unique_ptr<Context> nctx = Begin(ctx);
 
     rss::StartRWTransaction(*nctx, service_name_);
+
+    bcb(std::move(nctx));
+}
+
+void Client::BeginRO(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    std::unique_ptr<Context> nctx = Begin(ctx);
+
+    rss::StartROTransaction(*nctx, service_name_);
 
     bcb(std::move(nctx));
 }
@@ -305,8 +334,7 @@ void Client::Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
     auto tid = next_transaction_id_++;
     auto &start_ts = ctx->start_ts();
 
-    auto state = std::make_unique<ContextState>();
-    context_states_.emplace(tid, std::move(state));
+    context_states_.emplace(tid, std::make_unique<ContextState>());
 
     for (uint64_t i = 0; i < nshards_; i++) {
         sclients_[i]->Begin(tid, start_ts);
@@ -327,28 +355,37 @@ void Client::Get(std::unique_ptr<Context> &ctx, const std::string &key, get_call
     Debug("GET [%lu : %s]", tid, key.c_str());
 
     auto search = context_states_.find(tid);
-    if (search == context_states_.end()) {
-        Debug("[%lu] Already aborted", tid);
-        gcb(REPLY_FAIL, "", "", Timestamp());
-        return;
-    }
+    ASSERT(search != context_states_.end());
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", tid);
+    if (state->needs_aborts()) {
+        Debug("[%lu] Need to abort", tid);
         gcb(REPLY_FAIL, "", "", Timestamp());
         return;
     }
+
+    ASSERT(state->executing());
 
     // Contact the appropriate shard to get the value.
     int i = (*part_)(key, nshards_, -1, state->participants());
 
+    state->set_getting(i);
+
     // Add this shard to set of participants
     state->add_participant(i);
 
+    auto gcb1 = [gcb, state = std::ref(state)](int s, const std::string &k, const std::string &v, Timestamp ts) {
+        state.get()->set_executing();
+        gcb(s, k, v, ts);
+    };
+
+    auto gtcb1 = [gtcb, state = std::ref(state)](int s, const std::string &k) {
+        state.get()->set_executing();
+        gtcb(s, k);
+    };
+
     // Send the GET operation to appropriate shard.
-    sclients_[i]->Get(tid, key, gcb, gtcb, timeout);
+    sclients_[i]->Get(tid, key, gcb1, gtcb1, timeout);
 }
 
 /* Returns the value corresponding to the supplied key. */
@@ -359,28 +396,37 @@ void Client::GetForUpdate(std::unique_ptr<Context> &ctx, const std::string &key,
     Debug("GET FOR UPDATE [%lu : %s]", tid, key.c_str());
 
     auto search = context_states_.find(tid);
-    if (search == context_states_.end()) {
-        Debug("[%lu] Already aborted", tid);
-        gcb(REPLY_FAIL, "", "", Timestamp());
-        return;
-    }
+    ASSERT(search != context_states_.end());
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", tid);
+    if (state->needs_aborts()) {
+        Debug("[%lu] Need to abort", tid);
         gcb(REPLY_FAIL, "", "", Timestamp());
         return;
     }
+
+    ASSERT(state->executing());
 
     // Contact the appropriate shard to get the value.
     int i = (*part_)(key, nshards_, -1, state->participants());
 
+    state->set_getting(i);
+
     // Add this shard to set of participants
     state->add_participant(i);
 
+    auto gcb1 = [gcb, state = std::ref(state)](int s, const std::string &k, const std::string &v, Timestamp ts) {
+        state.get()->set_executing();
+        gcb(s, k, v, ts);
+    };
+
+    auto gtcb1 = [gtcb, state = std::ref(state)](int s, const std::string &k) {
+        state.get()->set_executing();
+        gtcb(s, k);
+    };
+
     // Send the GET operation to appropriate shard.
-    sclients_[i]->GetForUpdate(tid, key, gcb, gtcb, timeout);
+    sclients_[i]->GetForUpdate(tid, key, gcb1, gtcb1, timeout);
 }
 
 /* Sets the value corresponding to the supplied key. */
@@ -392,27 +438,36 @@ void Client::Put(std::unique_ptr<Context> &ctx, const std::string &key, const st
     Debug("PUT [%lu : %s]", tid, key.c_str());
 
     auto search = context_states_.find(tid);
-    if (search == context_states_.end()) {
-        Debug("[%lu] Already aborted", tid);
-        pcb(REPLY_FAIL, "", "");
-        return;
-    }
+    ASSERT(search != context_states_.end());
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", tid);
+    if (state->needs_aborts()) {
+        Debug("[%lu] Need to abort", tid);
         pcb(REPLY_FAIL, "", "");
         return;
     }
+
+    ASSERT(state->executing());
 
     // Contact the appropriate shard to set the value.
     int i = (*part_)(key, nshards_, -1, state->participants());
 
+    state->set_putting(i);
+
     // Add this shard to set of participants
     state->add_participant(i);
 
-    sclients_[i]->Put(tid, key, value, pcb, ptcb, timeout);
+    auto pcb1 = [pcb, state = std::ref(state)](int s, const std::string &k, const std::string &v) {
+        state.get()->set_executing();
+        pcb(s, k, v);
+    };
+
+    auto ptcb1 = [ptcb, state = std::ref(state)](int s, const std::string &k, const std::string &v) {
+        state.get()->set_executing();
+        ptcb(s, k, v);
+    };
+
+    sclients_[i]->Put(tid, key, value, pcb1, ptcb1, timeout);
 }
 
 /* Attempts to commit the ongoing transaction. */
@@ -422,24 +477,20 @@ void Client::Commit(std::unique_ptr<Context> &ctx, commit_callback ccb, commit_t
     Debug("[%lu] COMMIT", tid);
 
     auto search = context_states_.find(tid);
-    if (search == context_states_.end()) {
-        Debug("[%lu] Already aborted", tid);
-        ccb(ABORTED_SYSTEM);
-        return;
-    }
+    ASSERT(search != context_states_.end());
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", tid);
+    if (state->needs_aborts()) {
+        Debug("[%lu] Need to abort", tid);
         ccb(ABORTED_SYSTEM);
         return;
     }
+
+    ASSERT(state->executing());
+    state->set_committing();
 
     auto &min_read_ts = ctx->min_read_ts();
     Debug("[%lu] min_read_ts: %lu.%lu", tid, min_read_ts.getTimestamp(), min_read_ts.getID());
-
-    state->set_committing();
 
     uint64_t req_id = last_req_id_++;
     PendingRequest *req = new PendingRequest(req_id);
@@ -528,40 +579,14 @@ void Client::CommitCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int 
 void Client::Abort(std::unique_ptr<Context> &ctx, abort_callback acb, abort_timeout_callback atcb,
                    uint32_t timeout) {
     auto tid = ctx->transaction_id();
+    Debug("[%lu] ABORT", tid);
 
-    auto acb1 = [acb, ctx = std::ref(ctx), service_name = service_name_]() {
-        rss::EndRWTransaction(*(ctx.get()), service_name);
-        acb();
-    };
-
-    auto atcb1 = [atcb, ctx = std::ref(ctx), service_name = service_name_]() {
-        rss::EndRWTransaction(*(ctx.get()), service_name);
-        atcb();
-    };
-    Abort(tid, acb1, atcb1, timeout);
-}
-
-/* Aborts the ongoing transaction. */
-void Client::Abort(const uint64_t transaction_id, abort_callback acb, abort_timeout_callback atcb,
-                   uint32_t timeout) {
-    Debug("[%lu] ABORT", transaction_id);
-
-    auto search = context_states_.find(transaction_id);
-    if (search == context_states_.end()) {
-        Debug("[%lu] Already aborted", transaction_id);
-        acb();
-        return;
-    }
+    auto search = context_states_.find(tid);
+    ASSERT(search != context_states_.end());
 
     auto &state = search->second;
-
-    if (state->aborted()) {
-        Debug("[%lu] Already aborted", transaction_id);
-        acb();
-        return;
-    }
-
-    state->set_aborted();
+    ASSERT(state->needs_aborts() || state->executing());
+    state->set_aborting();
 
     auto &participants = state->participants();
 
@@ -572,20 +597,21 @@ void Client::Abort(const uint64_t transaction_id, abort_callback acb, abort_time
     req->atcb = atcb;
     req->outstandingPrepares = participants.size();
 
-    auto cb = std::bind(&Client::AbortCallback, this, transaction_id, req->id);
+    auto cb = std::bind(&Client::AbortCallback, this, std::ref(ctx), req->id);
     auto tcb = []() {};
 
     for (int p : participants) {
-        sclients_[p]->Abort(transaction_id, cb, tcb, timeout);
+        sclients_[p]->Abort(tid, cb, tcb, timeout);
     }
 }
 
-void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
-    Debug("[%lu] Abort callback", transaction_id);
+void Client::AbortCallback(std::unique_ptr<Context> &ctx, uint64_t req_id) {
+    auto tid = ctx->transaction_id();
+    Debug("[%lu] Abort callback", tid);
 
     auto search = pending_reqs_.find(req_id);
     if (search == pending_reqs_.end()) {
-        Debug("[%lu] Transaction already finished", transaction_id);
+        Debug("[%lu] Transaction already finished", tid);
         return;
     }
 
@@ -596,10 +622,12 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
         pending_reqs_.erase(req_id);
         delete req;
 
-        Debug("[%lu] Abort finished", transaction_id);
+        rss::EndRWTransaction(*ctx, service_name_);
+
+        Debug("[%lu] Abort finished", tid);
         acb();
 
-        context_states_.erase(transaction_id);
+        context_states_.erase(tid);
     }
 }
 
@@ -607,8 +635,6 @@ void Client::AbortCallback(const uint64_t transaction_id, uint64_t req_id) {
 void Client::ROCommit(std::unique_ptr<Context> &ctx, const std::unordered_set<std::string> &keys,
                       commit_callback ccb, commit_timeout_callback ctcb,
                       uint32_t timeout) {
-    rss::StartROTransaction(*ctx, service_name_);
-
     auto tid = ctx->transaction_id();
 
     Debug("[%lu] ROCOMMIT", tid);

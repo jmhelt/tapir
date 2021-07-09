@@ -73,7 +73,20 @@ void OpenBenchmarkClient::SendNext() {
 
     auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
     auto btcb = []() {};
-    client_.Begin(bcb, btcb, timeout_);
+
+    Operation op = transaction->GetNextOperation(0);
+    switch (op.type) {
+        case BEGIN_RW:
+            client_.BeginRW(bcb, btcb, timeout_);
+            break;
+
+        case BEGIN_RO:
+            client_.BeginRO(bcb, btcb, timeout_);
+            break;
+
+        default:
+            NOT_REACHABLE();
+    }
 
     if (!cooldownStarted) {
         uint64_t next_arrival_us = static_cast<uint64_t>(next_arrival_dist_(rand_));
@@ -91,7 +104,20 @@ void OpenBenchmarkClient::SendNextInSession(std::unique_ptr<Context> &ctx) {
 
     auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
     auto btcb = []() {};
-    client_.Begin(ctx, bcb, btcb, timeout_);
+
+    Operation op = transaction->GetNextOperation(0);
+    switch (op.type) {
+        case BEGIN_RW:
+            client_.BeginRW(ctx, bcb, btcb, timeout_);
+            break;
+
+        case BEGIN_RO:
+            client_.BeginRO(ctx, bcb, btcb, timeout_);
+            break;
+
+        default:
+            NOT_REACHABLE();
+    }
 }
 
 void OpenBenchmarkClient::BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx) {
@@ -125,7 +151,7 @@ void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
     auto ptcb = std::bind(&OpenBenchmarkClient::PutTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
     auto ccb = std::bind(&OpenBenchmarkClient::CommitCallback, this, transaction_id, std::placeholders::_1);
     auto ctcb = std::bind(&OpenBenchmarkClient::CommitTimeout, this);
-    auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this);
+    auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this, transaction_id, ABORTED_USER);
     auto atcb = std::bind(&OpenBenchmarkClient::AbortTimeout, this);
 
     switch (op.type) {
@@ -161,6 +187,22 @@ void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
     }
 }
 
+void OpenBenchmarkClient::ExecuteAbort(const uint64_t transaction_id, transaction_status_t status) {
+    Debug("[%lu] ExecuteAbort", transaction_id);
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &et = search->second;
+    auto transaction = et.transaction();
+    auto op_index = et.op_index();
+    auto &ctx = et.ctx();
+
+    auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this, transaction_id, status);
+    auto atcb = std::bind(&OpenBenchmarkClient::AbortTimeout, this);
+
+    client_.Abort(ctx, acb, atcb, timeout_);
+}
+
 void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
                                       int status, const std::string &key, const std::string &val, Timestamp ts) {
     Debug("[%lu] Get(%s) callback", transaction_id, key.c_str());
@@ -172,8 +214,7 @@ void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
     if (status == REPLY_OK) {
         ExecuteNextOperation(transaction_id);
     } else if (status == REPLY_FAIL) {
-        auto ecb = et.ecb();
-        ecb(ABORTED_SYSTEM);
+        ExecuteAbort(transaction_id, ABORTED_SYSTEM);
     } else {
         Panic("Unknown status for Get %d.", status);
     }
@@ -205,8 +246,7 @@ void OpenBenchmarkClient::PutCallback(const uint64_t transaction_id,
     if (status == REPLY_OK) {
         ExecuteNextOperation(transaction_id);
     } else if (status == REPLY_FAIL) {
-        auto ecb = et.ecb();
-        ecb(ABORTED_SYSTEM);
+        ExecuteAbort(transaction_id, ABORTED_SYSTEM);
     } else {
         Panic("Unknown status for Put %d.", status);
     }
@@ -217,7 +257,7 @@ void OpenBenchmarkClient::PutTimeout(const uint64_t transaction_id,
     Warning("[%lu] Put(%s,%s) timed out :(", transaction_id, key.c_str(), val.c_str());
 }
 
-void OpenBenchmarkClient::CommitCallback(const uint64_t transaction_id, transaction_status_t result) {
+void OpenBenchmarkClient::CommitCallback(const uint64_t transaction_id, transaction_status_t status) {
     Debug("Commit callback.");
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
@@ -225,15 +265,22 @@ void OpenBenchmarkClient::CommitCallback(const uint64_t transaction_id, transact
     auto &et = search->second;
     auto ecb = et.ecb();
 
-    ecb(result);
+    ecb(status);
 }
 
 void OpenBenchmarkClient::CommitTimeout() {
     Warning("Commit timed out :(");
 }
 
-void OpenBenchmarkClient::AbortCallback() {
+void OpenBenchmarkClient::AbortCallback(const uint64_t transaction_id, transaction_status_t status) {
     Debug("Abort callback.");
+    auto search = executing_transactions_.find(transaction_id);
+    ASSERT(search != executing_transactions_.end());
+
+    auto &et = search->second;
+    auto ecb = et.ecb();
+
+    ecb(status);
 }
 
 void OpenBenchmarkClient::AbortTimeout() {

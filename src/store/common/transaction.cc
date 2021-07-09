@@ -52,8 +52,13 @@ void Transaction::addWriteSet(const string &key, const string &value) {
 }
 
 void Transaction::add_read_write_sets(const Transaction &other) {
-    readSet.insert(other.getReadSet().begin(), other.getReadSet().end());
-    writeSet.insert(other.getWriteSet().begin(), other.getWriteSet().end());
+    for (auto &kt : other.getReadSet()) {
+        readSet[kt.first] = kt.second;
+    }
+
+    for (auto &kv : other.getWriteSet()) {
+        writeSet[kv.first] = kv.second;
+    }
 }
 
 void Transaction::serialize(TransactionMessage *msg) const {

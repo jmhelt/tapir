@@ -506,6 +506,31 @@ void ShardClient::Wound(uint64_t transaction_id) {
     transport_->SendMessageToReplica(this, shard_idx_, replica_, wound_);
 }
 
+void ShardClient::AbortGet(uint64_t transaction_id) {
+    Debug("[%lu] [shard %i] Aborting GET", transaction_id, shard_idx_);
+
+    for (auto it = pendingGets.begin(); it != pendingGets.end(); ++it) {
+        if (it->second->transaction_id == transaction_id) {
+            PendingGet *req = it->second;
+            uint64_t transaction_id = req->transaction_id;
+            get_callback gcb = req->gcb;
+            std::string key = req->key;
+
+            pendingGets.erase(it);
+            delete req;
+
+            gcb(REPLY_FAIL, key, "", {});
+            break;
+        }
+    }
+}
+
+void ShardClient::AbortPut(uint64_t transaction_id) {
+    Debug("[%lu] [shard %i] Aborting PUT", transaction_id, shard_idx_);
+
+    Panic("No PUT in progress!");
+}
+
 void ShardClient::HandleAbortReply(const proto::AbortReply &reply) {
     Debug("[shard %i] Received HandleAbortReply", shard_idx_);
     uint64_t req_id = reply.rid().client_req_id();

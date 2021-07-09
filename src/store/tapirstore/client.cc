@@ -98,7 +98,19 @@ void Client::Begin(begin_callback bcb,
     });
 }
 
-void Client::Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+void Client::BeginRW(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+void Client::BeginRW(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+void Client::BeginRO(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
+    Begin(bcb, btcb, timeout);
+}
+
+void Client::BeginRO(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) {
     Begin(bcb, btcb, timeout);
 }
 

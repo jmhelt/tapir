@@ -6,7 +6,9 @@
 #include <vector>
 
 enum OperationType {
-    GET = 0,
+    BEGIN_RW = 0,
+    BEGIN_RO,
+    GET,
     GET_FOR_UPDATE,
     PUT,
     COMMIT,
@@ -21,6 +23,10 @@ struct Operation {
     std::string value;
     const std::unordered_set<std::string> keys;
 };
+
+Operation BeginRW();
+
+Operation BeginRO();
 
 Operation Wait();
 

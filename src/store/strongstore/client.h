@@ -28,12 +28,9 @@ namespace strongstore {
 
 class ContextState {
    public:
-    ContextState() : participants_{}, prepares_{}, values_{}, snapshot_ts_{}, state_{EXECUTING} {}
+    ContextState()
+        : participants_{}, prepares_{}, values_{}, snapshot_ts_{}, current_participant_{-1}, state_{EXECUTING} {}
     ~ContextState() {}
-
-    bool executing() const { return (state_ == EXECUTING); }
-    bool committing() const { return (state_ == COMMITTING); }
-    bool aborted() const { return (state_ == ABORTED); }
 
     const std::set<int> &participants() const { return participants_; }
     const std::unordered_map<uint64_t, PreparedTransaction> prepares() const { return prepares_; }
@@ -43,8 +40,40 @@ class ContextState {
    protected:
     friend class Client;
 
+    enum State {
+        EXECUTING = 0,
+        GETTING,
+        PUTTING,
+        COMMITTING,
+        NEEDS_ABORT,
+        ABORTING
+    };
+
+    State state() const { return state_; }
+
+    bool executing() const { return (state_ == EXECUTING); }
+    bool needs_aborts() const { return (state_ == NEEDS_ABORT); }
+
+    int current_participant() const { return current_participant_; }
+
+    void set_executing() {
+        current_participant_ = -1;
+        state_ = EXECUTING;
+    }
+
+    void set_getting(int p) {
+        current_participant_ = p;
+        state_ = GETTING;
+    }
+
+    void set_putting(int p) {
+        current_participant_ = p;
+        state_ = PUTTING;
+    }
+
     void set_committing() { state_ = COMMITTING; }
-    void set_aborted() { state_ = ABORTED; }
+    void set_needs_abort() { state_ = NEEDS_ABORT; }
+    void set_aborting() { state_ = ABORTING; }
 
     std::set<int> &mutable_participants() { return participants_; }
     void add_participant(int p) { participants_.insert(p); }
@@ -56,16 +85,11 @@ class ContextState {
     void set_snapshot_ts(const Timestamp &ts) { snapshot_ts_ = ts; }
 
    private:
-    enum State {
-        EXECUTING,
-        COMMITTING,
-        ABORTED
-    };
-
     std::set<int> participants_;
     std::unordered_map<uint64_t, PreparedTransaction> prepares_;
     std::unordered_map<std::string, std::list<Value>> values_;
     Timestamp snapshot_ts_;
+    int current_participant_;
     State state_;
 };
 
@@ -97,9 +121,13 @@ class Client : public ::Client {
     virtual ~Client();
 
     // Overriding functions from ::Client
-    // Begin a transaction
-    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
-    virtual void Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    // Begin a RW transaction
+    virtual void BeginRW(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRW(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+
+    // Begin a RO transaction
+    virtual void BeginRO(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRO(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
 
     // Begin a retried transaction.
     virtual void Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
@@ -151,13 +179,13 @@ class Client : public ::Client {
         int outstandingPrepares;
     };
 
-    void Abort(const uint64_t transaction_id, abort_callback acb, abort_timeout_callback atcb,
-               uint32_t timeout);
+    std::unique_ptr<Context> Begin();
+    std::unique_ptr<Context> Begin(std::unique_ptr<Context> &ctx);
 
     // local Prepare function
     void CommitCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int status, Timestamp commit_ts, Timestamp nonblock_ts);
 
-    void AbortCallback(const uint64_t transaction_id, uint64_t req_id);
+    void AbortCallback(std::unique_ptr<Context> &ctx, uint64_t req_id);
 
     void ROCommitCallback(std::unique_ptr<Context> &ctx, uint64_t req_id, int shard_idx,
                           const std::vector<Value> &values,

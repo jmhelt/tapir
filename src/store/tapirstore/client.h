@@ -62,12 +62,16 @@ class Client : public ::Client {
            bool pingReplicas, bool syncCommit, TrueTime timeserver);
     virtual ~Client();
 
-    virtual void Begin(begin_callback bcb,
-                       begin_timeout_callback btcb, uint32_t timeout) override;
-    virtual void Begin(std::unique_ptr<Context> &ctx,
-                       begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRW(begin_callback bcb,
+                         begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRW(std::unique_ptr<Context> &ctx,
+                         begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRO(begin_callback bcb,
+                         begin_timeout_callback btcb, uint32_t timeout) override;
+    virtual void BeginRO(std::unique_ptr<Context> &ctx,
+                         begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) override;
 
-    // Begin a transaction.
+    // Retries a transaction.
     virtual void Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) override;
 
@@ -113,6 +117,8 @@ class Client : public ::Client {
         bool callbackInvoked;
         uint32_t timeout;
     };
+
+    void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout);
 
     // Prepare function
     void Prepare(PendingRequest *req, uint32_t timeout);

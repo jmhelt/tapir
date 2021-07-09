@@ -65,6 +65,8 @@ void Session::UpdateLastService(const std::string &name) {
                 std::cerr << "last_service: " << last_service_ << ", current_state: " << static_cast<int>(current_state_) << std::endl;
                 std::cerr << "Invalid state transition: Still executing transaction at previous service" << std::endl;
                 throw new std::runtime_error("Invalid state transition: Still executing transaction at previous service");
+            default:
+                throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
         }
     }
 
@@ -83,6 +85,8 @@ void Session::StartRWTransaction(const std::string &name) {
             std::cerr << "Invalid state transition: Already executing transaction" << std::endl;
             std::cerr << "last_service: " << last_service_ << ", current_state: " << static_cast<int>(current_state_) << std::endl;
             throw new std::runtime_error("Invalid state transition: Already executing transaction");
+        default:
+            throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
 
     UpdateLastService(name);
@@ -100,6 +104,8 @@ void Session::EndRWTransaction(const std::string &name) {
             std::cerr << "Invalid state transition: Not executing RW transaction" << std::endl;
             std::cerr << "last_service: " << last_service_ << ", current_state: " << static_cast<int>(current_state_) << std::endl;
             throw new std::runtime_error("Invalid state transition: Not executing RW transaction");
+        default:
+            throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
 }
 
@@ -115,6 +121,8 @@ void Session::StartROTransaction(const std::string &name) {
             std::cerr << "Invalid state transition: Already executing transaction" << std::endl;
             std::cerr << "last_service: " << last_service_ << ", current_state: " << static_cast<int>(current_state_) << std::endl;
             throw new std::runtime_error("Invalid state transition: Already executing transaction");
+        default:
+            throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
 
     UpdateLastService(name);
@@ -132,6 +140,8 @@ void Session::EndROTransaction(const std::string &name) {
             std::cerr << "Invalid state transition: Not executing RO transaction" << std::endl;
             std::cerr << "last_service: " << last_service_ << ", current_state: " << static_cast<int>(current_state_) << std::endl;
             throw new std::runtime_error("Invalid state transition: Not executing RO transaction");
+        default:
+            throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
 }
 

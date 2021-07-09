@@ -74,8 +74,11 @@ class Client {
     Client() { _Latency_Init(&clientLat, "client_lat"); }
     virtual ~Client() {}
 
-    virtual void Begin(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
-    virtual void Begin(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void BeginRW(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void BeginRW(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+
+    virtual void BeginRO(begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
+    virtual void BeginRO(std::unique_ptr<Context> &ctx, begin_callback bcb, begin_timeout_callback btcb, uint32_t timeout) = 0;
 
     virtual void Retry(std::unique_ptr<Context> &ctx, begin_callback bcb,
                        begin_timeout_callback btcb, uint32_t timeout) = 0;

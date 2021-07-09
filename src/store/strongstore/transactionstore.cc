@@ -31,7 +31,6 @@ void TransactionStore::PendingRWTransaction::StartCoordinatorPrepare(const Times
 
     start_ts_ = start_ts;
     participants_ = participants;
-    transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
     transaction_.set_start_time(transaction.start_time());
     prepare_ts_ = std::max(prepare_ts_, start_ts);
@@ -68,7 +67,6 @@ void TransactionStore::PendingRWTransaction::StartParticipantPrepare(int coordin
         ASSERT(coordinator_ == coordinator);
     }
 
-    transaction_.getWriteSet().clear();  // Hack to make GetForUpdate work
     transaction_.add_read_write_sets(transaction);
     Debug("Setting nonblock ts: %lu", nonblock_ts.getTimestamp());
     nonblock_ts_ = nonblock_ts;

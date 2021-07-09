@@ -61,7 +61,7 @@ class OpenBenchmarkClient {
     class ExecutingTransaction {
        public:
         ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx, execute_callback ecb)
-            : lat_{}, id_{id}, transaction_{transaction}, ctx_{std::move(ctx)}, ecb_{ecb}, n_attempts_{1}, op_index_{0} {}
+            : lat_{}, id_{id}, transaction_{transaction}, ctx_{std::move(ctx)}, ecb_{ecb}, n_attempts_{1}, op_index_{1} {}
 
         uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
@@ -87,6 +87,8 @@ class OpenBenchmarkClient {
         std::size_t op_index_;
     };
 
+    void ExecuteAbort(const uint64_t transaction_id, transaction_status_t status);
+
     void SendNextInSession(std::unique_ptr<Context> &ctx);
 
     void BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx);
@@ -103,9 +105,9 @@ class OpenBenchmarkClient {
     void PutTimeout(const uint64_t transaction_id,
                     int status, const std::string &key, const std::string &val);
 
-    void CommitCallback(const uint64_t transaction_id, transaction_status_t result);
+    void CommitCallback(const uint64_t transaction_id, transaction_status_t status);
     void CommitTimeout();
-    void AbortCallback();
+    void AbortCallback(const uint64_t transaction_id, transaction_status_t status);
     void AbortTimeout();
 
     void Finish();

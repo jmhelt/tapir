@@ -1,5 +1,13 @@
 #include "store/common/frontend/transaction_utils.h"
 
+Operation BeginRW() {
+    return Operation{BEGIN_RW, "", ""};
+}
+
+Operation BeginRO() {
+    return Operation{BEGIN_RO, "", ""};
+}
+
 Operation Wait() {
     return Operation{WAIT, "", ""};
 }
@@ -19,10 +27,6 @@ Operation Put(const std::string &key,
 
 Operation Commit() {
     return Operation{COMMIT, "", ""};
-}
-
-Operation Abort() {
-    return Operation{ABORT, "", ""};
 }
 
 Operation ROCommit(const std::unordered_set<std::string> &keys) {

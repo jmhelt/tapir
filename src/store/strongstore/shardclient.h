@@ -119,6 +119,8 @@ class ShardClient : public TransportReceiver {
                abort_timeout_callback atcb, uint32_t timeout);
 
     void Wound(uint64_t transaction_id);
+    void AbortGet(uint64_t transaction_id);
+    void AbortPut(uint64_t transaction_id);
 
    private:
     struct PendingRequest {
