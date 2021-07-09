@@ -74,6 +74,8 @@ void Session::UpdateLastService(const std::string &name) {
 }
 
 void Session::StartRWTransaction(const std::string &name) {
+    UpdateLastService(name);
+
     switch (current_state_) {
         case NONE:
         case EXECUTED_RW:
@@ -88,8 +90,6 @@ void Session::StartRWTransaction(const std::string &name) {
         default:
             throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
-
-    UpdateLastService(name);
 }
 
 void Session::EndRWTransaction(const std::string &name) {
@@ -110,6 +110,8 @@ void Session::EndRWTransaction(const std::string &name) {
 }
 
 void Session::StartROTransaction(const std::string &name) {
+    UpdateLastService(name);
+
     switch (current_state_) {
         case NONE:
         case EXECUTED_RW:
@@ -124,8 +126,6 @@ void Session::StartROTransaction(const std::string &name) {
         default:
             throw new std::runtime_error("Unexpected state: " + std::to_string(current_state_));
     }
-
-    UpdateLastService(name);
 }
 
 void Session::EndROTransaction(const std::string &name) {

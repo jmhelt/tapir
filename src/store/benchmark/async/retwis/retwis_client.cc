@@ -9,12 +9,12 @@
 
 namespace retwis {
 
-RetwisClient::RetwisClient(KeySelector *keySelector, Client &client, uint32_t timeout,
+RetwisClient::RetwisClient(KeySelector *keySelector, const std::vector<Client *> &clients, uint32_t timeout,
                            Transport &transport, uint64_t id,
                            double arrival_rate, double think_time, double stay_probability,
                            int expDuration, int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,
                            bool retryAborted, uint32_t maxBackoff, uint32_t maxAttempts, const std::string &latencyFilename)
-    : OpenBenchmarkClient(client, timeout, transport, id,
+    : OpenBenchmarkClient(clients, timeout, transport, id,
                           arrival_rate, think_time, stay_probability,
                           expDuration, warmupSec, cooldownSec, abortBackoff,
                           retryAborted, maxBackoff, maxAttempts, latencyFilename),

@@ -3,6 +3,7 @@
 #include <rss/lib.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 
 #include "lib/configuration.h"
@@ -24,7 +25,7 @@ Client::Client(Consistency consistency, const NetworkConfiguration &net_config,
       context_states_{},
       net_config_{net_config},
       client_region_{client_region},
-      service_name_{"spanner-" + std::to_string(client_id)},
+      service_name_{"spanner-" + std::to_string(client_id) + "-" + std::to_string(std::rand())},
       config_{config},
       client_id_{client_id},
       nshards_(nShards),

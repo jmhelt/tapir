@@ -326,39 +326,40 @@ def calculate_statistics_for_run(config, local_out_directory, run):
                 except json.decoder.JSONDecodeError:
                     print('Invalid JSON file %s.' % client_stats_file)
 
-        for shard_idx in range(len(config["shards"])):
-            shard = config["shards"][shard_idx]
-            for replica_idx in range(len(shard)):
-                replica = shard[replica_idx]
-                if get_region(config, replica) != region:
-                    continue
+        for instance_idx in range(config["num_instances"]):
+            for shard_idx in range(len(config["shards"])):
+                shard = config["shards"][shard_idx]
+                for replica_idx in range(len(shard)):
+                    replica = shard[replica_idx]
+                    if get_region(config, replica) != region:
+                        continue
 
-                server_stats_file = os.path.join(local_out_directory, 'server-%d' % shard_idx,
-                                                 'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
-                print(server_stats_file)
-                try:
-                    with open(server_stats_file) as f:
-                        server_stats = json.load(f)
-                        for k, v in server_stats.items():
-                            if not type(v) is dict:
-                                if (not 'stats_merge_lists' in config) or (not k in config['stats_merge_lists']):
-                                    if k not in stats:
-                                        stats[k] = v
+                    server_stats_file = os.path.join(local_out_directory, 'server-%d-%d' % (instance_idx, shard_idx),
+                                                     'server-%d-%d-%d-stats-%d.json' % (instance_idx, shard_idx, replica_idx, run))
+                    print(server_stats_file)
+                    try:
+                        with open(server_stats_file) as f:
+                            server_stats = json.load(f)
+                            for k, v in server_stats.items():
+                                if not type(v) is dict:
+                                    if (not 'stats_merge_lists' in config) or (not k in config['stats_merge_lists']):
+                                        if k not in stats:
+                                            stats[k] = v
+                                        else:
+                                            stats[k] += v
                                     else:
-                                        stats[k] += v
-                                else:
-                                    if k not in stats:
-                                        stats[k] = v
-                                    else:
-                                        if len(stats[k]) < len(v):
-                                            for uu in range(len(stats[k]), len(v)):
-                                                stats[k].append(0)
-                                        for uu in range(len(v)):
-                                            stats[k][uu] += v[uu]
-                except FileNotFoundError:
-                    print('No stats file %s.' % server_stats_file)
-                except json.decoder.JSONDecodeError:
-                    print('Invalid JSON file %s.' % server_stats_file)
+                                        if k not in stats:
+                                            stats[k] = v
+                                        else:
+                                            if len(stats[k]) < len(v):
+                                                for uu in range(len(stats[k]), len(v)):
+                                                    stats[k].append(0)
+                                            for uu in range(len(v)):
+                                                stats[k][uu] += v[uu]
+                    except FileNotFoundError:
+                        print('No stats file %s.' % server_stats_file)
+                    except json.decoder.JSONDecodeError:
+                        print('Invalid JSON file %s.' % server_stats_file)
 
         for cid, opl in op_latencies.items():
             for k, v in opl.items():

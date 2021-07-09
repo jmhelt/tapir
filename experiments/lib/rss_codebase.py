@@ -1,26 +1,34 @@
 import collections
-import ipaddress
 import json
+import shutil
 
 from lib.experiment_codebase import *
 from utils.experiment_util import *
+from utils.remote_util import *
 
 
-class RssCodebase(ExperimentCodebase):
+class RssCodebase:
 
     def get_client_cmd(self, config, i, k, run, local_exp_directory,
                        remote_exp_directory):
 
         client = config["clients"][i]
+
+        num_instances = config["num_instances"]
+        replica_configs = [config["replica_config_format_str"] %
+                           (i) for i in range(num_instances)]
+        shard_configs = [config["shard_config_format_str"] %
+                         (i) for i in range(num_instances)]
+
         if 'run_locally' in config and config['run_locally']:
             client_host = 'localhost'
             path_to_client_bin = os.path.join(config['src_directory'],
                                               config['bin_directory_name'], config['client_bin_name'])
             exp_directory = local_exp_directory
-            replica_config_path = os.path.join(
-                local_exp_directory, config["replica_config"])
-            shard_config_path = os.path.join(
-                local_exp_directory, config["shard_config"])
+            replica_config_paths = map(lambda c: os.path.join(
+                local_exp_directory, c), replica_configs)
+            shard_config_paths = map(lambda c: os.path.join(
+                local_exp_directory, c), shard_configs)
             network_config_path = os.path.join(
                 local_exp_directory, config["network_config"])
             stats_file = os.path.join(exp_directory,
@@ -32,17 +40,15 @@ class RssCodebase(ExperimentCodebase):
                 config['base_remote_bin_directory_nfs'],
                 config['bin_directory_name'], config['client_bin_name'])
             exp_directory = remote_exp_directory
-            replica_config_path = os.path.join(
-                remote_exp_directory, config["replica_config"])
-            shard_config_path = os.path.join(
-                remote_exp_directory, config["shard_config"])
+            replica_config_paths = map(lambda c: os.path.join(
+                remote_exp_directory, c), replica_configs)
+            shard_config_paths = map(lambda c: os.path.join(
+                remote_exp_directory, c), shard_configs)
             network_config_path = os.path.join(
                 remote_exp_directory, config["network_config"])
             stats_file = os.path.join(exp_directory,
                                       config['out_directory_name'],
                                       '%s-%d-stats-%d.json' % (client, k, run))
-
-        client_threads = config["client_threads_per_process"] if "client_threads_per_process" in config else 1
 
         client_id = i * config["client_processes_per_client_node"] + k
 
@@ -51,8 +57,7 @@ class RssCodebase(ExperimentCodebase):
             path_to_client_bin,
             '--client_id', client_id,
             '--client_host', client_host,
-            '--replica_config_path', replica_config_path,
-            '--shard_config_path', shard_config_path,
+            '--replica_config_paths', ','.join(shard_config_paths),
             '--net_config_path', network_config_path,
             '--num_shards', config['num_shards'],
             '--benchmark', config['benchmark_name'],
@@ -61,7 +66,6 @@ class RssCodebase(ExperimentCodebase):
             '--cooldown_secs', config['client_ramp_down'],
             '--protocol_mode', config['client_protocol_mode'],
             '--stats_file', stats_file,
-            '--num_clients', client_threads,
             '--clock_error', truetime_error,
             '--strong_consistency', config['consistency']]])
 
@@ -171,31 +175,36 @@ class RssCodebase(ExperimentCodebase):
         client_command = '(cd %s; %s) & ' % (exp_directory, client_command)
         return client_command
 
-    def get_replica_cmd(self, config, shard_idx, replica_idx, run, local_exp_directory,
+    def get_replica_cmd(self, config, instance_idx, shard_idx, replica_idx, run, local_exp_directory,
                         remote_exp_directory):
+        replica_config = config["replica_config_format_str"] % (instance_idx)
+        shard_config = config["shard_config_format_str"] % (instance_idx)
+
         if 'run_locally' in config and config['run_locally']:
             path_to_server_bin = os.path.join(config['src_directory'],
                                               config['bin_directory_name'], config['server_bin_name'])
             exp_directory = local_exp_directory
             replica_config_path = os.path.join(
-                local_exp_directory, config["replica_config"])
+                local_exp_directory, replica_config)
             shard_config_path = os.path.join(
-                local_exp_directory, config["shard_config"])
+                local_exp_directory, shard_config)
             stats_file = os.path.join(exp_directory,
-                                      config['out_directory_name'], 'server-%d' % shard_idx,
-                                      'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
+                                      config['out_directory_name'],
+                                      'server-%d-%d' % (instance_idx,
+                                                        shard_idx),
+                                      'server-%d-%d-%d-stats-%d.json' % (instance_idx, shard_idx, replica_idx, run))
         else:
             path_to_server_bin = os.path.join(
                 config['base_remote_bin_directory_nfs'],
                 config['bin_directory_name'], config['server_bin_name'])
             exp_directory = remote_exp_directory
             replica_config_path = os.path.join(
-                remote_exp_directory, config["replica_config"])
+                remote_exp_directory, replica_config)
             shard_config_path = os.path.join(
-                remote_exp_directory, config["shard_config"])
+                remote_exp_directory, shard_config)
             stats_file = os.path.join(exp_directory,
                                       config['out_directory_name'],
-                                      'server-%d-%d-stats-%d.json' % (shard_idx, replica_idx, run))
+                                      'server-%d-%d-%d-stats-%d.json' % (instance_idx, shard_idx, replica_idx, run))
 
         n = 2 * config['fault_tolerance'] + 1
         server_id = config['client_total'] + shard_idx * n + replica_idx
@@ -343,20 +352,22 @@ class RssCodebase(ExperimentCodebase):
         # Wrapping additional information around command
         if 'run_locally' in config and config['run_locally']:
             stdout_file = os.path.join(exp_directory,
-                                       config['out_directory_name'], 'server-%d' % shard_idx,
-                                       'server-%d-%d-stdout-%d.log' % (shard_idx, replica_idx, run))
+                                       config['out_directory_name'], 'server-%d-%d' % (
+                                           instance_idx, shard_idx),
+                                       'server-%d-%d-%d-stdout-%d.log' % (instance_idx, shard_idx, replica_idx, run))
             stderr_file = os.path.join(exp_directory,
-                                       config['out_directory_name'], 'server-%d' % shard_idx,
-                                       'server-%d-%d-stderr-%d.log' % (shard_idx, replica_idx, run))
+                                       config['out_directory_name'], 'server-%d-%d' % (
+                                           instance_idx, shard_idx),
+                                       'server-%d-%d-%d-stderr-%d.log' % (instance_idx, shard_idx, replica_idx, run))
             replica_command = '%s 1> %s 2> %s' % (replica_command, stdout_file,
                                                   stderr_file)
         else:
             stdout_file = os.path.join(exp_directory,
-                                       config['out_directory_name'], 'server-%d-%d-stdout-%d.log' % (
-                                           shard_idx, replica_idx, run))
+                                       config['out_directory_name'], 'server-%d-%d-%d-stdout-%d.log' % (
+                                           instance_idx, shard_idx, replica_idx, run))
             stderr_file = os.path.join(exp_directory,
                                        config['out_directory_name'], 'server-%d-%d-stderr-%d.log' % (
-                                           shard_idx, replica_idx, run))
+                                           instance_idx, shard_idx, replica_idx, run))
 
             if 'default_remote_shell' in config and config['default_remote_shell'] == 'bash':
                 replica_command = '%s 1> %s 2> %s' % (replica_command, stdout_file,
@@ -382,36 +393,49 @@ class RssCodebase(ExperimentCodebase):
         return replica_command
 
     def prepare_local_exp_directory(self, config, config_file):
-        local_exp_directory = super().prepare_local_exp_directory(config, config_file)
+        local_exp_directory = get_timestamped_exp_dir(config)
+        os.makedirs(local_exp_directory)
+        shutil.copy(config_file, os.path.join(
+            local_exp_directory, os.path.basename(config_file)))
+
         server_names = config["server_names"]
+        num_instances = config["num_instances"]
+
         fault_tolerance = config["fault_tolerance"]
         n = 2 * fault_tolerance + 1
         shards = config["shards"]
         assert(len(shards) == config["num_shards"])
+
         server_base_port = config["server_port"]
         server_ports = collections.defaultdict(lambda: server_base_port)
-        shard_idx = 0
-        replica_config_path = os.path.join(
-            local_exp_directory, config["replica_config"])
-        shard_config_path = os.path.join(
-            local_exp_directory, config["shard_config"])
-        with open(replica_config_path, "w") as rcf, open(shard_config_path, "w") as scf:
-            print("f {}".format(fault_tolerance), file=rcf)
-            print("f {}".format(fault_tolerance), file=scf)
-            for shard in shards:
-                print("group", file=rcf)
-                print("group", file=scf)
-                assert(len(shard) == n)
-                for replica in shard:
-                    assert(replica in server_names)
-                    if "run_locally" in config and config["run_locally"]:
-                        replica = "localhost"
 
-                    port = server_ports[replica]
-                    print("replica {}:{}".format(replica, port), file=rcf)
-                    print("replica {}:{}".format(replica, port+1), file=scf)
-                    server_ports[replica] += 2
-            shard_idx += 1
+        for instance_idx in range(num_instances):
+            shard_idx = 0
+            replica_config = config["replica_config_format_str"] % (
+                instance_idx)
+            shard_config = config["shard_config_format_str"] % (instance_idx)
+            replica_config_path = os.path.join(
+                local_exp_directory, replica_config)
+            shard_config_path = os.path.join(local_exp_directory, shard_config)
+
+            with open(replica_config_path, "w") as rcf, open(shard_config_path, "w") as scf:
+                print("f {}".format(fault_tolerance), file=rcf)
+                print("f {}".format(fault_tolerance), file=scf)
+                for shard in shards:
+                    print("group", file=rcf)
+                    print("group", file=scf)
+                    assert(len(shard) == n)
+                    for replica in shard:
+                        assert(replica in server_names)
+                        if "run_locally" in config and config["run_locally"]:
+                            replica = "localhost"
+
+                        port = server_ports[replica]
+                        print("replica {}:{}".format(replica, port), file=rcf)
+                        print("replica {}:{}".format(
+                            replica, port+1), file=scf)
+                        server_ports[replica] += 2
+                shard_idx += 1
 
         # Write network config
         if "run_locally" in config and config["run_locally"]:
@@ -443,9 +467,7 @@ class RssCodebase(ExperimentCodebase):
         return local_exp_directory
 
     def prepare_remote_server_codebase(self, config, host, local_exp_directory, remote_out_directory):
-        if config['replication_protocol'] == 'indicus' or config['replication_protocol'] == 'hotstuff':
-            run_remote_command_sync(
-                'sudo rm -rf /dev/shm/*', config['emulab_user'], host)
+        pass
 
     def setup_nodes(self, config):
         pass

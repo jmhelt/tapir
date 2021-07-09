@@ -5,6 +5,7 @@
 #include <memory>
 #include <random>
 #include <unordered_map>
+#include <vector>
 
 #include "lib/latency.h"
 #include "lib/message.h"
@@ -20,7 +21,7 @@ typedef std::function<void()> bench_done_callback;
 
 class OpenBenchmarkClient {
    public:
-    OpenBenchmarkClient(Client &client, uint32_t timeout,
+    OpenBenchmarkClient(const std::vector<Client *> &clients, uint32_t timeout,
                         Transport &transport, uint64_t id,
                         double arrival_rate, double think_time, double stay_probability,
                         int expDuration, int warmupSec, int cooldownSec,
@@ -60,8 +61,8 @@ class OpenBenchmarkClient {
    private:
     class ExecutingTransaction {
        public:
-        ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx, execute_callback ecb)
-            : lat_{}, id_{id}, transaction_{transaction}, ctx_{std::move(ctx)}, ecb_{ecb}, n_attempts_{1}, op_index_{1} {}
+        ExecutingTransaction(uint64_t id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx, execute_callback ecb, std::size_t client_index)
+            : lat_{}, id_{id}, transaction_{transaction}, ctx_{std::move(ctx)}, ecb_{ecb}, n_attempts_{1}, op_index_{1}, current_client_index_{client_index}, current_client_txn_count_{0} {}
 
         uint64_t id() const { return id_; }
         AsyncTransaction *transaction() const { return transaction_; }
@@ -77,6 +78,12 @@ class OpenBenchmarkClient {
         void reset_outstanding_ops() { op_index_ = 0; }
         void incr_op_index() { op_index_++; }
 
+        std::size_t current_client_index() const { return current_client_index_; }
+        void set_client_index(std::size_t i) { current_client_index_ = i; }
+
+        std::size_t current_client_txn_count() const { return current_client_txn_count_; }
+        void incr_current_client_op_count() { current_client_txn_count_++; }
+
        private:
         Latency_Frame_t lat_;
         uint64_t id_;
@@ -85,13 +92,16 @@ class OpenBenchmarkClient {
         execute_callback ecb_;
         uint64_t n_attempts_;
         std::size_t op_index_;
+        std::size_t current_client_index_;
+        std::size_t current_client_txn_count_;
     };
 
     void ExecuteAbort(const uint64_t transaction_id, transaction_status_t status);
 
     void SendNextInSession(std::unique_ptr<Context> &ctx);
 
-    void BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx);
+    void BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction,
+                       std::size_t client_index, std::unique_ptr<Context> ctx);
 
     void ExecuteNextOperation(const uint64_t transaction_id);
 
@@ -117,7 +127,7 @@ class OpenBenchmarkClient {
     std::unordered_map<uint64_t, ExecutingTransaction> executing_transactions_;
     uint64_t next_transaction_id_;
 
-    Client &client_;
+    const std::vector<Client *> &clients_;
 
     const uint64_t client_id_;
     uint32_t timeout_;

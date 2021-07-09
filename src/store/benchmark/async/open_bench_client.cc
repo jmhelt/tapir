@@ -15,7 +15,7 @@
 
 DEFINE_LATENCY(op);
 
-OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
+OpenBenchmarkClient::OpenBenchmarkClient(const std::vector<Client *> &clients, uint32_t timeout,
                                          Transport &transport, uint64_t id,
                                          double arrival_rate, double think_time,
                                          double stay_probability,
@@ -26,7 +26,7 @@ OpenBenchmarkClient::OpenBenchmarkClient(Client &client, uint32_t timeout,
     : transport_(transport),
       executing_transactions_{},
       next_transaction_id_{0},
-      client_{client},
+      clients_{clients},
       client_id_{id},
       timeout_{timeout},
       rand_{id},
@@ -71,17 +71,20 @@ void OpenBenchmarkClient::SendNext() {
     auto transaction = GetNextTransaction();
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
 
-    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
+    std::size_t client_index = 0;  // TODO: Choose client
+    auto &client = *clients_[client_index];
+
+    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, client_index, std::placeholders::_1);
     auto btcb = []() {};
 
     Operation op = transaction->GetNextOperation(0);
     switch (op.type) {
         case BEGIN_RW:
-            client_.BeginRW(bcb, btcb, timeout_);
+            client.BeginRW(bcb, btcb, timeout_);
             break;
 
         case BEGIN_RO:
-            client_.BeginRO(bcb, btcb, timeout_);
+            client.BeginRO(bcb, btcb, timeout_);
             break;
 
         default:
@@ -102,17 +105,20 @@ void OpenBenchmarkClient::SendNextInSession(std::unique_ptr<Context> &ctx) {
     auto transaction = GetNextTransaction();
     stats.Increment(transaction->GetTransactionType() + "_attempts", 1);
 
-    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, std::placeholders::_1);
+    std::size_t client_index = 1;  // TODO: Choose client
+    auto &client = *clients_[client_index];
+
+    auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, tid, transaction, client_index, std::placeholders::_1);
     auto btcb = []() {};
 
     Operation op = transaction->GetNextOperation(0);
     switch (op.type) {
         case BEGIN_RW:
-            client_.BeginRW(ctx, bcb, btcb, timeout_);
+            client.BeginRW(ctx, bcb, btcb, timeout_);
             break;
 
         case BEGIN_RO:
-            client_.BeginRO(ctx, bcb, btcb, timeout_);
+            client.BeginRO(ctx, bcb, btcb, timeout_);
             break;
 
         default:
@@ -120,14 +126,19 @@ void OpenBenchmarkClient::SendNextInSession(std::unique_ptr<Context> &ctx) {
     }
 }
 
-void OpenBenchmarkClient::BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction, std::unique_ptr<Context> ctx) {
+void OpenBenchmarkClient::BeginCallback(uint64_t transaction_id, AsyncTransaction *transaction,
+                                        std::size_t client_index, std::unique_ptr<Context> ctx) {
     auto ecb = std::bind(&OpenBenchmarkClient::ExecuteCallback, this, transaction_id, std::placeholders::_1);
 
-    executing_transactions_.emplace(transaction_id, ExecutingTransaction{transaction_id, transaction, std::move(ctx), ecb});
+    executing_transactions_.emplace(transaction_id, ExecutingTransaction{transaction_id, transaction, std::move(ctx), ecb, client_index});
 
     auto search = executing_transactions_.find(transaction_id);
     ASSERT(search != executing_transactions_.end());
-    _Latency_StartRec(search->second.lat());
+
+    auto &et = search->second;
+    et.current_client_txn_count();
+
+    _Latency_StartRec(et.lat());
 
     ExecuteNextOperation(transaction_id);
 }
@@ -154,29 +165,32 @@ void OpenBenchmarkClient::ExecuteNextOperation(const uint64_t transaction_id) {
     auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this, transaction_id, ABORTED_USER);
     auto atcb = std::bind(&OpenBenchmarkClient::AbortTimeout, this);
 
+    auto client_index = et.current_client_index();
+    auto &client = *clients_[client_index];
+
     switch (op.type) {
         case GET:
-            client_.Get(ctx, op.key, gcb, gtcb, timeout_);
+            client.Get(ctx, op.key, gcb, gtcb, timeout_);
             break;
 
         case GET_FOR_UPDATE:
-            client_.GetForUpdate(ctx, op.key, gcb, gtcb, timeout_);
+            client.GetForUpdate(ctx, op.key, gcb, gtcb, timeout_);
             break;
 
         case PUT:
-            client_.Put(ctx, op.key, op.value, pcb, ptcb, timeout_);
+            client.Put(ctx, op.key, op.value, pcb, ptcb, timeout_);
             break;
 
         case COMMIT:
-            client_.Commit(ctx, ccb, ctcb, timeout_);
+            client.Commit(ctx, ccb, ctcb, timeout_);
             break;
 
         case ABORT:
-            client_.Abort(ctx, acb, atcb, timeout_);
+            client.Abort(ctx, acb, atcb, timeout_);
             break;
 
         case ROCOMMIT:
-            client_.ROCommit(ctx, op.keys, ccb, ctcb, timeout_);
+            client.ROCommit(ctx, op.keys, ccb, ctcb, timeout_);
             break;
 
         case WAIT:
@@ -197,10 +211,13 @@ void OpenBenchmarkClient::ExecuteAbort(const uint64_t transaction_id, transactio
     auto op_index = et.op_index();
     auto &ctx = et.ctx();
 
+    auto client_index = et.current_client_index();
+    auto &client = *clients_[client_index];
+
     auto acb = std::bind(&OpenBenchmarkClient::AbortCallback, this, transaction_id, status);
     auto atcb = std::bind(&OpenBenchmarkClient::AbortTimeout, this);
 
-    client_.Abort(ctx, acb, atcb, timeout_);
+    client.Abort(ctx, acb, atcb, timeout_);
 }
 
 void OpenBenchmarkClient::GetCallback(const uint64_t transaction_id,
@@ -227,12 +244,15 @@ void OpenBenchmarkClient::GetTimeout(const uint64_t transaction_id,
     ASSERT(search != executing_transactions_.end());
 
     auto &et = search->second;
-
     auto &ctx = et.ctx();
+
+    auto client_index = et.current_client_index();
+    auto &client = *clients_[client_index];
+
     auto gcb = std::bind(&OpenBenchmarkClient::GetCallback, this, transaction_id, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
     auto gtcb = std::bind(&OpenBenchmarkClient::GetTimeout, this, transaction_id, std::placeholders::_1, std::placeholders::_2);
 
-    client_.Get(ctx, key, gcb, gtcb, timeout_);
+    client.Get(ctx, key, gcb, gtcb, timeout_);
 }
 
 void OpenBenchmarkClient::PutCallback(const uint64_t transaction_id,
@@ -358,13 +378,16 @@ void OpenBenchmarkClient::ExecuteCallback(uint64_t transaction_id,
                 auto transaction = et.transaction();
                 auto ctx = std::move(et.ctx());
                 auto &ttype = et.transaction()->GetTransactionType();
+                auto client_index = et.current_client_index();
                 executing_transactions_.erase(search);
+
+                auto &client = *clients_[client_index];
 
                 stats.Increment(ttype + "_attempts", 1);
 
-                auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, transaction_id, transaction, std::placeholders::_1);
+                auto bcb = std::bind(&OpenBenchmarkClient::BeginCallback, this, transaction_id, transaction, client_index, std::placeholders::_1);
                 auto btcb = []() {};
-                client_.Retry(ctx, bcb, btcb, timeout_);
+                client.Retry(ctx, bcb, btcb, timeout_);
             });
         }
     }

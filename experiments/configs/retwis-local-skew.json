@@ -24,22 +24,13 @@
   "consistency": [
     "rss"
   ],
-  "shard_config": "shard.config",
-  "replica_config": "replica.config",
+  "num_instances": 2,
+  "shard_config_format_str": "shard-%d.config",
+  "replica_config_format_str": "replica-%d.config",
   "network_config": "network.json",
   "fault_tolerance": 1,
-  "num_shards": 3,
+  "num_shards": 1,
   "shards": [
-    [
-      "us-east-1-0",
-      "eu-west-1-0",
-      "ap-northeast-1-0"
-    ],
-    [
-      "us-east-1-0",
-      "eu-west-1-0",
-      "ap-northeast-1-0"
-    ],
     [
       "us-east-1-0",
       "eu-west-1-0",
@@ -80,7 +71,7 @@
   "client_zipf_coefficient": [
     0.9
   ],
-  "client_arrival_rate": 20,
+  "client_arrival_rate": 5,
   "client_stay_probability": 0.5,
   "client_think_time": 0,
   "nb_time_alpha": 1.0,

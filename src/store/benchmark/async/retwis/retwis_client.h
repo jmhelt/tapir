@@ -1,6 +1,10 @@
 #ifndef RETWIS_CLIENT_H
 #define RETWIS_CLIENT_H
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "store/benchmark/async/common/key_selector.h"
 #include "store/benchmark/async/open_bench_client.h"
 #include "store/benchmark/async/retwis/retwis_transaction.h"
@@ -15,7 +19,7 @@ enum KeySelection {
 
 class RetwisClient : public OpenBenchmarkClient {
    public:
-    RetwisClient(KeySelector *keySelector, Client &client, uint32_t timeout,
+    RetwisClient(KeySelector *keySelector, const std::vector<Client *> &clients, uint32_t timeout,
                  Transport &transport, uint64_t id,
                  double arrival_rate, double think_time, double stay_probability,
                  int expDuration, int warmupSec, int cooldownSec, int tputInterval, uint32_t abortBackoff,

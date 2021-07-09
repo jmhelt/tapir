@@ -57,9 +57,7 @@ enum transmode_t {
  */
 DEFINE_uint64(client_id, 0, "unique identifier for client");
 DEFINE_string(client_host, "", "client host string");
-DEFINE_string(replica_config_path, "",
-              "path to replication configuration file");
-DEFINE_string(shard_config_path, "", "path to shard configuration file");
+DEFINE_string(replica_config_paths, "", "paths to replication configuration files");
 DEFINE_uint64(num_shards, 1, "number of shards in the system");
 DEFINE_bool(ping_replicas, false, "determine latency to replicas via pings");
 DEFINE_string(net_config_path, "", "path to network configuration file");
@@ -173,7 +171,6 @@ DEFINE_uint64(cooldown_secs, 5,
 DEFINE_uint64(tput_interval, 0,
               "time (in seconds) between throughput"
               " measurements");
-DEFINE_uint64(num_clients, 1, "number of clients to run in this process");
 DEFINE_uint64(num_requests, -1,
               "number of requests (transactions) per"
               " client");
@@ -516,7 +513,7 @@ int main(int argc, char **argv) {
     bench_done_callback bdcb = [&clientsDone, &latencyFile, &latencyRawFile]() {
         ++clientsDone;
         Debug("%lu clients have finished.", clientsDone.load());
-        if (clientsDone == FLAGS_num_clients) {
+        if (clientsDone == 1) {
             Latency_t sum;
             _Latency_Init(&sum, "total");
             for (unsigned int i = 0; i < benchClients.size(); i++) {
@@ -542,59 +539,62 @@ int main(int argc, char **argv) {
         }
     };
 
-    std::ifstream replica_config_stream(FLAGS_replica_config_path);
-    if (replica_config_stream.fail()) {
-        std::cerr << "Unable to read configuration file: "
-                  << FLAGS_replica_config_path << std::endl;
-        return -1;
-    }
-    transport::Configuration replica_config{replica_config_stream};
-
-    std::ifstream shard_config_stream(FLAGS_shard_config_path);
-    if (shard_config_stream.fail()) {
-        std::cerr << "Unable to read configuration file: "
-                  << FLAGS_shard_config_path << std::endl;
-        return -1;
-    }
-    transport::Configuration shard_config{shard_config_stream};
-
-    if (closestReplicas.size() > 0 &&
-        closestReplicas.size() != static_cast<size_t>(replica_config.n)) {
-        std::cerr << "If specifying closest replicas, must specify all "
-                  << replica_config.n << "; only specified "
-                  << closestReplicas.size() << std::endl;
-        return 1;
-    }
-
     std::ifstream net_config_stream(FLAGS_net_config_path);
     if (net_config_stream.fail()) {
-        std::cerr << "Unable to read configuration file: "
-                  << FLAGS_net_config_path << std::endl;
+        std::cerr << "Unable to read configuration file: " << FLAGS_net_config_path << std::endl;
         return -1;
     }
 
-    if (FLAGS_num_clients > (1 << 6)) {
-        std::cerr << "Only support up to " << (1 << 6)
-                  << " clients in one process." << std::endl;
-        return 1;
+    std::string buf;
+    std::stringstream f{FLAGS_replica_config_paths};
+
+    std::vector<transport::Configuration> replica_configs;
+    std::vector<strongstore::NetworkConfiguration> net_configs;
+    std::vector<std::string> client_regions;
+    int i = 0;
+    while (std::getline(f, buf, ',')) {
+        std::ifstream replica_config_stream{buf};
+        if (replica_config_stream.fail()) {
+            std::cerr << "Unable to read configuration file: " << buf << std::endl;
+            return -1;
+        }
+        replica_configs.emplace_back(replica_config_stream);
+
+        if (mode == PROTO_STRONG) {
+            net_config_stream.seekg(0);
+            net_configs.emplace_back(replica_configs[i], net_config_stream);
+            client_regions.emplace_back(net_configs[i].GetRegion(FLAGS_client_host));
+        }
+
+        i++;
     }
 
-    for (size_t i = 0; i < FLAGS_num_clients; i++) {
+    // TODO: Remove this
+    // if (closestReplicas.size() > 0 &&
+    //     closestReplicas.size() != static_cast<size_t>(replica_config.n)) {
+    //     std::cerr << "If specifying closest replicas, must specify all "
+    //               << replica_config.n << "; only specified "
+    //               << closestReplicas.size() << std::endl;
+    //     return 1;
+    // }
+
+    const std::size_t n_instances = replica_configs.size();
+    for (std::size_t i = 0; i < n_instances; ++i) {
         Client *client = nullptr;
-        // uint64_t clientId = (FLAGS_client_id << 6) | i;
         switch (mode) {
             case PROTO_TAPIR: {
+                ASSERT(replica_configs.size() == 1);
                 client = new tapirstore::Client(
-                    &replica_config, FLAGS_client_id, FLAGS_num_shards,
+                    &replica_configs[0], FLAGS_client_id, FLAGS_num_shards,
                     FLAGS_closest_replica, tport, part, FLAGS_ping_replicas,
                     FLAGS_tapir_sync_commit, tt);
                 break;
             }
             case PROTO_STRONG: {
-                strongstore::NetworkConfiguration net_config{shard_config,
-                                                             net_config_stream};
-                const std::string &client_region =
-                    net_config.GetRegion(FLAGS_client_host);
+                auto &shard_config = replica_configs[i];
+                auto &net_config = net_configs[i];
+                auto &client_region = client_regions[i];
+
                 client = new strongstore::Client(
                     consistency, net_config, client_region, shard_config,
                     FLAGS_client_id, FLAGS_num_shards, FLAGS_closest_replica,
@@ -605,43 +605,43 @@ int main(int argc, char **argv) {
                 NOT_REACHABLE();
         }
 
-        switch (benchMode) {
-            case BENCH_RETWIS:
-                break;
-            default:
-                NOT_REACHABLE();
-        }
-
-        uint32_t seed = (FLAGS_client_id << 4) | i;
-        OpenBenchmarkClient *bench;
-        switch (benchMode) {
-            case BENCH_RETWIS:
-                ASSERT(client != nullptr);
-                bench = new retwis::RetwisClient(
-                    keySelector, *client, FLAGS_message_timeout, *tport, seed,
-                    FLAGS_client_arrival_rate, FLAGS_client_think_time, FLAGS_client_stay_probability,
-                    FLAGS_exp_duration, FLAGS_warmup_secs, FLAGS_cooldown_secs,
-                    FLAGS_tput_interval,
-                    FLAGS_abort_backoff, FLAGS_retry_aborted, FLAGS_max_backoff,
-                    FLAGS_max_attempts);
-                break;
-            default:
-                NOT_REACHABLE();
-        }
-
-        switch (benchMode) {
-            case BENCH_RETWIS:
-                tport->Timer(0, [bench, bdcb]() { bench->Start(bdcb); });
-                break;
-            case BENCH_UNKNOWN:
-            default:
-                NOT_REACHABLE();
-        }
-        if (client != nullptr) {
-            clients.push_back(client);
-        }
-        benchClients.push_back(bench);
+        ASSERT(client != nullptr);
+        clients.push_back(client);
     }
+
+    switch (benchMode) {
+        case BENCH_RETWIS:
+            break;
+        default:
+            NOT_REACHABLE();
+    }
+
+    uint32_t seed = FLAGS_client_id << 4;
+    OpenBenchmarkClient *bench;
+    switch (benchMode) {
+        case BENCH_RETWIS:
+            bench = new retwis::RetwisClient(
+                keySelector, clients, FLAGS_message_timeout, *tport, seed,
+                FLAGS_client_arrival_rate, FLAGS_client_think_time, FLAGS_client_stay_probability,
+                FLAGS_exp_duration, FLAGS_warmup_secs, FLAGS_cooldown_secs,
+                FLAGS_tput_interval,
+                FLAGS_abort_backoff, FLAGS_retry_aborted, FLAGS_max_backoff,
+                FLAGS_max_attempts);
+            break;
+        default:
+            NOT_REACHABLE();
+    }
+
+    switch (benchMode) {
+        case BENCH_RETWIS:
+            tport->Timer(0, [bench, bdcb]() { bench->Start(bdcb); });
+            break;
+        case BENCH_UNKNOWN:
+        default:
+            NOT_REACHABLE();
+    }
+
+    benchClients.push_back(bench);
 
     if (threads.size() > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));

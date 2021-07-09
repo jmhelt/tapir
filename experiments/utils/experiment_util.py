@@ -177,34 +177,37 @@ def start_clients(config, local_exp_directory, remote_exp_directory, run):
 
 def start_servers(config, local_exp_directory, remote_exp_directory, run):
     server_threads = []
+
     server_names = config["server_names"]
+
+    num_instances = config["num_instances"]
     fault_tolerance = config["fault_tolerance"]
     n = 2 * fault_tolerance + 1
     shards = config["shards"]
     assert(len(shards) == config["num_shards"])
-    server_base_port = config["server_port"]
-    server_ports = collections.defaultdict(lambda: server_base_port)
-    start_commands = {}
-    shard_idx = 0
-    for shard in shards:
-        assert(len(shard) == n)
-        replica_idx = 0
-        for replica in shard:
-            assert(replica in server_names)
-            server_idx = server_names.index(replica)
-            if is_exp_local(config):
-                os.makedirs(os.path.join(local_exp_directory,
-                                         config['out_directory_name'], 'server-%d' % shard_idx),
-                            exist_ok=True)
 
-            server_command = get_replica_cmd(config, shard_idx,
-                                             replica_idx, run, local_exp_directory, remote_exp_directory)
-            if not server_idx in start_commands:
-                start_commands[server_idx] = '(%s)' % server_command
-            else:
-                start_commands[server_idx] += ' & (%s)' % server_command
-            replica_idx += 1
-        shard_idx += 1
+    start_commands = {}
+    for instance_idx in range(num_instances):
+        shard_idx = 0
+        for shard in shards:
+            assert(len(shard) == n)
+            replica_idx = 0
+            for replica in shard:
+                assert(replica in server_names)
+                server_idx = server_names.index(replica)
+                if is_exp_local(config):
+                    out_dir = os.path.join(
+                        local_exp_directory, config['out_directory_name'], 'server-%d-%d' % (instance_idx, shard_idx))
+                    os.makedirs(out_dir, exist_ok=True)
+
+                server_command = get_replica_cmd(config, instance_idx, shard_idx,
+                                                 replica_idx, run, local_exp_directory, remote_exp_directory)
+                if not server_idx in start_commands:
+                    start_commands[server_idx] = '(%s)' % server_command
+                else:
+                    start_commands[server_idx] += ' & (%s)' % server_command
+                replica_idx += 1
+            shard_idx += 1
 
     for idx, cmd in start_commands.items():
         if is_exp_remote(config):
@@ -336,7 +339,7 @@ def collect_and_calculate(config, client_config_idx, remote_exp_directory, local
         config, local_out_directory)
     generate_cdf_plots(config, local_out_directory, stats, executor)
     generate_ot_plots(config, local_out_directory, stats, op_latencies,
-                     op_times, client_op_latencies, client_op_times, executor)
+                      op_times, client_op_latencies, client_op_times, executor)
     return local_out_directory
 
 
